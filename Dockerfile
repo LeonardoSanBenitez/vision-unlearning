@@ -32,7 +32,7 @@ RUN git config --global --add safe.directory /src
 # Application dependencies
 WORKDIR /src/
 COPY pyproject.toml /src/
-RUN poetry install --with dev --no-root --no-interaction --no-ansi
+RUN poetry install --no-root --no-interaction --no-ansi
 
 ########################################
 # Add Jupyter notebook
