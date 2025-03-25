@@ -1,16 +1,16 @@
-[project]
+[tool.poetry]
 name = "vision-unlearning"
 version = "0.1.0"
 description = "Vision Unlearning: a tool for Machine Unlearning in Computer Vision"
 readme = "README.md"
 authors = [
-    {name = "Carolina Kelsch", email = "carolinarkelsch@gmail.com"},
-    {name = "Juan Carlos San Miguel Avedillo", email = "uancarlos.sanmiguel@uam.es"},
-    {name = "Leonardo Santiago Benitez Pereira", email = "lsbenitezpereira@gmail.com"},
-    {name = "Luis Herranz Arribas", email = "carolinarkelsch@gmail.com"},
-    {name = "Natnael Mola", email = "natnaelfanose56@gmail.com"}
+    "Leonardo Santiago Benitez Pereira <lsbenitezpereira@gmail.com>",
+    "Carolina Kelsch <carolinarkelsch@gmail.com>",
+    "Natnael Mola <natnaelfanose56@gmail.com>",
+    "Juan Carlos San Miguel Avedillo <juancarlos.sanmiguel@uam.es>",
+    "Luis Herranz Arribas <carolinarkelsch@gmail.com>"
 ]
-license = { file = "LICENSE" }
+license = "Apache-2.0"
 classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -70,18 +70,32 @@ matplotlib = "^3.10.0"
 pydantic = "*"
 lpips = "*"
 image-similarity-measures = "*"
+sphinx-autoapi = "^3.6.0"
 
-# Needed only for development
-# TODO: declare them separately
-python-dotenv = "~1.0"
+[tool.poetry.group.dev.dependencies]
 mypy = "~1.12"
 pycodestyle = "~2.12"
 pytest-asyncio = "^0.24.0"
+build = "*"
+twine = "*"
+setuptools = ">61.0.0"
+wheel = "*"
+
+sphinx = "^7.0.0"
+sphinx-rtd-theme = "*"
+myst-parser = "*"  # To support Markdown (README.md)
+sphinx-autoapi = "*"  # To generate docs from docstrings
 
 
 [build-system]
-requires = ["poetry-core", "setuptools>=61.0.0", "wheel"]
+requires = ["poetry-core", "setuptools>=61.0.0", "wheel"]  # TODO: do I have to declare them again?
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.sphinx]
+source-dir = "docs"
+build-dir = "docs/_build"
+builder = "html"
 
 
 [tool.pytest.ini_options]

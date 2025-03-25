@@ -33,16 +33,14 @@ endef
 # TODO: push the image to dockerhub
 run-interactive-docker:
 	echo '\n-------------------------------------------------------------------------\n'
-	echo 'Go to http://localhost:8888/tree?token=20e10069-1b7c-403f-9895-f6650f4e90d9'
+	echo 'Go to http://localhost:8888/tree?token=7e500f07-fe1c-44b4-b2c5-bad27bbb17f9"'
 	echo '\n-------------------------------------------------------------------------\n'
-	if $(call is_docker_running,unlearning-notebooks); then \
+	if $(call is_docker_running,vision-unlearning-notebooks); then \
 		echo 'Container is already running.'
 	else
 		echo 'Container is not running. Starting it now...'
 		docker-compose down
 		docker-compose up -d
-		$(call exec_docker, sh -c 'huggingface-cli login --token ${HF_TOKEN}')
-		$(call exec_docker, accelerate config default)
 	fi;
 
 clean-docker:
@@ -55,21 +53,24 @@ stop-docker:
 ##############################
 # Targets for testing
 # Currently all tests run inside the docker container, but that's just because of the dependencies
-test: run-docker
+test: run-interactive-docker
 	echo '\n\n------------------------\nMypy Check\n------------------------'
 	$(call exec_docker, poetry run mypy --install-types --non-interactive > /dev/null 2>&1)  # hidden output
-	$(call exec_docker, poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases /libs)
+	$(call exec_docker, poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases ./vision_unlearning)
 
 	echo '\n\n------------------------\nPycodestyle Check\n------------------------'
-	$(call exec_docker, poetry run pycodestyle --max-line-length=200 --ignore=E701 /libs)
+	$(call exec_docker, poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning)
 
 	echo '\n\n-------\nPytest checks\n-------'
-	$(call exec_docker, poetry run pytest /tests)
+	$(call exec_docker, poetry run pytest ./tests)
 	# Manual tests (requires things like connecting some hardware or doing something interactive)
-	# poetry run pytest /tests/**/manual_*.py
-	# poetry run pytest --capture=no -k "test_example" /tests/**/manual_example.py
+	# poetry run pytest ./tests/**/manual_*.py
+	# poetry run pytest --capture=no -k "test_example" ./tests/**/manual_example.py
 
-build:
-	python3 -m build
-	python3 -m twine check dist/*
-	python3 -m twine upload --skip-existing dist/*
+build-pip:
+	$(call exec_docker, poetry run build)
+	$(call exec_docker, poetry run twine check dist/*)
+	$(call exec_docker, poetry run twine upload --skip-existing dist/*)
+
+build-docs:
+	$(call exec_docker, poetry run sphinx-build -b html docs/source docs/_build)
