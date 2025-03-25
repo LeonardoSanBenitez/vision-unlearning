@@ -1,0 +1,103 @@
+[project]
+name = "vision-unlearning"
+version = "0.1.0"
+description = "Vision Unlearning: a tool for Machine Unlearning in Computer Vision"
+readme = "README.md"
+authors = [
+    {name = "Carolina Kelsch", email = "carolinarkelsch@gmail.com"},
+    {name = "Juan Carlos San Miguel Avedillo", email = "uancarlos.sanmiguel@uam.es"},
+    {name = "Leonardo Santiago Benitez Pereira", email = "lsbenitezpereira@gmail.com"},
+    {name = "Luis Herranz Arribas", email = "carolinarkelsch@gmail.com"},
+    {name = "Natnael Mola", email = "natnaelfanose56@gmail.com"}
+]
+license = { file = "LICENSE" }
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+]
+keywords = ["machine unlearning", "machine learning", "deep learning", "computer vision"]
+packages = [{ include = "vision_unlearning" }]
+exclude = ["tests", "docs", "examples"]
+
+
+[tool.poetry.dependencies]
+python = "~3.10"
+Pillow = "*"
+accelerate = ">=0.31.0"
+compel = "==0.1.8"
+datasets = ">=2.19.1"
+filelock = "*"
+flax = ">=0.4.1"
+hf-doc-builder = ">=0.3.0"
+huggingface-hub = ">=0.27.0"
+requests-mock = "==1.10.0"
+importlib_metadata = "*"
+invisible-watermark = ">=0.2.0"
+isort = ">=5.5.4"
+jax = ">=0.4.1"
+jaxlib = ">=0.4.1"
+Jinja2 = "*"
+k-diffusion = ">=0.0.12"
+torchsde = "*"
+note_seq = "*"
+librosa = "*"
+numpy = "*"
+parameterized = "*"
+peft = "==0.7.0"
+protobuf = ">=3.20.3,<4"
+pytest = "*"
+pytest-timeout = "*"
+pytest-xdist = "*"
+ruff = "==0.1.5"
+safetensors = ">=0.3.1"
+sentencepiece = ">=0.1.91,!=0.1.92"
+GitPython = "<3.1.19"
+scipy = "*"
+onnx = "*"
+regex = "!=2019.12.17"
+requests = "*"
+tensorboard = "*"
+tiktoken = ">=0.7.0"
+torch = ">=1.4"
+torchvision = "*"
+transformers = ">=4.41.2"
+urllib3 = "<=2.0.0"
+black = "*"
+phonemizer = "*"
+torchmetrics = "*"
+opencv-python = "*"
+matplotlib = "^3.10.0"
+pydantic = "*"
+lpips = "*"
+image-similarity-measures = "*"
+
+# Needed only for development
+# TODO: declare them separately
+python-dotenv = "~1.0"
+mypy = "~1.12"
+pycodestyle = "~2.12"
+pytest-asyncio = "^0.24.0"
+
+
+[build-system]
+requires = ["poetry-core", "setuptools>=61.0.0", "wheel"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::numba.core.errors.NumbaDeprecationWarning",
+    "ignore:.*nopython=False.*",
+]
+asyncio_default_fixture_loop_scope = "function"
+
+
+[tool.mypy]
+no_warn_incomplete_stub = true
+disable_error_code = [
+    "import-untyped", 
+    "import-not-found"
+]
+explicit_package_bases = true
+install_types = true
+non_interactive = true
