@@ -9,7 +9,7 @@ author = ""
 release = "0.1.0"
 
 extensions = [
-    #"myst_parser",  # Enables Markdown support
+    "myst_parser",  # Enables Markdown support
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
