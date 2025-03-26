@@ -70,7 +70,6 @@ matplotlib = "^3.10.0"
 pydantic = "*"
 lpips = "*"
 image-similarity-measures = "*"
-sphinx-autoapi = "^3.6.0"
 
 # Needed only for development/build
 # TODO: declare them separately
@@ -85,7 +84,7 @@ wheel = "*"
 sphinx = "^7.0.0"
 sphinx-rtd-theme = "*"
 myst-parser = "*"  # To support Markdown (README.md)
-sphinx-autoapi = "*"  # To generate docs from docstrings
+sphinx-autoapi = "^3.6.0"  # To generate docs from docstrings
 
 
 [build-system]
