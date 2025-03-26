@@ -1,2 +1,2 @@
-from vision_unlearning.unlearner.base import *
-from vision_unlearning.unlearner.lora import *
+from libs.unlearner.base import *
+from libs.unlearner.lora import *

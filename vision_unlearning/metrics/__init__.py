@@ -1,3 +1,4 @@
-from vision_unlearning.metrics.base import *
-from vision_unlearning.metrics.image_and_text import *
-from vision_unlearning.metrics.image_and_image import *
+from libs.metrics.base import *
+from libs.metrics.image_and_text import *
+from libs.metrics.image_and_image import *
+from libs.metrics.image import *

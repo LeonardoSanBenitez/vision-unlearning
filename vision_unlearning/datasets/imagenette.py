@@ -4,7 +4,7 @@ import requests
 import tarfile
 import numpy as np
 from torchvision import datasets, transforms
-from vision_unlearning.datasets.base import UnlearnDataset, UnlearnDatasetSplit
+from libs.datasets.base import UnlearnDataset, UnlearnDatasetSplit
 
 
 class UnlearnDatasetImagenette(UnlearnDataset):

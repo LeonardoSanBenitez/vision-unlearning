@@ -1,7 +1,7 @@
 import os
 import pickle
 import logging
-from vision_unlearning.datasets.base import UnlearnDataset, UnlearnDatasetSplit
+from libs.datasets.base import UnlearnDataset, UnlearnDatasetSplit
 
  
 class UnlearnDatasetLocal(UnlearnDataset):

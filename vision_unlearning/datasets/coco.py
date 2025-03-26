@@ -1,4 +1,4 @@
-from vision_unlearning.datasets.base import UnlearnDataset
+from libs.datasets.base import UnlearnDataset
 
 
 class UnlearnDatasetCoco(UnlearnDataset):

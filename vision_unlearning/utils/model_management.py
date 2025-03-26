@@ -6,7 +6,7 @@ from PIL import Image
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from huggingface_hub.repocard_data import EvalResult, ModelCardData
 
-from vision_unlearning.utils.logger import get_logger
+from libs.utils.logger import get_logger
 
 
 logger = get_logger('utils')

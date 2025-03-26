@@ -1,3 +1,4 @@
+import os
 import time
 from typing import List, Dict, Tuple
 from pydantic import BaseModel, ConfigDict
@@ -11,11 +12,11 @@ from diffusers import StableDiffusionPipeline
 from diffusers.utils import check_min_version, convert_state_dict_to_diffusers, is_wandb_available
 from huggingface_hub.repocard_data import EvalResult
 
-from vision_unlearning.metrics import MetricImageTextSimilarity
-from vision_unlearning.utils.logger import get_logger
+from libs.metrics import MetricImageTextSimilarity, MetricPaintingStyle
+from libs.utils.logger import get_logger
 if is_wandb_available():
-    from vision_unlearning.integrations.wandb import wandb_log_image
-from vision_unlearning.integrations.tensorboard import tensorboard_log_image
+    from libs.integrations.wandb import wandb_log_image
+from libs.integrations.tensorboard import tensorboard_log_image
 
 
 logger = get_logger('evaluation')
@@ -175,6 +176,31 @@ class EvaluatorTextToImage(BaseModel):
             ))
 
         return eval_results, images
+
+
+def evaluate_painting_style(metadata: List[Dict[str, str]], metric_painting_style: MetricPaintingStyle, dataset_path: str, device: str) -> dict:
+    '''
+    @param metadata: list of dictionaries with keys "file_name" and "text"; follows this schema: Follows this schema: https://huggingface.co/docs/datasets/v2.4.0/en/image_load#image-captioning
+    @return metrics (as float, not yet as EvalResult)
+    Compute metrics from already generated images
+    '''
+    metrics = {
+        'per_image': [],
+    }
+
+    # TODO: refactor this to leverage paralelism
+    for result in metadata:
+        image = Image.open(os.path.join(dataset_path, result['file_name']))
+        result.update(metric_painting_style.score(image))
+        metrics['per_image'].append(result)
+
+    metrics['overall'] = {
+        'is_desired_style_mean': float(np.mean([result['is_desired_style'] for result in metrics['per_image']])),
+        'desired_style_confidence_mean': float(np.mean([result['desired_style_confidence'] for result in metrics['per_image']])),
+        'desired_style_confidence_std': float(np.std([result['desired_style_confidence'] for result in metrics['per_image']])),
+    }
+
+    return metrics
 
 
 def log_validation(

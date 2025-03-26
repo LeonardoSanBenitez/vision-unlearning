@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 from typing import List
 import torch
-from vision_unlearning.utils.logger import get_logger
+from libs.utils.logger import get_logger
 
 
 logger = get_logger('gradient_weighting')
@@ -24,7 +24,7 @@ class GradientWeightingMethod(BaseModel, ABC):
     @abstractmethod
     def weight_grads(self, grads_forget: List[torch.Tensor], grads_retain: List[torch.Tensor], accelerator) -> List[torch.Tensor]:
         '''
-        @return: scaled_grad
+        @return scaled_grad
         '''
         pass
 
