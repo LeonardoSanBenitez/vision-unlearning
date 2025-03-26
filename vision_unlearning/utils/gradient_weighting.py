@@ -24,7 +24,7 @@ class GradientWeightingMethod(BaseModel, ABC):
     @abstractmethod
     def weight_grads(self, grads_forget: List[torch.Tensor], grads_retain: List[torch.Tensor], accelerator) -> List[torch.Tensor]:
         '''
-        @return scaled_grad
+        @return: scaled_grad
         '''
         pass
 

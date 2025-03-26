@@ -9,11 +9,11 @@ author = ""
 release = "0.1.0"
 
 extensions = [
-    "myst_parser",  # Enables Markdown support
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "autoapi.extension",
+    "myst_parser",  # Enables Markdown support
 ]
 
 autoapi_dirs = ["../../vision_unlearning"]  # Extracts docstrings
@@ -29,4 +29,8 @@ myst_enable_extensions = [
     "dollarmath",
     "amsmath",
 ]
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
+}
 myst_heading_anchors = 3
