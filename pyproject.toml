@@ -81,11 +81,10 @@ twine = "*"
 setuptools = ">61.0.0"
 wheel = "*"
 
-sphinx = "^7.0.0"
-sphinx-rtd-theme = "*"
-myst-parser = "*"  # To support Markdown (README.md)
-sphinx-autoapi = "^3.6.0"  # To generate docs from docstrings
-
+sphinx = "^7.2.6"
+sphinx-rtd-theme = "^2.0.0"
+myst-parser = "^2.0.0"  # To support Markdown (README.md)
+sphinx-autoapi = "^3.0.0"  # To generate docs from docstrings
 
 [build-system]
 requires = ["poetry-core", "setuptools>=61.0.0", "wheel"]  # TODO: do I have to declare them again?

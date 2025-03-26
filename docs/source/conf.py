@@ -21,4 +21,12 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
+html_static_path = ["source/_static"]
+
+
+# Add MyST configuration
+myst_enable_extensions = [
+    "dollarmath",
+    "amsmath",
+]
+myst_heading_anchors = 3

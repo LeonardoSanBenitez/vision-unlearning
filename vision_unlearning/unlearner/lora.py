@@ -50,16 +50,21 @@ DATASET_NAME_MAPPING = {  # TODO: is this necessary?
 
 def unlearn_lora(model_original_id: str, model_lora_id: str, device: str) -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
     '''
-    id can be both a local dir or a huggingface model id
-    return pipeline_original, pipeline_learned, pipeline_unlearned
+    id can be both a local dir or a huggingface model id.
 
-    Inspired by @inproceedings{zhang2023composing,
-        title={Composing Parameter-Efficient Modules with Arithmetic Operations}, 
-        author={Zhang, Jinghan and Chen, Shiqi and Liu, Junteng and He, Junxian},
-        booktitle={Advances in Neural Information Processing Systems},
-        year={2023}
-    }
-    Source: https://github.com/hkust-nlp/PEM_composition/tree/main/exps/composition_for_unlearning
+    Returns:
+        pipeline_original, pipeline_learned, pipeline_unlearned
+
+    Inspired by:
+        @inproceedings{zhang2023composing,
+            title={Composing Parameter-Efficient Modules with Arithmetic Operations}, 
+            author={Zhang, Jinghan and Chen, Shiqi and Liu, Junteng and He, Junxian},
+            booktitle={Advances in Neural Information Processing Systems},
+            year={2023}
+        }
+
+    Source:
+        https://github.com/hkust-nlp/PEM_composition/tree/main/exps/composition_for_unlearning
     '''
     pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
 
