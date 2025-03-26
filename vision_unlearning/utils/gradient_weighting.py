@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 from typing import List
 import torch
-from libs.utils.logger import get_logger
+from vision_unlearning.utils.logger import get_logger
 
 
 logger = get_logger('gradient_weighting')

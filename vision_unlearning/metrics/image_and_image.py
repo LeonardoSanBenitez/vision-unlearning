@@ -3,7 +3,7 @@ from PIL import Image
 from image_similarity_measures.evaluate import evaluation
 import lpips
 from torchvision import transforms
-from libs.metrics.base import Metric
+from vision_unlearning.metrics.base import Metric
 
 
 class MetricImageImage(Metric):

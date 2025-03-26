@@ -1,7 +1,7 @@
 # application -> forget|retain -> prompt
 # Retain is usually a similar concept, but depending on the application can be something else, or empty entirely (example: for imagenette class forgetting, the retain set is the remaining 9 classes)
 prompts = {
-    "naturo": {
+    "naruto": {
         "forget": [
             "A naruto with blue eyes",
             "One naruto character with dark hair and brown eyes",

@@ -10,7 +10,7 @@ FORMATTER = logging.Formatter(
 
 
 def get_logger(name: str, level=logging.INFO) -> logging.Logger:
-    logger = logging.getLogger('libs.' + name)
+    logger = logging.getLogger('vision_unlearning.' + name)
     # log to sys.stdout for backward compatibility.
     # TODO: May need to be removed in the future, after local/blob file stream are fully supported.
     stdout_handler = logging.StreamHandler(sys.stdout)

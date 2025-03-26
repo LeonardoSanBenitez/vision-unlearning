@@ -3,7 +3,7 @@ from PIL import Image
 import torch
 from transformers import pipeline
 from transformers.pipelines.image_classification import ImageClassificationPipeline
-from libs.metrics.base import Metric
+from vision_unlearning.metrics.base import Metric
 
 
 class MetricPaintingStyle(Metric):

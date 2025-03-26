@@ -12,11 +12,11 @@ from diffusers import StableDiffusionPipeline
 from diffusers.utils import check_min_version, convert_state_dict_to_diffusers, is_wandb_available
 from huggingface_hub.repocard_data import EvalResult
 
-from libs.metrics import MetricImageTextSimilarity, MetricPaintingStyle
-from libs.utils.logger import get_logger
+from vision_unlearning.metrics import MetricImageTextSimilarity, MetricPaintingStyle
+from vision_unlearning.utils.logger import get_logger
 if is_wandb_available():
-    from libs.integrations.wandb import wandb_log_image
-from libs.integrations.tensorboard import tensorboard_log_image
+    from vision_unlearning.integrations.wandb import wandb_log_image
+from vision_unlearning.integrations.tensorboard import tensorboard_log_image
 
 
 logger = get_logger('evaluation')

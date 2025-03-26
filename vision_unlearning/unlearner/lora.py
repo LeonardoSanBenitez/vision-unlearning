@@ -32,13 +32,13 @@ import accelerate
 from accelerate import Accelerator
 from tqdm.auto import tqdm
 
-from libs.metrics import MetricImageTextSimilarity
-from libs.evaluator import EvaluatorTextToImage, plot_gradient_conflict_hist, log_validation
-from libs.utils.logger import get_logger
-from libs.utils.model_management import save_model_card
-from libs.utils.training import unwrap_model, preprocess_train, collate_fn
-from libs.utils.gradient_weighting import GradientWeightingMethod
-from libs.unlearner.base import Unlearner
+from vision_unlearning.metrics import MetricImageTextSimilarity
+from vision_unlearning.evaluator import EvaluatorTextToImage, plot_gradient_conflict_hist, log_validation
+from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.utils.model_management import save_model_card
+from vision_unlearning.utils.training import unwrap_model, preprocess_train, collate_fn
+from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod
+from vision_unlearning.unlearner.base import Unlearner
 
 
 logger = get_logger('trainer')

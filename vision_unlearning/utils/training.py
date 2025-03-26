@@ -62,7 +62,7 @@ def launch_accelerated_training(unlearner: 'Unlearner'):
     '''
     Wrap your training function with the accelerator
     '''
-    from libs.unlearner import Unlearner  # imported here to avoid circular import  # mypy: ignore  # noqa
+    from vision_unlearning.unlearner import Unlearner  # imported here to avoid circular import  # mypy: ignore  # noqa
     accelerator = Accelerator(mixed_precision="fp16", dynamo_backend="no")
     with accelerator.local_main_process_first():
         if accelerator.is_local_main_process:

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.utils.checkpoint
 from torchmetrics.functional.multimodal import clip_score
-from libs.metrics.base import Metric
+from vision_unlearning.metrics.base import Metric
 
 
 class MetricImageTextSimilarity(Metric):
