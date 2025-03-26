@@ -744,28 +744,28 @@ class UnlearnerLora(Unlearner):
                 ))
 
             ################################
-            if self.push_to_hub:
-                save_model_card(
-                    repo_id,
-                    images=images,
-                    base_model=self.pretrained_model_name_or_path,
-                    dataset_forget_name=self.dataset_forget_name,
-                    dataset_retain_name=self.dataset_retain_name,
-                    repo_folder=self.output_dir,
-                    eval_results=eval_results,
-                    tags = [
-                        "stable-diffusion",
-                        "stable-diffusion-diffusers",
-                        "text-to-image",
-                        "diffusers",
-                        "diffusers-training",
-                        "lora",
-                    ],
-                    hyperparameters={k: v for k, v in self.model_dump().items() if isinstance(v, (str, float, int, type(None)))},
-                    similarities_gr=similarities_gr,
-                    similarities_gf=similarities_gf,
-                )
+            save_model_card(
+                repo_id,
+                images=images,
+                base_model=self.pretrained_model_name_or_path,
+                dataset_forget_name=self.dataset_forget_name,
+                dataset_retain_name=self.dataset_retain_name,
+                repo_folder=self.output_dir,
+                eval_results=eval_results,
+                tags = [
+                    "stable-diffusion",
+                    "stable-diffusion-diffusers",
+                    "text-to-image",
+                    "diffusers",
+                    "diffusers-training",
+                    "lora",
+                ],
+                hyperparameters={k: v for k, v in self.model_dump().items() if isinstance(v, (str, float, int, type(None)))},
+                similarities_gr=similarities_gr,
+                similarities_gf=similarities_gf,
+            )
 
+            if self.push_to_hub:
                 upload_folder(
                     repo_id=repo_id,
                     folder_path=self.output_dir,

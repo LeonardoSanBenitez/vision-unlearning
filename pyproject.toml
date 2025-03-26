@@ -70,6 +70,7 @@ matplotlib = "^3.10.0"
 pydantic = "*"
 lpips = "*"
 image-similarity-measures = "*"
+pyfftw = "*"
 
 # Needed only for development/build
 # TODO: declare them separately
