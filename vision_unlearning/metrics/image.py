@@ -32,14 +32,12 @@ class MetricPaintingStyle(Metric):
 
 
 # Pseudo test
-'''
-import torch
-from PIL import Image
-
-#image = Image.open('assets/Diffusion-MU-Attack/files/dataset/vangogh/imgs/35_0.png')
-image = Image.open('assets/Diffusion-MU-Attack/files/dataset/i2p_nude/imgs/1011_0.png')
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-metric_painting_style = MetricPaintingStyle(desired_style='vincent-van-gogh', top_k=3, model_path='assets/models_pretrained/style_classifier/results/checkpoint-2800', device=device)
-result = metric_painting_style.score(image)
-print(result)
-''';  # noqa  # type: ignore
+# import torch
+# from PIL import Image
+#
+# #image = Image.open('assets/Diffusion-MU-Attack/files/dataset/vangogh/imgs/35_0.png')
+# image = Image.open('assets/Diffusion-MU-Attack/files/dataset/i2p_nude/imgs/1011_0.png')
+# device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# metric_painting_style = MetricPaintingStyle(desired_style='vincent-van-gogh', top_k=3, model_path='assets/models_pretrained/style_classifier/results/checkpoint-2800', device=device)
+# result = metric_painting_style.score(image)
+# print(result)

@@ -567,13 +567,13 @@ class UnlearnerLora(Unlearner):
                     # Compute gradients
                     optimizer.zero_grad()
                     accelerator.backward(loss_forget)
-                    grads_forget = [p.grad.clone() for p in unet.parameters() if p.requires_grad]  # This list has 256 elements; each element is a torch.Tensor of shapes like [4, 320], then [320, 4], then [4, 640], then [640, 4], etc
-                    
+                    grads_forget = [p.grad.clone() for p in unet.parameters() if p.requires_grad]  # This list has 256 elements; each element is a torch.Tensor of shapes like [4, 320], then [320, 4], then [4, 640], then [640, 4], etc  # noqa
+
                     optimizer.zero_grad()
                     accelerator.backward(loss_retain)
                     grads_retain = [p.grad.clone() for p in unet.parameters() if p.requires_grad]
-                    
-                    #for e in grads_forget:
+
+                    # for e in grads_forget:
                     #    print(e.shape)
                     scaled_grad = self.gradient_weighting_method.weight_grads(grads_forget, grads_retain, accelerator)
 
@@ -582,8 +582,10 @@ class UnlearnerLora(Unlearner):
                         similarities_gf.append(F.cosine_similarity(scaled_grad[:, 0], torch.cat([g.view(-1) for g in grads_forget]), dim=0).item())
 
                     # Overwrite gradients for the optimizer
-                    for param, update in zip((p for p in unet.parameters() if p.requires_grad), 
-                                            torch.split(scaled_grad, [p.numel() for p in unet.parameters() if p.requires_grad])):
+                    for param, update in zip(
+                        (p for p in unet.parameters() if p.requires_grad),
+                        torch.split(scaled_grad, [p.numel() for p in unet.parameters() if p.requires_grad]),
+                    ):
                         param.grad = update.view(param.shape)
 
                     # Gradient clipping
@@ -595,7 +597,7 @@ class UnlearnerLora(Unlearner):
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad()
-        
+
                     #########################################
                     # End of Backpropagate
                     #########################################
@@ -703,8 +705,8 @@ class UnlearnerLora(Unlearner):
 
             pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.pretrained_model_name_or_path, self.output_dir, device=accelerator.device)
 
-            assert type(self.final_eval_prompts_forget) == list
-            assert type(self.final_eval_prompts_retain) == list
+            assert type(self.final_eval_prompts_forget) == list  # noqa
+            assert type(self.final_eval_prompts_retain) == list  # noqa
             evaluator = EvaluatorTextToImage(
                 pipeline_original=pipeline_original,
                 pipeline_learned=pipeline_learned,
@@ -726,30 +728,29 @@ class UnlearnerLora(Unlearner):
                 "dataset_name": f"{self.dataset_forget_name} (forget) and {self.dataset_retain_name} (retain) sets",
             }
 
-
             if self.compute_runtimes:
                 eval_results.append(EvalResult(
-                    metric_type = 'runtime',
-                    metric_name = f'Runtime init seconds (~↓)',
-                    metric_value = t1-t0,
+                    metric_type='runtime',
+                    metric_name=f'Runtime init seconds (~↓)',
+                    metric_value=t1 - t0,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
-                    metric_type = 'runtime',
-                    metric_name = f'Runtime data loading seconds (~↓)',
-                    metric_value = t2-t1,
+                    metric_type='runtime',
+                    metric_name=f'Runtime data loading seconds (~↓)',
+                    metric_value=t2 - t1,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
-                    metric_type = 'runtime',
-                    metric_name = f'Runtime training seconds (↓)',
-                    metric_value = t3-t2,
+                    metric_type='runtime',
+                    metric_name=f'Runtime training seconds (↓)',
+                    metric_value=t3 - t2,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
-                    metric_type = 'runtime',
-                    metric_name = f'Runtime eval seconds (~↓)',
-                    metric_value = t4-t3,
+                    metric_type='runtime',
+                    metric_name=f'Runtime eval seconds (~↓)',
+                    metric_value=t4 - t3,
                     **metric_common_attributes,  # type: ignore
                 ))
 
@@ -762,7 +763,7 @@ class UnlearnerLora(Unlearner):
                 dataset_retain_name=self.dataset_retain_name,
                 repo_folder=self.output_dir,
                 eval_results=eval_results,
-                tags = [
+                tags=[
                     "stable-diffusion",
                     "stable-diffusion-diffusers",
                     "text-to-image",

@@ -86,11 +86,11 @@ class UnlearnDataset(BaseModel, ABC):
             if all([isinstance(e, str) for e in forget]):
                 c = [i for i, class_name in enumerate(self._classes) if class_name in forget]
             elif all([isinstance(e, int) for e in forget]):
-                assert type(self._n_classes) == int, "Number of classes should be loaded before splitting"
-                assert all([type(e) == int for e in forget])
+                assert type(self._n_classes) == int, "Number of classes should be loaded before splitting"  # noqa
+                assert all([type(e) == int for e in forget])  # noqa
                 max_index = np.max(forget)
-                assert type(max_index) == int, "Forget should be a list of strings or integers"
-                assert max_index < self._n_classes, "Forget should be a list of strings or integers"
+                assert type(max_index) == int, "Forget should be a list of strings or integers"  # noqa
+                assert max_index < self._n_classes, "Forget should be a list of strings or integers"  # noqa
                 c = forget  # type: ignore
             else:
                 raise ValueError("Forget should be a list of strings or integers")
@@ -101,10 +101,10 @@ class UnlearnDataset(BaseModel, ABC):
         else:
             raise ValueError("Forget should be a list of strings or integers")
 
-        assert type(c) == list
-        assert all([type(e) == int for e in c])
+        assert type(c) == list  # noqa
+        assert all([type(e) == int for e in c])  # noqa
         assert len(c) > 0, "Forget should be a list integers"
-        
+
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Train], VisionDataset), "Train should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Validation], VisionDataset), "Valid should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Test], VisionDataset), "Test should be a VisionDataset"
@@ -174,13 +174,13 @@ class UnlearnDataset(BaseModel, ABC):
                 if format == 'pkl':
                     with open(os.path.join(path, f"{split.value}.pkl"), 'wb') as f:
                         pickle.dump(data, f)
-                elif format == 'jpg':            
+                elif format == 'jpg':
                     split_path = os.path.join(path, split.value)
                     os.makedirs(split_path, exist_ok=True)
                     metadata = []
                     for idx in range(len(data)):
                         image, label = data[idx]
-                        assert type(label) == int
+                        assert type(label) == int  # noqa
                         image_path = os.path.join(split_path, f"{idx}.jpg")
                         # Convert tensor to PIL image and save
                         if isinstance(image, torch.Tensor):

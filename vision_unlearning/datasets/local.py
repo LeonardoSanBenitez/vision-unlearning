@@ -3,7 +3,7 @@ import pickle
 import logging
 from vision_unlearning.datasets.base import UnlearnDataset, UnlearnDatasetSplit
 
- 
+
 class UnlearnDatasetLocal(UnlearnDataset):
     path: str
 
