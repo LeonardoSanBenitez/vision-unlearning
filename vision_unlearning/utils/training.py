@@ -1,4 +1,5 @@
 import random
+import numpy as np
 import torch
 from diffusers.utils.torch_utils import is_compiled_module
 from accelerate import Accelerator
@@ -26,6 +27,7 @@ def tokenize_captions(examples, tokenizer, caption_column, is_train=True):
     )
     return inputs.input_ids
 
+
 def unwrap_model(model, accelerator):
     '''
     Adapted from The HuggingFace Inc. team. All rights reserved.
@@ -35,6 +37,7 @@ def unwrap_model(model, accelerator):
     model = accelerator.unwrap_model(model)
     model = model._orig_mod if is_compiled_module(model) else model
     return model
+
 
 def preprocess_train(examples, tokenizer, caption_column, image_column, train_transforms):
     '''
@@ -47,6 +50,7 @@ def preprocess_train(examples, tokenizer, caption_column, image_column, train_tr
     examples["input_ids"] = tokenize_captions(examples, tokenizer, caption_column)
     return examples
 
+
 def collate_fn(examples):
     '''
     Adapted from The HuggingFace Inc. team. All rights reserved.
@@ -58,11 +62,11 @@ def collate_fn(examples):
     input_ids = torch.stack([example["input_ids"] for example in examples])
     return {"pixel_values": pixel_values, "input_ids": input_ids}
 
-def launch_accelerated_training(unlearner: 'Unlearner'):
+
+def launch_accelerated_training(unlearner: 'Unlearner'):  # type: ignore
     '''
     Wrap your training function with the accelerator
     '''
-    from vision_unlearning.unlearner import Unlearner  # imported here to avoid circular import  # mypy: ignore  # noqa
     accelerator = Accelerator(mixed_precision="fp16", dynamo_backend="no")
     with accelerator.local_main_process_first():
         if accelerator.is_local_main_process:

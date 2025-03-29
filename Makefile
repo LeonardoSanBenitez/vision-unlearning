@@ -55,22 +55,22 @@ stop-docker:
 # Currently all tests run inside the docker container, but that's just because of the dependencies
 test: run-interactive-docker
 	echo '\n\n------------------------\nMypy Check\n------------------------'
-	$(call exec_docker, poetry run mypy --install-types --non-interactive > /dev/null 2>&1)  # hidden output
-	$(call exec_docker, poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases ./vision_unlearning)
+	$(call exec_docker, poetry run --quiet mypy --install-types --non-interactive > /dev/null 2>&1)  # hidden output
+	$(call exec_docker, poetry run --quiet mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning)
 
 	echo '\n\n------------------------\nPycodestyle Check\n------------------------'
-	$(call exec_docker, poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning)
+	$(call exec_docker, poetry run --quiet pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning)
 
 	echo '\n\n-------\nPytest checks\n-------'
-	$(call exec_docker, poetry run pytest ./tests)
+	$(call exec_docker, poetry run --quiet pytest ./tests)
 	# Manual tests (requires things like connecting some hardware or doing something interactive)
-	# poetry run pytest ./tests/**/manual_*.py
-	# poetry run pytest --capture=no -k "test_example" ./tests/**/manual_example.py
+	# poetry run --quiet pytest ./tests/**/manual_*.py
+	# poetry run --quiet pytest --capture=no -k "test_example" ./tests/**/manual_example.py
 
-build-pip:
-	$(call exec_docker, poetry run build)
-	$(call exec_docker, poetry run twine check dist/*)
-	$(call exec_docker, poetry run twine upload --skip-existing dist/*)
+build-pip: run-interactive-docker
+	$(call exec_docker, poetry run --quiet build)
+	$(call exec_docker, poetry run --quiet twine check dist/*)
+	$(call exec_docker, poetry run --quiet twine upload --skip-existing dist/*)
 
-build-docs:
-	$(call exec_docker, poetry run sphinx-build -b html docs/source docs/_build)
+build-docs: run-interactive-docker
+	$(call exec_docker, poetry run --quiet sphinx-build -b html docs/source docs/_build)

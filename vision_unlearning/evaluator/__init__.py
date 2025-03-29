@@ -163,14 +163,14 @@ class EvaluatorTextToImage(BaseModel):
             metric_common_attributes["dataset_name"] = "Forget and Retain sets"
             eval_results.append(EvalResult(
                 metric_type='runtime',
-                metric_name='Inference latency seconds mean(↓)',
+                metric_name='Inference latency seconds mean (↓)',
                 metric_value=float(np.mean(latencies)),
                 **metric_common_attributes,  # type: ignore
             ))
-    
+
             eval_results.append(EvalResult(
                 metric_type='runtime',
-                metric_name='Inference latency seconds std(~↓)',
+                metric_name='Inference latency seconds std (~↓)',
                 metric_value=float(np.std(latencies)),
                 **metric_common_attributes,  # type: ignore
             ))
@@ -184,14 +184,14 @@ def evaluate_painting_style(metadata: List[Dict[str, str]], metric_painting_styl
     @return metrics (as float, not yet as EvalResult)
     Compute metrics from already generated images
     '''
-    metrics = {
+    metrics: dict = {
         'per_image': [],
     }
 
     # TODO: refactor this to leverage paralelism
     for result in metadata:
         image = Image.open(os.path.join(dataset_path, result['file_name']))
-        result.update(metric_painting_style.score(image))
+        result.update(metric_painting_style.score(image))  # type: ignore
         metrics['per_image'].append(result)
 
     metrics['overall'] = {
@@ -230,7 +230,7 @@ def log_validation(
     if torch.backends.mps.is_available():
         autocast_ctx = nullcontext()
     else:
-        autocast_ctx = torch.autocast(accelerator.device.type)
+        autocast_ctx = torch.autocast(accelerator.device.type)  # type: ignore
 
     with autocast_ctx:
         for i in range(num_validation_images):
@@ -249,11 +249,11 @@ def log_validation(
 def plot_gradient_conflict_hist(similarities: List[float], title: str, color: str) -> Image.Image:
     fig = plt.figure(figsize=(8, 5))
     plt.hist(similarities, bins=50, color=color, alpha=0.75, label="Values")
-    plt.axvline(np.mean(similarities), color=color, linestyle='-.', linewidth=2, label="Avgerage")
+    plt.axvline(float(np.mean(similarities)), color=color, linestyle='-.', linewidth=2, label="Avgerage")
     plt.xlabel("Cosine Similarity")
     plt.ylabel("Frequency")
     plt.title(title)
-    #plt.legend()
+    # plt.legend()
     plt.grid(True, linestyle='--', alpha=0.6)
     fig.canvas.draw()
-    return Image.fromarray(np.uint8(np.array(fig.canvas.buffer_rgba())))
+    return Image.fromarray(np.uint8(np.array(fig.canvas.buffer_rgba())))  # type: ignore

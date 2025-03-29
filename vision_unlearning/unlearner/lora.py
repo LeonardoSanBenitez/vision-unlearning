@@ -164,6 +164,10 @@ class UnlearnerLora(Unlearner):
     prediction_type: Optional[str] = Field(None, description="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
 
     def train(self):
+        if type(self.final_eval_prompts_retain) == str:
+            raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")
+        if type(self.final_eval_prompts_forget) == str:
+            raise NotImplementedError("final_eval_prompts_forget should be a list of prompts, not a string.")
         t0 = time.time()
         if self.report_to == "wandb" and self.hub_token is not None:
             raise ValueError(
@@ -425,6 +429,7 @@ class UnlearnerLora(Unlearner):
 
         # Potentially load in the weights and states from a previous save
         if self.resume_from_checkpoint:
+            path: Optional[str]
             if self.resume_from_checkpoint != "latest":
                 path = os.path.basename(self.resume_from_checkpoint)
             else:
@@ -640,7 +645,7 @@ class UnlearnerLora(Unlearner):
                             logger.info(f"Saved state to {save_path}")
 
                 logs = {"step_loss": loss_forget.detach().item(), "step_loss_forget": loss_forget.detach().item(), "step_loss_retain": loss_retain.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
-                progress_bar.set_postfix(**logs)
+                progress_bar.set_postfix(**logs)  # type: ignore
 
                 if global_step >= self.max_train_steps:
                     break
@@ -660,7 +665,7 @@ class UnlearnerLora(Unlearner):
                     del pipeline
                     torch.cuda.empty_cache()
 
-        images: Dict[str, Image] = {}
+        images: Dict[str, Image.Image] = {}
         if self.compute_gradient_conflict:
             similarities_gr = list(filter(lambda e: not np.isnan(e), similarities_gr))  # TODO: why are there nan values?
             similarities_gf = list(filter(lambda e: not np.isnan(e), similarities_gf))

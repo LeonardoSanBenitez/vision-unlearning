@@ -1,6 +1,13 @@
+[project]
+name = "vision-unlearning"
+
+[project.urls]
+repository    = "https://github.com/LeonardoSanBenitez/vision-unlearning"
+documentation = "https://github.com/LeonardoSanBenitez/vision-unlearning"
+
 [tool.poetry]
 name = "vision-unlearning"
-version = "0.1.0"
+version = "0.1.1"
 description = "Vision Unlearning: a tool for Machine Unlearning in Computer Vision"
 readme = "README.md"
 authors = [
@@ -18,7 +25,6 @@ classifiers = [
 keywords = ["machine unlearning", "machine learning", "deep learning", "computer vision"]
 packages = [{ include = "vision_unlearning" }]
 exclude = ["tests", "docs", "examples"]
-
 
 [tool.poetry.dependencies]
 python = "~3.10"
@@ -71,6 +77,7 @@ pydantic = "*"
 lpips = "*"
 image-similarity-measures = "*"
 pyfftw = "*"
+PyYAML = "*"
 
 # Needed only for development/build
 # TODO: declare them separately
@@ -82,10 +89,10 @@ twine = "*"
 setuptools = ">61.0.0"
 wheel = "*"
 
-sphinx = "^7.2.6"
-sphinx-rtd-theme = "^2.0.0"
-myst-parser = "^1.0.0"   # To support Markdown (README.md)
-sphinx-autoapi = "^3.0.0"  # To generate docs from docstrings
+sphinx = "~7.4"
+sphinx-rtd-theme = "~2.0"
+myst-parser = "~4.0"   # To support Markdown (README.md)
+sphinx-autoapi = "~3.6"  # To generate docs from docstrings
 
 [build-system]
 requires = ["poetry-core", "setuptools>=61.0.0", "wheel"]  # TODO: do I have to declare them again?

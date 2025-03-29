@@ -93,13 +93,13 @@ class UnlearnDataset(BaseModel, ABC):
                 max_index = np.max(forget)
                 assert type(max_index) == int, "Forget should be a list of strings or integers"
                 assert max_index < self._n_classes, "Forget should be a list of strings or integers"
-                c = forget
+                c = forget  # type: ignore
             else:
                 raise ValueError("Forget should be a list of strings or integers")
         elif isinstance(forget, str):
             c = [i for i, class_name in enumerate(self._classes) if class_name == forget]
         elif isinstance(forget, int):
-            c = [forget] if forget < self._n_classes else None
+            c = [forget] if forget < self._n_classes else None  # type: ignore
         else:
             raise ValueError("Forget should be a list of strings or integers")
 
@@ -110,9 +110,9 @@ class UnlearnDataset(BaseModel, ABC):
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Train], VisionDataset), "Train should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Validation], VisionDataset), "Valid should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Test], VisionDataset), "Test should be a VisionDataset"
-        trainf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Train].targets), c)  # mypy: ignore
-        validf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Validation].targets), c)  # mypy: ignore
-        testf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Test].targets), c)  # mypy: ignore
+        trainf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Train].targets), c)  # type: ignore
+        validf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Validation].targets), c)  # type: ignore
+        testf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Test].targets), c)  # type: ignore
 
         train_idx = np.array(range(len(self._dataset_splits[UnlearnDatasetSplit.Train])))
         valid_idx = np.array(range(len(self._dataset_splits[UnlearnDatasetSplit.Validation])))
@@ -199,4 +199,5 @@ class UnlearnDataset(BaseModel, ABC):
                     raise ValueError(f"Format {format} not supported")
 
     def make_prompt_for_label(self, label: int) -> str:
+        assert self._classes is not None
         return f"an image of {self._classes[label]}"

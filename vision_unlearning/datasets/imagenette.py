@@ -54,6 +54,7 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         print("Extraction complete.")
 
     def _load(self) -> None:
+        assert self._classes is not None
         # Download Imagenette to the temporary folder
         self._download_imagenette(self.download_path)
 
@@ -73,6 +74,7 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         test_set = datasets.ImageFolder(val_path, transform=transform)
 
         self._classes = train_set.classes
+        assert self._classes is not None
         self._n_classes = len(self._classes)
 
         # Split the training set into training and validation
@@ -81,12 +83,12 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         for i in range(self._n_classes):
             class_idx = np.where(np.array(train_set.targets) == i)[0]
             val_idxs.append(rng.choice(class_idx, int(0.1 * len(class_idx)), replace=False))
-        val_idxs = np.hstack(val_idxs)
-        train_idxs = list(set(range(len(train_set))) - set(val_idxs))
+        val_idxs_stacked = np.hstack(val_idxs)
+        train_idxs = list(set(range(len(train_set))) - set(val_idxs_stacked))
 
         # Create validation set as a new ImageFolder instance
-        valid_data = [train_set.samples[i] for i in val_idxs]
-        valid_targets = [train_set.targets[i] for i in val_idxs]
+        valid_data = [train_set.samples[i] for i in val_idxs_stacked]
+        valid_targets = [train_set.targets[i] for i in val_idxs_stacked]
 
         valid_set = datasets.ImageFolder(
             train_path,
@@ -109,4 +111,5 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         }
 
     def make_prompt_for_label(self, label: int) -> str:
+        assert self._classes is not None
         return f"an image of {self.class_mapping[self._classes[label]]}"

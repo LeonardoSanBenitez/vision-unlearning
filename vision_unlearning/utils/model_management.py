@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict
+from typing import List, Dict, Optional
 from PIL import Image
 
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
@@ -11,13 +11,14 @@ from vision_unlearning.utils.logger import get_logger
 
 logger = get_logger('utils')
 
+
 def save_model_card(
     repo_id: str,
+    base_model: str,
+    dataset_forget_name: str,
+    dataset_retain_name: str,
+    repo_folder: str,
     images: Dict[str, Image.Image] = {},
-    base_model: str = None,
-    dataset_forget_name: str = None,
-    dataset_retain_name: str = None,
-    repo_folder: str = None,
     eval_results: List[EvalResult] = [],  # whenever possible, should have this names: https://huggingface.co/metrics
     tags: List[str] = [],
     hyperparameters: dict = {},
@@ -42,7 +43,9 @@ def save_model_card(
     # TODO: this description is not appearing in the model card
     model_description = f"""
 # LoRA text2image fine-tuning - {repo_id}
-These are LoRA adaption weights for {base_model}. The weights were fine-tuned for forgetting {dataset_forget_name} dataset, while retaining {dataset_retain_name}. You can find some example images in the following. \n
+These are LoRA adaption weights for {base_model}.
+The weights were fine-tuned for forgetting {dataset_forget_name} dataset, while retaining {dataset_retain_name}.
+You can find some example images in the following.\n
 {img_str}
 """
 
@@ -58,14 +61,14 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned fo
 
     model_card.data = ModelCardData(
         model_name = repo_id,
-        eval_results=eval_results,
-        hyperparameters=hyperparameters,  # goes as kwargs
+        eval_results = eval_results,
+        hyperparameters = hyperparameters,  # goes as kwargs
     )
 
     model_card.save(os.path.join(repo_folder, "README.md"))
     logger.info(f"Model card saved to {repo_folder}")
 
-    if len(similarities_gf)>0 or len(similarities_gr)>0:
+    if len(similarities_gf) > 0 or len(similarities_gr) > 0:
         logger.info('Saving gradient conflicts')
         with open(os.path.join(repo_folder, "gradient_conflicts.json"), "w") as f:
             json.dump({"forget": similarities_gf, "retain": similarities_gr}, f)

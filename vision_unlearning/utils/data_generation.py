@@ -20,7 +20,7 @@ def generate_dataset(model_base_name: str, lora_name: Optional[str], prompts: Li
         pipeline.load_lora_weights(lora_name, weight_name="pytorch_lora_weights.safetensors")
 
     # Generate
-    images: List[Image] = []
+    images: List[Image.Image] = []
     for prompt in prompts:
         images.append(pipeline(prompt).images[0])
     assert len(images) == len(prompts)
@@ -37,5 +37,5 @@ def generate_dataset(model_base_name: str, lora_name: Optional[str], prompts: Li
     with open(os.path.join(output_path, "metadata.jsonl"), "w") as f:
         for entry in metadata:
             f.write(json.dumps(entry) + "\n")
-    
+
     return metadata
