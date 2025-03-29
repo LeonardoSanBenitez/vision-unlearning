@@ -60,9 +60,9 @@ You can find some example images in the following.\n
     model_card = populate_model_card(model_card, tags=tags)
 
     model_card.data = ModelCardData(
-        model_name = repo_id,
-        eval_results = eval_results,
-        hyperparameters = hyperparameters,  # goes as kwargs
+        model_name=repo_id,
+        eval_results=eval_results,
+        hyperparameters=hyperparameters,  # goes as kwargs
     )
 
     model_card.save(os.path.join(repo_folder, "README.md"))

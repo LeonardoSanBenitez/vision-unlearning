@@ -48,13 +48,14 @@ DATASET_NAME_MAPPING = {  # TODO: is this necessary?
     "Hamdy20002/COCO_Person": ("image", "text"),
 }
 
+
 def unlearn_lora(model_original_id: str, model_lora_id: str, device: str) -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
 
     Inspired by @inproceedings{zhang2023composing,
-        title={Composing Parameter-Efficient Modules with Arithmetic Operations}, 
+        title={Composing Parameter-Efficient Modules with Arithmetic Operations},
         author={Zhang, Jinghan and Chen, Shiqi and Liu, Junteng and He, Junxian},
         booktitle={Advances in Neural Information Processing Systems},
         year={2023}
@@ -86,7 +87,7 @@ class UnlearnerLora(Unlearner):
     """
     Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
     Strongly based on the huggingface example (see credits in the end)
-    
+
     Adapted from The HuggingFace Inc. team. All rights reserved.
     Licensed under the Apache License, Version 2.0.
     Source: https://github.com/huggingface/diffusers/blob/main/examples/text_to_image/train_text_to_image_lora.py
@@ -94,7 +95,7 @@ class UnlearnerLora(Unlearner):
     pretrained_model_name_or_path: str = Field(..., description="Path to pretrained model or model identifier from huggingface.co/models.")
     revision: Optional[str] = Field(None, description="Revision of pretrained model identifier from huggingface.co/models.")
     variant: Optional[str] = Field(None, description="Variant of the model files of the pretrained model identifier from huggingface.co/models, e.g., fp16.")
-    
+
     gradient_weighting_method: GradientWeightingMethod = Field(..., description="The method to use for weighting the gradients.")
     compute_gradient_conflict: bool = Field(True, description="Whether to compute the gradient conflict, for evaluation purposes.")
     compute_runtimes: bool = Field(True, description="Whether to compute the runtimes of the training, for evaluation purposes.")
@@ -114,7 +115,7 @@ class UnlearnerLora(Unlearner):
     max_train_samples: Optional[int] = Field(None, description="Limit the number of training examples for debugging or quicker training.")
     output_dir: str = Field("sd-model-finetuned-lora", description="Output directory for model predictions and checkpoints.")
     cache_dir: Optional[str] = Field(None, description="Directory where downloaded models and datasets will be stored.")
-    
+
     seed: Optional[int] = Field(None, description="A seed for reproducible training.")
     resolution: int = Field(512, description="Resolution for input images.")
     center_crop: bool = Field(False, description="Whether to center crop the input images.")
@@ -158,15 +159,16 @@ class UnlearnerLora(Unlearner):
     noise_offset: float = Field(0.0, description="Scale of noise offset.")
     rank: int = Field(4, description="Dimension of the LoRA update matrices.")
 
-    final_eval_prompts_forget: str|List[str] = Field([], description="Prompts for final evaluation on the forget dataset (ModelHub identifier or directly the prompts).")
-    final_eval_prompts_retain: str|List[str] = Field([], description="Prompts for final evaluation on the retain dataset (ModelHub identifier or directly the prompts).")
+    final_eval_prompts_forget: str | List[str] = Field([], description="Prompts for final evaluation on the forget dataset (ModelHub identifier or directly the prompts).")
+    final_eval_prompts_retain: str | List[str] = Field([], description="Prompts for final evaluation on the retain dataset (ModelHub identifier or directly the prompts).")
 
-    prediction_type: Optional[str] = Field(None, description="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
+    prediction_type: Optional[str] = Field(None, description="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. "
+                                                             "If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
 
     def train(self):
-        if type(self.final_eval_prompts_retain) == str:
+        if isinstance(self.final_eval_prompts_retain, str):
             raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")
-        if type(self.final_eval_prompts_forget) == str:
+        if isinstance(self.final_eval_prompts_forget, str):
             raise NotImplementedError("final_eval_prompts_forget should be a list of prompts, not a string.")
         t0 = time.time()
         if self.report_to == "wandb" and self.hub_token is not None:
@@ -199,7 +201,7 @@ class UnlearnerLora(Unlearner):
 
         if torch.backends.mps.is_available():
             accelerator.native_amp = False
-        
+
         logger.info(accelerator.state)
 
         # Handle the repository creation
@@ -255,7 +257,9 @@ class UnlearnerLora(Unlearner):
                 xformers_version = version.parse(xformers.__version__)
                 if xformers_version == version.parse("0.0.16"):
                     logger.warning(
-                        "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                        "xFormers 0.0.16 cannot be used for training in some GPUs. "
+                        "If you observe problems during training, please update xFormers to at least 0.0.17. "
+                        "See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
                     )
                 unet.enable_xformers_memory_efficient_attention()
             else:
@@ -270,7 +274,6 @@ class UnlearnerLora(Unlearner):
         # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-s
         if self.allow_tf32:
             torch.backends.cuda.matmul.allow_tf32 = True
-
 
         # Initialize the optimizer
         if self.use_8bit_adam:
@@ -478,10 +481,10 @@ class UnlearnerLora(Unlearner):
                 batch_forget["input_ids"] = batch_forget["input_ids"][:min_length]
                 batch_retain["input_ids"] = batch_retain["input_ids"][:min_length]
                 assert batch_forget["pixel_values"].shape == batch_retain["pixel_values"].shape
-                
+
                 batch_forget["pixel_values"] = batch_forget["pixel_values"].to(accelerator.device)
                 batch_retain["pixel_values"] = batch_retain["pixel_values"].to(accelerator.device)
-                
+
                 batch_forget["input_ids"] = batch_forget["input_ids"].to(accelerator.device)
                 batch_retain["input_ids"] = batch_retain["input_ids"].to(accelerator.device)
 
@@ -549,18 +552,18 @@ class UnlearnerLora(Unlearner):
                     #########################################
                     # Backpropagate
                     #########################################
-                    
+
                     # This is how it was before the munba trick:
-                    #accelerator.backward(loss)
-                    #if accelerator.sync_gradients:
-                    #    params_to_clip = lora_layers
-                    #    accelerator.clip_grad_norm_(params_to_clip, self.max_grad_norm)
-                    #optimizer.step()
-                    #lr_scheduler.step()
-                    #optimizer.zero_grad()
-                    
+                    # accelerator.backward(loss)
+                    # if accelerator.sync_gradients:
+                    #     params_to_clip = lora_layers
+                    #     accelerator.clip_grad_norm_(params_to_clip, self.max_grad_norm)
+                    # optimizer.step()
+                    # lr_scheduler.step()
+                    # optimizer.zero_grad()
+
                     # This is with the munba trick:
-                    
+
                     # Compute gradients
                     optimizer.zero_grad()
                     accelerator.backward(loss_forget)
@@ -700,6 +703,8 @@ class UnlearnerLora(Unlearner):
 
             pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.pretrained_model_name_or_path, self.output_dir, device=accelerator.device)
 
+            assert type(self.final_eval_prompts_forget) == list
+            assert type(self.final_eval_prompts_retain) == list
             evaluator = EvaluatorTextToImage(
                 pipeline_original=pipeline_original,
                 pipeline_learned=pipeline_learned,
@@ -727,25 +732,25 @@ class UnlearnerLora(Unlearner):
                     metric_type = 'runtime',
                     metric_name = f'Runtime init seconds (~↓)',
                     metric_value = t1-t0,
-                    **metric_common_attributes,
+                    **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type = 'runtime',
                     metric_name = f'Runtime data loading seconds (~↓)',
                     metric_value = t2-t1,
-                    **metric_common_attributes,
+                    **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type = 'runtime',
                     metric_name = f'Runtime training seconds (↓)',
                     metric_value = t3-t2,
-                    **metric_common_attributes,
+                    **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type = 'runtime',
                     metric_name = f'Runtime eval seconds (~↓)',
                     metric_value = t4-t3,
-                    **metric_common_attributes,
+                    **metric_common_attributes,  # type: ignore
                 ))
 
             ################################

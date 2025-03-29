@@ -9,7 +9,7 @@ class Unlearner(BaseModel, ABC):
     One unlearner may have variations/parametrizations that correspond to different unlearning algorithms/methods
     '''
     # TODO: what is shared among all unlearners?
-    
+
     @abstractmethod
     def train(self):
         pass

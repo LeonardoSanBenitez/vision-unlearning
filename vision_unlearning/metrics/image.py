@@ -42,4 +42,4 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 metric_painting_style = MetricPaintingStyle(desired_style='vincent-van-gogh', top_k=3, model_path='assets/models_pretrained/style_classifier/results/checkpoint-2800', device=device)
 result = metric_painting_style.score(image)
 print(result)
-''';  # noqa: E501
+''';  # noqa  # type: ignore

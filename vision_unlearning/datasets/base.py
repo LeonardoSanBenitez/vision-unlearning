@@ -12,7 +12,6 @@ from torchvision.datasets.vision import VisionDataset
 from torch.utils.data import Subset, DataLoader
 
 
-
 class UnlearnDatasetSplit(Enum):
     Train = "train"
     Validation = "validation"
@@ -80,8 +79,7 @@ class UnlearnDataset(BaseModel, ABC):
         else:
             raise NotImplementedError(f"Split mode {self.split_mode} not implemented")
 
-
-    def _split_class(self, forget: List[str|int]|str|int) -> None:
+    def _split_class(self, forget: List[str | int] | str | int) -> None:
         assert self._classes is not None, "Classes should be loaded before splitting"
         c: List[int]
         if isinstance(forget, list):

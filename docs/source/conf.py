@@ -13,7 +13,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "autoapi.extension",
-    "myst_parser",  # Enables Markdown support
+    #"myst_parser",  # Enables Markdown support
 ]
 
 autoapi_dirs = ["../../vision_unlearning"]  # Extracts docstrings
@@ -21,16 +21,16 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["source/_static"]
+html_static_path = ["_static"]
 
 
 # Add MyST configuration
-myst_enable_extensions = [
-    "dollarmath",
-    "amsmath",
-]
-source_suffix = {
-    '.rst': 'restructuredtext',
-    '.md': 'markdown',
-}
-myst_heading_anchors = 3
+# myst_enable_extensions = [
+#     "dollarmath",
+#     "amsmath",
+# ]
+# source_suffix = {
+#     '.rst': 'restructuredtext',
+#     '.md': 'markdown',
+# }
+# myst_heading_anchors = 3
