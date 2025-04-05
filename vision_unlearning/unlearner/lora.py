@@ -756,7 +756,7 @@ class UnlearnerLora(Unlearner):
 
             ################################
             save_model_card(
-                repo_id if self.push_to_hub else self.output_dir,
+                repo_id if self.push_to_hub else 'none',
                 images=images,
                 base_model=self.pretrained_model_name_or_path,
                 dataset_forget_name=self.dataset_forget_name,

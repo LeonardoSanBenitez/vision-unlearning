@@ -54,7 +54,6 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         print("Extraction complete.")
 
     def _load(self) -> None:
-        assert self._classes is not None
         # Download Imagenette to the temporary folder
         self._download_imagenette(self.download_path)
 
