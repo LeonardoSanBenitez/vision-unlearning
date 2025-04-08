@@ -2,7 +2,7 @@ import os
 import pickle
 import json
 from enum import Enum
-from typing import Dict, List, Optional, Union, Literal
+from typing import Dict, List, Optional, Union, Literal, Sequence
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, ConfigDict
 import numpy as np
@@ -43,11 +43,14 @@ class UnlearnDataset(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     split_mode: UnlearnDatasetSplitMode
-    split_kwargs: dict = {}  # Should contain the required by the mode-specific downstream methods (_split_class, _split_random, _split_temporal)
+    split_kwargs: dict = {} # Should contain the required by the mode-specific downstream methods (_split_class, _split_random, _split_temporal)
 
     _dataset_splits: Dict[UnlearnDatasetSplit, Union[Subset, VisionDataset]] = {}
     _classes: Optional[List[str]] = None
     _n_classes: int = 0
+
+    mean: Optional[Sequence[float]] = None
+    std: Optional[Sequence[float]] = None
 
     def model_post_init(self, __context: dict) -> None:
         # TODO: using pydantic's model_post_init makes this hard to debug... maybe just overwritting the constructor is better
@@ -104,7 +107,7 @@ class UnlearnDataset(BaseModel, ABC):
         assert type(c) == list  # noqa
         assert all([type(e) == int for e in c])  # noqa
         assert len(c) > 0, "Forget should be a list integers"
-
+        
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Train], VisionDataset), "Train should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Validation], VisionDataset), "Valid should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Test], VisionDataset), "Test should be a VisionDataset"
@@ -160,6 +163,9 @@ class UnlearnDataset(BaseModel, ABC):
         Raised exceptions: none
         '''
         return self._dataset_splits
+    
+    def denormalize(self, normalized: torch.Tensor) -> torch.Tensor:
+        return normalized * torch.Tensor(self.std).view(-1,1,1) + torch.Tensor(self.mean).view(-1,1,1)
 
     def save(self, path: str, format: Literal['pkl', 'jpg'] = 'pkl', save_unsplit: bool = False) -> None:
         '''
@@ -184,6 +190,8 @@ class UnlearnDataset(BaseModel, ABC):
                         image_path = os.path.join(split_path, f"{idx}.jpg")
                         # Convert tensor to PIL image and save
                         if isinstance(image, torch.Tensor):
+                            if self.mean is not None or self.std is not None:
+                                image = self.denormalize(image)
                             image = transforms.ToPILImage()(image)
                         image.save(image_path)
                         metadata.append({
