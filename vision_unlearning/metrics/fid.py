@@ -107,8 +107,8 @@ class FrechetInceptionDistance(Metric):
         fid_val = torch_fidelity.calculate_metrics(
             input1=real_images,
             input2=gen_images,
-            fid=True,
-            cude=True if torch.cuda.is_available() else False
+            metrics=['fid'],
+            cuda=True if torch.cuda.is_available() else False
         )
 
         assert fid_val is not None
