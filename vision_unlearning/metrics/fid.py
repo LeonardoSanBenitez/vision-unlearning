@@ -11,8 +11,8 @@ class FrechetInceptionDistance(Metric):
     metrics: Literal['FID'] = ['FID']
     real_imgs_path: str = None
     gen_imgs_path: str = None
-    real_imgs: torch.Tensor = None
-    gen_imgs: torch.Tensor = None
+    real_imgs: List[torch.Tensor] = None
+    gen_imgs: List[torch.Tensor] = None
 
     def model_post_init(self, __context: dict = None) -> None:
         assert self.real_imgs_path is not None or self.real_imgs is not None,\
@@ -50,6 +50,14 @@ class FrechetInceptionDistance(Metric):
             if os.path.splitext(file)[1].lower() in valid_extensions:
                 return True
         return False
+
+    def process_tensor_images(self, tensor_list: List[torch.Tensor]):
+        transform_tensor = transforms.Compose([
+            transforms.Resize((299, 299)),  # Resize for Inception compatibility
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
+        ])
+        
+        return [transform_tensor(img) for img in tensor_list]
     
     def load_images_from_folder(self, folder_path: str, transform: transforms.Compose) -> torch.Tensor:
         """
@@ -89,12 +97,12 @@ class FrechetInceptionDistance(Metric):
         if self.real_imgs_path:
             real_images = self.load_images_from_folder(self.real_imgs_path, transform)
         else:
-            real_images = self.real_imgs
+            real_images = self.process_tensor_images(self.real_imgs)
 
         if self.gen_imgs_path:
             gen_images = self.load_images_from_folder(self.gen_imgs_path, transform)
         else:
-            gen_images = self.gen_imgs
+            gen_images = self.process_tensor_images(self.gen_imgs)
 
         fid_val = torch_fidelity.calculate_metrics(
             input1=real_images,
