@@ -95,12 +95,12 @@ class FrechetInceptionDistance(Metric):
         ])
 
         if self.real_imgs_path:
-            real_images = self.load_images_from_folder(self.real_imgs_path, transform)
+            real_images = self.real_imgs_path #self.load_images_from_folder(self.real_imgs_path, transform)
         else:
             real_images = self.process_tensor_images(self.real_imgs)
 
         if self.gen_imgs_path:
-            gen_images = self.load_images_from_folder(self.gen_imgs_path, transform)
+            gen_images = self.gen_imgs_path #self.load_images_from_folder(self.gen_imgs_path, transform)
         else:
             gen_images = self.process_tensor_images(self.gen_imgs)
 
