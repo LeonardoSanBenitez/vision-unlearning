@@ -9,9 +9,13 @@ class UnlearnDatasetCifar(UnlearnDataset):
     download_path: str
 
     def _load(self) -> None:
+        # Define the transform
+        self.mean = (0.485, 0.456, 0.406)
+        self.std = (0.229, 0.224, 0.225)
+
         transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+            transforms.Normalize(self.mean, self.std)
         ])
         train_set = datasets.CIFAR10(self.download_path, train=True, transform=transform, download=True)
         test_set = datasets.CIFAR10(self.download_path, train=False, transform=transform, download=True)

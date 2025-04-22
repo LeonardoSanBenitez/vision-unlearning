@@ -54,7 +54,6 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         print("Extraction complete.")
 
     def _load(self) -> None:
-        assert self._classes is not None
         # Download Imagenette to the temporary folder
         self._download_imagenette(self.download_path)
 
@@ -64,9 +63,12 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         val_path = os.path.join(extracted_path, "val")
 
         # Define the transform
+        self.mean = (0.485, 0.456, 0.406)
+        self.std = (0.229, 0.224, 0.225)
+
         transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+            transforms.Normalize(self.mean, self.std)
         ])
 
         # Load the dataset using ImageFolder
