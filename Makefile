@@ -68,7 +68,7 @@ test: run-interactive-docker
 	# poetry run --quiet pytest --capture=no -k "test_example" ./tests/**/manual_example.py
 
 build-pip: run-interactive-docker
-	$(call exec_docker, poetry run --quiet build)
+	$(call exec_docker, poetry run --quiet python -m build)
 	$(call exec_docker, poetry run --quiet twine check dist/*)
 	$(call exec_docker, poetry run --quiet twine upload --skip-existing dist/*)
 
