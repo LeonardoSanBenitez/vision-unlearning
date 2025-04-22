@@ -26,7 +26,8 @@ def save_model_card(
     similarities_gf: List[float] = [],
 ):
     '''
-    the resulting file looks like this: https://github.com/huggingface/hub-docs/blob/main/modelcard.md
+    The resulting file looks like this: https://github.com/huggingface/hub-docs/blob/main/modelcard.md
+    This looks hugginface-specific, so you may think it should be in `integrations/huggingface.py`, but it is actually a generic Readme saving
 
     Adapted from The HuggingFace Inc. team. All rights reserved.
     Licensed under the Apache License, Version 2.0.

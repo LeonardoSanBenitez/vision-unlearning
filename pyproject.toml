@@ -78,6 +78,7 @@ lpips = "*"
 image-similarity-measures = "*"
 pyfftw = "*"
 PyYAML = "*"
+dadapy = "~0.3"
 
 # Needed only for development/build
 # TODO: declare them separately
