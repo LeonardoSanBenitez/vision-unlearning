@@ -16,7 +16,7 @@ def local_get_model_metrics(file_path) -> Dict[str, float | int | bool]:
     return name_to_value
 
 
-def local_get_model_images(folder_path, prefix: str = '') -> List[ImageFile]:
+def local_get_model_images(folder_path, prefix: str = '') -> List[ImageFile.ImageFile]:
     '''
     Searches only in folder `prefix`
     TODO: make it more flexible
@@ -24,7 +24,7 @@ def local_get_model_images(folder_path, prefix: str = '') -> List[ImageFile]:
     if not Path(folder_path):
         raise RuntimeError(f"No directory found for model: {folder_path}")
 
-    images: List[ImageFile] = []
+    images: List[ImageFile.ImageFile] = []
     for file_path in Path(os.path.join(folder_path, prefix)).iterdir():
         if file_path.is_file() and file_path.suffix in {'.png', '.jpg', '.jpeg', '.gif'}:
             images.append(Image.open(file_path))

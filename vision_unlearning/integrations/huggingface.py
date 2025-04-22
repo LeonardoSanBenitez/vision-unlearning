@@ -188,11 +188,11 @@ def huggingface_get_model_metrics(model_id: str) -> Dict[str, float | int | bool
     return name_to_value
 
 
-def huggingface_get_model_images(model_id, prefix: str = '') -> List[ImageFile]:
+def huggingface_get_model_images(model_id, prefix: str = '') -> List[ImageFile.ImageFile]:
     '''
     Searches in anything starting with `prefix`
     '''
-    images: List[ImageFile] = []
+    images: List[ImageFile.ImageFile] = []
     api = hf_api.HfApi()
     model_info = api.model_info(model_id)
     if model_info.siblings:
