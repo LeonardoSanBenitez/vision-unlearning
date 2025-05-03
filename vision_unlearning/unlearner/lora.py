@@ -49,7 +49,7 @@ DATASET_NAME_MAPPING = {  # TODO: is this necessary?
 }
 
 
-def unlearn_lora(model_original_id: str, model_lora_id: str, device: str) -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
+def unlearn_lora(model_original_id: str, model_lora_id: str, device: str, weight_name: str = "pytorch_lora_weights.safetensors") -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
@@ -65,10 +65,10 @@ def unlearn_lora(model_original_id: str, model_lora_id: str, device: str) -> Tup
     pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
 
     pipeline_learned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
-    pipeline_learned.load_lora_weights(model_lora_id, weight_name="pytorch_lora_weights.safetensors")
+    pipeline_learned.load_lora_weights(model_lora_id, weight_name=weight_name)
 
     pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
-    pipeline_unlearned.load_lora_weights(model_lora_id, weight_name="pytorch_lora_weights.safetensors")
+    pipeline_unlearned.load_lora_weights(model_lora_id, weight_name=weight_name)
     total: int = 0
     sum_before_invert: float = sum([float(param.sum()) for name, param in pipeline_unlearned.unet.named_parameters() if "lora_A" in name])
     for name, param in pipeline_unlearned.unet.named_parameters():
