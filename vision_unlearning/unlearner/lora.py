@@ -92,6 +92,17 @@ class UnlearnerLora(Unlearner):
     Licensed under the Apache License, Version 2.0.
     Source: https://github.com/huggingface/diffusers/blob/main/examples/text_to_image/train_text_to_image_lora.py
     """
+    # TODO: there is code duplication in UnlearnerLoraSparse. Maybe UnlearnerLora should be made generic enough so that UnlearnerLoraSparse can inherit from it
+    # Specific to this unlearner, general arguments
+    rank: int = Field(4, description="Dimension of the LoRA update matrices.")
+    cache_dir: Optional[str] = Field(None, description="Directory where downloaded models and datasets will be stored.")
+    push_to_hub: bool = Field(False, description="Push the model to Hugging Face Hub.")
+    hub_token: Optional[str] = Field(None, description="Token for authentication to push to Model Hub.")
+    hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`.")
+    report_to: str = Field("tensorboard", description="Logging integration for reporting results (e.g., tensorboard, wandb).")
+    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage"
+
+    # Specific to this unlearner, training related
     pretrained_model_name_or_path: str = Field(..., description="Path to pretrained model or model identifier from huggingface.co/models.")
     revision: Optional[str] = Field(None, description="Revision of pretrained model identifier from huggingface.co/models.")
     variant: Optional[str] = Field(None, description="Variant of the model files of the pretrained model identifier from huggingface.co/models, e.g., fp16.")
@@ -100,6 +111,26 @@ class UnlearnerLora(Unlearner):
     compute_gradient_conflict: bool = Field(True, description="Whether to compute the gradient conflict, for evaluation purposes.")
     compute_runtimes: bool = Field(True, description="Whether to compute the runtimes of the training, for evaluation purposes.")
 
+    train_batch_size: int = Field(16, description="Batch size per device for training.")
+    max_train_steps: Optional[int] = Field(None, description="Total number of training steps, overrides num_train_epochs if provided.")
+    gradient_checkpointing: bool = Field(False, description="Enable gradient checkpointing to save memory at the expense of slower backward pass.")
+    lr_scheduler: str = Field("constant", description="Scheduler type for learning rate.")
+    lr_warmup_steps: int = Field(500, description="Number of warmup steps in the learning rate scheduler.")
+    use_8bit_adam: bool = Field(False, description="Use 8-bit Adam optimizer from bitsandbytes.")
+    allow_tf32: bool = Field(False, description="Allow TF32 on Ampere GPUs for potential training speed-up.")
+    adam_beta1: float = Field(0.9, description="Beta1 parameter for Adam optimizer.")
+    adam_beta2: float = Field(0.999, description="Beta2 parameter for Adam optimizer.")
+    adam_weight_decay: float = Field(1e-2, description="Weight decay for Adam optimizer.")
+    adam_epsilon: float = Field(1e-8, description="Epsilon value for Adam optimizer.")
+    max_grad_norm: float = Field(1.0, description="Maximum gradient norm.")
+    mixed_precision: Optional[str] = Field(None, description="Use mixed precision training: 'fp16' or 'bf16'.")
+    checkpointing_steps: int = Field(500, description="Save training state checkpoint every X updates.")
+    checkpoints_total_limit: Optional[int] = Field(None, description="Maximum number of checkpoints to store.")
+    resume_from_checkpoint: Optional[str] = Field(None, description="Resume training from a previous checkpoint.")
+    enable_xformers_memory_efficient_attention: bool = Field(False, description="Use xformers for memory-efficient attention.")
+    noise_offset: float = Field(0.0, description="Scale of noise offset.")
+
+    # Dataset related
     dataset_forget_name: str = Field(..., description="The name or path of the dataset to be forgotten.")
     dataset_retain_name: str = Field(..., description="The name or path of the dataset to be retained.")
     dataset_forget_config_name: Optional[str] = Field(None, description="The config of the dataset for forgetting, leave as None if there's only one config.")
@@ -112,58 +143,27 @@ class UnlearnerLora(Unlearner):
     num_validation_images: int = Field(4, description="Number of images to generate during validation with `validation_prompt`.")
     validation_epochs: int = Field(1, description="Run fine-tuning validation every X epochs.")
 
-    max_train_samples: Optional[int] = Field(None, description="Limit the number of training examples for debugging or quicker training.")
-    output_dir: str = Field("sd-model-finetuned-lora", description="Output directory for model predictions and checkpoints.")
-    cache_dir: Optional[str] = Field(None, description="Directory where downloaded models and datasets will be stored.")
-
-    seed: Optional[int] = Field(None, description="A seed for reproducible training.")
     resolution: int = Field(512, description="Resolution for input images.")
     center_crop: bool = Field(False, description="Whether to center crop the input images.")
     random_flip: bool = Field(False, description="Whether to randomly flip images horizontally.")
 
-    train_batch_size: int = Field(16, description="Batch size per device for training.")
-    num_train_epochs: int = Field(100, description="Number of training epochs.")
-    max_train_steps: Optional[int] = Field(None, description="Total number of training steps, overrides num_train_epochs if provided.")
-
-    gradient_accumulation_steps: int = Field(1, description="Number of steps to accumulate before performing backward/update pass.")
-    gradient_checkpointing: bool = Field(False, description="Enable gradient checkpointing to save memory at the expense of slower backward pass.")
-
-    learning_rate: float = Field(1e-4, description="Initial learning rate after warmup period.")
-    lr_scheduler: str = Field("constant", description="Scheduler type for learning rate.")
-    lr_warmup_steps: int = Field(500, description="Number of warmup steps in the learning rate scheduler.")
-
-    use_8bit_adam: bool = Field(False, description="Use 8-bit Adam optimizer from bitsandbytes.")
-    allow_tf32: bool = Field(False, description="Allow TF32 on Ampere GPUs for potential training speed-up.")
-
+    max_train_samples: Optional[int] = Field(None, description="Limit the number of training examples for debugging or quicker training.")
     dataloader_num_workers: int = Field(0, description="Number of subprocesses for data loading.")
-    adam_beta1: float = Field(0.9, description="Beta1 parameter for Adam optimizer.")
-    adam_beta2: float = Field(0.999, description="Beta2 parameter for Adam optimizer.")
-    adam_weight_decay: float = Field(1e-2, description="Weight decay for Adam optimizer.")
-    adam_epsilon: float = Field(1e-8, description="Epsilon value for Adam optimizer.")
-    max_grad_norm: float = Field(1.0, description="Maximum gradient norm.")
-
-    push_to_hub: bool = Field(False, description="Push the model to Hugging Face Hub.")
-    hub_token: Optional[str] = Field(None, description="Token for authentication to push to Model Hub.")
-    hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`.")
-
-    logging_dir: str = Field("logs", description="Directory for TensorBoard logs.")
-    mixed_precision: Optional[str] = Field(None, description="Use mixed precision training: 'fp16' or 'bf16'.")
-    report_to: str = Field("tensorboard", description="Logging integration for reporting results (e.g., tensorboard, wandb).")
-
-    local_rank: int = Field(-1, description="Local rank for distributed training.")
-    checkpointing_steps: int = Field(500, description="Save training state checkpoint every X updates.")
-    checkpoints_total_limit: Optional[int] = Field(None, description="Maximum number of checkpoints to store.")
-    resume_from_checkpoint: Optional[str] = Field(None, description="Resume training from a previous checkpoint.")
-
-    enable_xformers_memory_efficient_attention: bool = Field(False, description="Use xformers for memory-efficient attention.")
-    noise_offset: float = Field(0.0, description="Scale of noise offset.")
-    rank: int = Field(4, description="Dimension of the LoRA update matrices.")
 
     final_eval_prompts_forget: str | List[str] = Field([], description="Prompts for final evaluation on the forget dataset (ModelHub identifier or directly the prompts).")
     final_eval_prompts_retain: str | List[str] = Field([], description="Prompts for final evaluation on the retain dataset (ModelHub identifier or directly the prompts).")
-
     prediction_type: Optional[str] = Field(None, description="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. "
-                                                             "If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
+                                                    "If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
+
+    # Training args from huggingface
+    gradient_accumulation_steps: int = Field(1, description="Number of steps to accumulate before performing backward/update pass.")
+    num_train_epochs: int = Field(100, description="Number of training epochs.")
+    learning_rate: float = Field(1e-4, description="Initial learning rate after warmup period.")
+
+    output_dir: str = Field("sd-model-finetuned-lora", description="Output directory for model predictions and checkpoints.")
+    logging_dir: str = Field("logs", description="Directory for TensorBoard logs.")
+    seed: Optional[int] = Field(None, description="A seed for reproducible training.")
+    local_rank: int = Field(-1, description="Local rank for distributed training.")
 
     def train(self):
         if isinstance(self.final_eval_prompts_retain, str):
@@ -176,6 +176,11 @@ class UnlearnerLora(Unlearner):
                 "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
                 " Please use `huggingface-cli login` to authenticate with the Hub."
             )
+
+        if not self.is_lora_negated:
+            # TODO: this shiould be a simple matter of following the gradinet or its negation
+            raise NotImplementedError()
+
 
         # Acelerator config
         accelerator_project_config = accelerate.utils.ProjectConfiguration(project_dir=self.output_dir, logging_dir=Path(self.output_dir, self.logging_dir))
@@ -408,6 +413,7 @@ class UnlearnerLora(Unlearner):
                     f"the expected length ({len_train_dataloader_after_sharding}) when the learning rate scheduler was created. "
                     f"This inconsistency may result in the learning rate scheduler not functioning properly."
                 )
+
         # Afterwards we recalculate our number of training epochs
         self.num_train_epochs = math.ceil(self.max_train_steps / num_update_steps_per_epoch)
 

@@ -7,7 +7,7 @@ documentation = "https://github.com/LeonardoSanBenitez/vision-unlearning"
 
 [tool.poetry]
 name = "vision-unlearning"
-version = "0.1.2"
+version = "0.1.3"
 description = "Vision Unlearning: a tool for Machine Unlearning in Computer Vision"
 readme = "README.md"
 authors = [
