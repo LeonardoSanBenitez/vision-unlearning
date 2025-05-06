@@ -5,7 +5,7 @@ import torch_fidelity
 from torchvision import transforms
 from vision_unlearning.metrics.base import Metric
 import os
-
+from vision_unlearning.utils.images_handling import verify_images_in_path
 
 class FrechetInceptionDistance(Metric):
     metrics: Literal['FID'] = ['FID']
@@ -21,35 +21,18 @@ class FrechetInceptionDistance(Metric):
             "Could not find generated images data!\r\nPlease define a path to a folder or a torch.Tensor with the images."
 
         if self.real_imgs_path:
-            assert self.verify_images_in_path(self.real_imgs_path), \
+            assert verify_images_in_path(self.real_imgs_path), \
                 f"No valid images found in the folder '{self.real_imgs_path}'."
         else:
             assert self.real_imgs.dim() == 4, \
                 "The real images tensor should have 4 dimensions (batch_size, channels, height, width)."
         if self.gen_imgs_path:
-            assert self.verify_images_in_path(self.gen_imgs_path), \
+            assert verify_images_in_path(self.gen_imgs_path), \
                 f"No valid images found in the folder '{self.gen_imgs_path}'."
         else:
             assert self.gen_imgs.dim() == 4, \
                 "The generated images tensor should have 4 dimensions (batch_size, channels, height, width)."
         pass
-
-    def verify_images_in_path(self, path: str) -> bool:
-        """
-        Verifies if the given path contains image files.
-        :param path: Path to the folder to check.
-        :return: True if images are found, False otherwise.
-        """
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"The path '{path}' does not exist.")
-        if not os.path.isdir(path):
-            raise NotADirectoryError(f"The path '{path}' is not a directory.")
-
-        valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
-        for file in os.listdir(path):
-            if os.path.splitext(file)[1].lower() in valid_extensions:
-                return True
-        return False
 
     def process_tensor_images(self, tensor_list: List[torch.Tensor]):
         transform_tensor = transforms.Compose([
