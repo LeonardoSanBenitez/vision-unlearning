@@ -3,7 +3,7 @@ name = "vision-unlearning"
 
 [project.urls]
 repository    = "https://github.com/LeonardoSanBenitez/vision-unlearning"
-documentation = "https://github.com/LeonardoSanBenitez/vision-unlearning"
+documentation = "https://vision-unlearning.readthedocs.io/"
 
 [tool.poetry]
 name = "vision-unlearning"
