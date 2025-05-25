@@ -1,6 +1,7 @@
+import os
+from typing import Dict
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
-import os
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -29,11 +30,11 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
         @return mask_dict: keys like "down_blocks.1.attentions.1.transformer_blocks.0.attn1.to_v.weight"
         '''
         logger.debug("Loading scheduler and models...")
-        sched = DDPMScheduler.from_pretrained(model_id, subfolder="scheduler")
-        tokenizer = CLIPTokenizer.from_pretrained(model_id, subfolder="tokenizer")
-        text_enc = CLIPTextModel.from_pretrained(model_id, subfolder="text_encoder").to(device)
-        vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae").to(device)
-        unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").to(device)
+        sched = DDPMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
+        tokenizer = CLIPTokenizer.from_pretrained(model_name_or_path, subfolder="tokenizer")
+        text_enc = CLIPTextModel.from_pretrained(model_name_or_path, subfolder="text_encoder").to(device)
+        vae = AutoencoderKL.from_pretrained(model_name_or_path, subfolder="vae").to(device)
+        unet = UNet2DConditionModel.from_pretrained(model_name_or_path, subfolder="unet").to(device)
 
         unet.requires_grad_(True)
         text_enc.eval()

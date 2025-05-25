@@ -100,7 +100,7 @@ class UnlearnerLora(Unlearner):
     hub_token: Optional[str] = Field(None, description="Token for authentication to push to Model Hub.")
     hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`.")
     report_to: str = Field("tensorboard", description="Logging integration for reporting results (e.g., tensorboard, wandb).")
-    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage"
+    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")
 
     # Specific to this unlearner, training related
     pretrained_model_name_or_path: str = Field(..., description="Path to pretrained model or model identifier from huggingface.co/models.")
