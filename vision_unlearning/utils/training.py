@@ -1,4 +1,5 @@
 import random
+from typing import Optional
 import numpy as np
 import torch
 from diffusers.utils.torch_utils import is_compiled_module
@@ -39,15 +40,29 @@ def unwrap_model(model, accelerator):
     return model
 
 
-def preprocess_train(examples, tokenizer, caption_column, image_column, train_transforms):
+def forget_tokens(examples, tokenizer, caption_column, forget_class):
+    length = len(examples[caption_column])
+    my_str = "an image of " + forget_class
+    captions = [my_str] * length
+    inputs = tokenizer(
+        captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+    )
+    return inputs.input_ids
+    
+def preprocess_train(examples, tokenizer, caption_column, image_column, train_transforms, concept_overwrite: Optional[str] = None):
     '''
     Adapted from The HuggingFace Inc. team. All rights reserved.
     Licensed under the Apache License, Version 2.0.
     Source: https://github.com/huggingface/diffusers/blob/main/examples/text_to_image/train_text_to_image_lora.py
+
+    concept_overwrite: concept to be used for overwriting, described as an textual string (used to modify the prompt).
+    TODO: this handling of concept_overwrite is weird... I wish this were somewhat more structured/organized/clear
     '''
     images = [image.convert("RGB") for image in examples[image_column]]
     examples["pixel_values"] = [train_transforms(image) for image in images]
     examples["input_ids"] = tokenize_captions(examples, tokenizer, caption_column)
+    if concept_overwrite:
+        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, "garbage_truck")
     return examples
 
 
@@ -60,7 +75,11 @@ def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
     input_ids = torch.stack([example["input_ids"] for example in examples])
-    return {"pixel_values": pixel_values, "input_ids": input_ids}
+    result = {"pixel_values": pixel_values, "input_ids": input_ids}
+    if "forget_ids" in examples[0]:
+        # This happens when `preprocess_train` was called with a non-none `concept_overwrite`
+        result["forget_ids"] = torch.stack([example["forget_ids"] for example in examples])
+    return result
 
 
 def launch_accelerated_training(unlearner: 'Unlearner'):  # type: ignore
