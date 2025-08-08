@@ -78,7 +78,7 @@ class EvaluatorTextToImage(BaseModel):
                 axes[2].axis("off")
                 fig.suptitle(prompt, fontsize=16)
                 fig.canvas.draw()
-                images[prompt] = Image.fromarray(np.uint8(np.array(fig.canvas.buffer_rgba())))  # type: ignore
+                images[f"{scope.capitalize()} - {prompt}"] = Image.fromarray(np.uint8(np.array(fig.canvas.buffer_rgba())))  # type: ignore
                 plt.show()
 
             # Assemble metrics object

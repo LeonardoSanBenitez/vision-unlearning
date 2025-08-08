@@ -87,7 +87,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
 
             # Add noise
             noise = torch.randn_like(latents)
-            t = torch.randint(0, sched.num_train_timesteps, (latents.shape[0],), device=device)
+            t = torch.randint(0, sched.config.num_train_timesteps, (latents.shape[0],), device=device)
             noisy = sched.add_noise(latents, noise, t)
 
             # UNet prediction & loss

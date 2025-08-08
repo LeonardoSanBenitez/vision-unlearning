@@ -62,7 +62,7 @@ def preprocess_train(examples, tokenizer, caption_column, image_column, train_tr
     examples["pixel_values"] = [train_transforms(image) for image in images]
     examples["input_ids"] = tokenize_captions(examples, tokenizer, caption_column)
     if concept_overwrite:
-        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, "garbage_truck")
+        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, "garbage_truck")  # TODO hardcoded
     return examples
 
 
