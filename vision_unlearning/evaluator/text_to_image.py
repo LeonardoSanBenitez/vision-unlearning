@@ -235,8 +235,9 @@ def log_validation(
         autocast_ctx = torch.autocast(accelerator.device.type)  # type: ignore
 
     with autocast_ctx:
+        phase_prefix = "tst" if is_final_validation else "val"
         for i in range(num_validation_images):
-            images[f"val_prompt_{i+1:02d}"] = pipeline(validation_prompt, num_inference_steps=30, generator=generator).images[0]
+            images[f"{phase_prefix}_prompt_{epoch:02d}_{i+1:02d}"] = pipeline(validation_prompt, num_inference_steps=30, generator=generator).images[0]
 
     for tracker in accelerator.trackers:
         phase_name = "test" if is_final_validation else "validation"
