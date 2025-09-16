@@ -1,4 +1,4 @@
-from typing import List, Literal, Dict
+from typing import List, Literal, Dict, Optional
 from PIL import Image
 from image_similarity_measures.evaluate import evaluation
 import lpips
@@ -8,16 +8,13 @@ from vision_unlearning.metrics.base import Metric
 
 class MetricImageImage(Metric):
     _loss_alex: lpips.lpips.LPIPS
-    _loss_vgg: lpips.lpips.LPIPS
+    _loss_vgg: Optional[lpips.lpips.LPIPS]
     metrics: List[Literal['rmse', 'psnr', 'ssim', 'fsim', 'issm', 'sre', 'sam', 'uiq', 'lpips_alex', 'lpips_vgg']]
 
-    def __init__(self, metrics: List[Literal['rmse', 'psnr', 'ssim', 'fsim', 'issm', 'sre', 'sam', 'uiq', 'lpips_alex', 'lpips_vgg']]):
-        # TODO: use pydantic's constructor, and initialize the models as post init
-        self.metrics = metrics
-        # Download the models for the LPIPS metrics, if required
-        if 'lpips_alex' in metrics:
+    def model_post_init(self, __context: dict) -> None:
+        if 'lpips_alex' in self.metrics:
             self._loss_alex = lpips.LPIPS(net='alex')
-        if 'lpips_vgg' in metrics:
+        if 'lpips_vgg' in self.metrics:
             self._loss_vgg = lpips.LPIPS(net='vgg')
 
     def _evaluate_lpips(self, org_img_path: str, pred_img_path: str, loss_fn: lpips.lpips.LPIPS) -> float:

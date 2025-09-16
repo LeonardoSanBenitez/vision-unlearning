@@ -40,10 +40,9 @@ def unwrap_model(model, accelerator):
     return model
 
 
-def forget_tokens(examples, tokenizer, caption_column, forget_class):
+def forget_tokens(examples, tokenizer, caption_column, forget_prompt: str):
     length = len(examples[caption_column])
-    my_str = "an image of " + forget_class
-    captions = [my_str] * length
+    captions = [forget_prompt] * length
     inputs = tokenizer(
         captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
     )
@@ -62,7 +61,7 @@ def preprocess_train(examples, tokenizer, caption_column, image_column, train_tr
     examples["pixel_values"] = [train_transforms(image) for image in images]
     examples["input_ids"] = tokenize_captions(examples, tokenizer, caption_column)
     if concept_overwrite:
-        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, "garbage_truck")  # TODO hardcoded
+        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, "an image of garbage_truck")  # TODO hardcoded
     return examples
 
 
