@@ -1,6 +1,6 @@
 # Vision Unlearning
 
-![Documentation](https://vision-unlearning.readthedocs.io/)
+[Documentation](https://vision-unlearning.readthedocs.io/)
 
 ## Installation
 
