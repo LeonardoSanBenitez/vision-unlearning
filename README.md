@@ -33,6 +33,8 @@ For practitioners, Vision Unlearning provides:
 - Easy access to state-of-the-art unlearning algorithms.
 - A standardized interface to experiment with different algorithms.
 
+## Tutorials
+[Replace _George W. Bush_ by _Tony Blair_ using FADE](https://drive.google.com/file/d/1DtdwZuUDHhu-7O5cgeTHVbTGjyiuIwTQ/view?usp=sharing)
 ## Main Interfaces
 
 Vision Unlearning standardizes the following components:
