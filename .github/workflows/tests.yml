@@ -1,0 +1,45 @@
+name : Automated Testing
+
+on: 
+    push:
+        branches: ["soham"]
+    pull_request:
+        branches: ["soham"]
+
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+    
+    steps:
+        - name : Checkout repo
+          uses : actions/checkout@v4
+        
+        - name : Set up Python
+          uses : actions/setup-python@v5
+          with : 
+            python-version : "3.11"
+        
+        - name : Install poetry
+          uses : pip install poetry
+        
+        - name : Install dependencies with poetry
+          uses : poetry install --no-interaction --no-root
+        
+        - name : Mypy check
+          uses : |
+            echo '\n\n-------------\nMypy check\n------------'
+            poetry run mypy --install-types --non-interactive > \dev\null 2>&1
+            poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
+
+        - name : Pycodestyle check
+          uses : |
+            echo '\n\n-------------\nPycodestyle check\n-------'
+            poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
+
+        - name : Pytest
+          uses : |
+            echo '\n\n-------------\nPytest\n------------------'
+            makdir -p reports
+            poetry run pytest --junitxml=reports/tests-results.xml ./tests  
+

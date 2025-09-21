@@ -1,5 +1,7 @@
 # Vision Unlearning
 
+![CI](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg)
+
 [Documentation](https://vision-unlearning.readthedocs.io/)
 
 ## Installation
