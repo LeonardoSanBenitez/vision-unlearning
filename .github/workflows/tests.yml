@@ -28,7 +28,7 @@ jobs:
       - name: Mypy check
         run: |
           echo '\n\n-------------\nMypy check\n------------'
-          poetry run mypy --install-types --non-interactive > /dev/null 2>&1
+          poetry run mypy --install-types --non-interactive
           poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
 
       - name: Pycodestyle check
