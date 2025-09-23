@@ -51,6 +51,8 @@ class EvaluatorTextToImage(BaseModel):
             scores_difference_original_unlearned: List[float] = []
             latencies: List[float] = []
 
+            print(f'Prompts to {scope}: {prompts}')
+
             for prompt in prompts:
                 t0 = time.time()
                 image_original = self.pipeline_original(prompt).images[0]  # type: ignore
