@@ -32,6 +32,10 @@ class EvaluatorTextToImage(BaseModel):
     metric_clip: MetricImageTextSimilarity
     compute_runtimes: bool = True
 
+    def model_post_init(self, __context: dict) -> None:
+        self.metric_clip = MetricImageTextSimilarity(['clip'])
+        
+    
     def evaluate(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         eval_results = []
         images = {}
