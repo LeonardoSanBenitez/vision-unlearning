@@ -61,6 +61,7 @@ class EvaluatorTextToImage(BaseModel):
                 score_original = self.metric_clip.score(image_original, prompt)['clip']
                 score_learned = self.metric_clip.score(image_learned, prompt)['clip']
                 score_unlearned = self.metric_clip.score(image_unlearned, prompt)['clip']
+                print(f'scores for prompt "{prompt}": original={score_original:.4f}, learned={score_learned:.4f}, unlearned={score_unlearned:.4f}')
                 scores_original.append(score_original)
                 scores_learned.append(score_learned)
                 scores_unlearned.append(score_unlearned)

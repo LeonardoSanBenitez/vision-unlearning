@@ -16,6 +16,7 @@ class MetricImageTextSimilarity(Metric):
     def model_post_init(self, __context: dict) -> None:
         # Download the models, if required
         if 'clip' in self.metrics:
+            print("Loading CLIP model...")
             self._clip_score_fn = partial(clip_score, model_name_or_path="openai/clip-vit-base-patch16")
 
     def score(self, image: Union[Image.Image, np.ndarray], text: str) -> Dict[str, float]:
@@ -32,6 +33,6 @@ class MetricImageTextSimilarity(Metric):
         # Calculate
         for metric in self.metrics:
             if metric == 'clip':
-                assert self._clip_score_fn is not None
+                assert self._clip_score_fn is not None, "Clip model was not loaded!"
                 scores[metric] = float(self._clip_score_fn(torch.from_numpy(image_int), text).detach())
         return scores
