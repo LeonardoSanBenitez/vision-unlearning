@@ -1,43 +1,98 @@
-name: Automated Testing
+# name: Automated Testing
 
-on: 
+# on: 
+#   push:
+#     branches: ["soham"]
+#   pull_request:
+#     branches: ["soham"]
+
+# jobs:
+#   test:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout repo
+#         uses: actions/checkout@v4
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with: 
+#           python-version: "3.10"
+
+#       - name: Install Poetry
+#         run: pip install poetry
+
+#       - name: Install dependencies with Poetry
+#         run: poetry install --no-interaction --no-root
+
+#       - name: Mypy check
+#         run: |
+#           echo '\n\n-------------\nMypy check\n------------'
+#           poetry run mypy --install-types --non-interactive > /dev/null 2>&1
+#           poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
+
+#       - name: Pycodestyle check
+#         run: |
+#           echo '\n\n-------------\nPycodestyle check\n------------'
+#           poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
+
+#       - name: Pytest
+#         run: |
+#           echo '\n\n-------------\nPytest\n------------------'
+#           mkdir -p reports
+#           poetry run pytest --junitxml=reports/tests-results.xml ./tests
+
+# Changes for adding seperate batches for each of the 3 tests
+
+name : Automated Testing
+
+on:
   push:
-    branches: ["soham"]
+    branches : ["soham"]
   pull_request:
-    branches: ["soham"]
+    branches : ["soham"]
 
 jobs:
-  test:
+  mypy:
+    name : Mypy Check
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses : actions/checkout@v4
+      - uses : actions/setup-python@v5
+        with : { python-version: "3.10" }
+      - run : pip install poetry
+      - run : poetry install--no-interaction --no-root
+      - run : |
+          echo '----------- Mypy check ---------------'
+          poetry run mypy --install-types --non-interactive ./vision_unlearning
+          poetry run mypy --no-warn-incompatible-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with: 
-          python-version: "3.10"
 
-      - name: Install Poetry
-        run: pip install poetry
 
-      - name: Install dependencies with Poetry
-        run: poetry install --no-interaction --no-root
-
-      - name: Mypy check
-        run: |
-          echo '\n\n-------------\nMypy check\n------------'
-          poetry run mypy --install-types --non-interactive > /dev/null 2>&1
-          poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
-
-      - name: Pycodestyle check
-        run: |
-          echo '\n\n-------------\nPycodestyle check\n------------'
+  pycodestyle:
+    name : Pycodestyle Check
+    runs-on : ubuntu-latest
+    steps:
+      - uses : actions/checkout@v4
+      - uses  : actions/setup-python@v5
+        with : { python-version: "3:10" }
+      - run : pip install poetry
+      - run : poetry install--no-interaction --no-root
+      - run : |
+          echo '----------- Pycodestyle check ----------'
           poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
 
-      - name: Pytest
-        run: |
-          echo '\n\n-------------\nPytest\n------------------'
-          mkdir -p reports
+  pytest:
+    name : Pytest Check
+    runs-on : 'ubuntu-latest'
+    steps:
+      - uses : actions/checkout@v4
+      - uses : actions/setup-python@v5
+        with : { python-version: "3.10"}
+      - run : pip install poetry
+      - run : poetry install--no-interaction --no-root
+      - run : |
+          echo '------------ Pytest check -------------'
           poetry run pytest --junitxml=reports/tests-results.xml ./tests
+            
+

@@ -1,6 +1,11 @@
 # Vision Unlearning
 
-![CI](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg)
+<!-- ![CI](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg) -->
+
+<!-- Seperate batches for 3 tests-->
+![Mypy](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg?branch=soham&job=mypy)
+![Pycodestyle](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg?branch=soham&job=pycodestyle)
+![Pytest](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg?branch=soham&job=pytest)
 
 [Documentation](https://vision-unlearning.readthedocs.io/)
 
