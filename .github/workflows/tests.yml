@@ -83,7 +83,7 @@ jobs:
           poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
 
   pytest:
-    name : Pytest Check
+    name : Pytest Check + Test Coverage
     runs-on : 'ubuntu-latest'
     steps:
       - uses : actions/checkout@v4
@@ -91,8 +91,12 @@ jobs:
         with : { python-version: "3.10"}
       - run : pip install poetry
       - run : poetry install --no-interaction --no-root
+      - run : poetry add --dev pytest-cov
       - run : |
           echo '------------ Pytest check -------------'
-          poetry run pytest --junitxml=reports/tests-results.xml ./tests
+          poetry run pytest --cov=vision_unlearning --cov-report=xml --junitxml=reports/tests-results.xml ./tests
+      
+      - name : Upload test Coverage
+        uses : codecov/codecov-action@v4
 
 
