@@ -48,6 +48,8 @@ jobs:
           poetry run pytest ./tests
 
   coverage:
+    name : Install repo as a package
+    run : pip install -e .
     name: Coverage Check
     runs-on: ubuntu-latest
     steps:
