@@ -6,6 +6,7 @@
 ![Mypy](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg?branch=soham&job=mypy)
 ![Pycodestyle](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg?branch=soham&job=pycodestyle)
 ![Pytest](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg?branch=soham&job=pytest)
+![Coverage](https://codecov.io/gh/LeonardoSanBenitez/vision-unlearning/branch/soham/graph/badge.svg)
 
 [Documentation](https://vision-unlearning.readthedocs.io/)
 
