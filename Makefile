@@ -14,7 +14,7 @@ define exec_docker
 	#  $(1): Command to run
 	# Returns:
 	#  Output of the command
-	docker-compose exec notebooks $(1)
+	docker compose exec notebooks $(1)
 endef
 
 define is_docker_running
@@ -23,7 +23,7 @@ define is_docker_running
 	#  $(1): Container name
 	# Returns:
 	#  Exit code 0 if running, 1 if not running
-	docker-compose ps --filter "status=running" | grep $(1) | grep -v Exit >/dev/null
+	docker compose ps --filter "status=running" | grep $(1) | grep -v Exit >/dev/null
 endef
 
 ##############################
@@ -39,16 +39,16 @@ run-interactive-docker:
 		echo 'Container is already running.'
 	else
 		echo 'Container is not running. Starting it now...'
-		docker-compose down
-		docker-compose up -d
+		docker compose down
+		docker compose up -d
 	fi;
 
 clean-docker:
-	docker-compose down --rmi all
+	docker compose down --rmi all
 	make run-docker
 
 stop-docker:
-	docker-compose down
+	docker compose down
 
 ##############################
 # Targets for testing

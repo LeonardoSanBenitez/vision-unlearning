@@ -1,4 +1,3 @@
-version: "3.5"
 services:
   notebooks:
     container_name: vision-unlearning-notebooks
