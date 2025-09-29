@@ -42,20 +42,26 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.10" }
 
+      # Free space before installing anything
+      - name: Free Disk Space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /opt/ghc \
+                      /usr/share/dotnet \
+                      /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL
+          echo "After cleanup:"
+          df -h
+
       - run: pip install poetry
       - run: poetry install --no-interaction --no-root
       - run: poetry add --dev pytest-cov
-      - run: pip install -e . 
+
+      - run: pip install -e .
+
       - run: |
           echo '------------ Pytest + Coverage check -------------'
-          # Clean up space
-          df -h
-          pip uninstall -y triton nvidia-pyindex nvidia-pip nvidia-cudnn-cu12 || true
-          df -h
-          pip cache purge
-          df -h
-          
-          # Run tests with coverage
           poetry run pytest --cov=vision_unlearning \
                             --cov-report=xml \
                             --junitxml=reports/tests-results.xml ./tests
