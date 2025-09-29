@@ -62,6 +62,7 @@ jobs:
 
       - run: |
           echo '------------ Pytest + Coverage check -------------'
+          cd vision_unlearning
           poetry run pytest --cov=vision_unlearning \
                             --cov-report=xml \
                             --junitxml=reports/tests-results.xml ./tests
