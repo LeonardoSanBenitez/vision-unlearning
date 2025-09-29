@@ -45,7 +45,7 @@ jobs:
       - run: pip install poetry
       - run: poetry install --no-interaction --no-root
       - run: poetry add --dev pytest-cov
-
+      - run: pip install -e . 
       - run: |
           echo '------------ Pytest + Coverage check -------------'
           # Clean up space
