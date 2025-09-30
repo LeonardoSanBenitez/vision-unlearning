@@ -62,9 +62,10 @@ jobs:
       - name: Run tests with coverage
         run: |
           echo '------------ Pytest + Coverage check -------------'
-          poetry run pytest --cov=vision_unlearning \
-                            --cov-report=xml \
-                            --junitxml=reports/tests-results.xml tests
+          poetry run pytest --cov=vision_unlearning --cov-report=xml:coverage.xml --junitxml=reports/tests-results.xml tests
 
       - name: Upload Coverage Report
         uses: codecov/codecov-action@v4
+        with:
+          file : ./coverage.xml
+          fail_ci_if_error : true
