@@ -34,8 +34,8 @@ jobs:
           echo '----------- Pycodestyle check ----------'
           poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
 
-    tests:
-    name: Pytest + Coverage
+  pytest_coverage:
+    name : Pytest + Coverage  
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
