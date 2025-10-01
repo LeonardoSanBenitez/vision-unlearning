@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ["soham"]
 
+permissions:
+  contents: write
+
 jobs:
   mypy:
     name: Mypy Check
