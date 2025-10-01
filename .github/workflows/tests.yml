@@ -62,10 +62,27 @@ jobs:
       - name: Run tests with coverage
         run: |
           echo '------------ Pytest + Coverage check -------------'
-          poetry run pytest --cov=vision_unlearning --cov-report=xml:coverage.xml --junitxml=reports/tests-results.xml tests
+          poetry run pytest --cov=vision_unlearning \
+          --cov-report=xml:coverage.xml \
+          --cov-report=json:coverage.json \
+          --junitxml=reports/tests-results.xml tests
 
-      - name: Upload Coverage Report
-        uses: codecov/codecov-action@v4
-        with:
-          file : ./coverage.xml
-          fail_ci_if_error : true
+      - name: Create the Sheilds.io badge
+        run: |
+          COVERAGE=$(jq '.totals.percent_covered_display' coverage.json | tr -d '"')
+          COLOR="red"
+          if [ ${COVERAGE%.*} -ge 90 ]; then COLOR="brightgreen"; 
+          elif [ ${COVERAGE%.*} -ge 75 ]; then COLOR="green"; 
+          elif [ ${COVERAGE%.*} -ge 50 ]; then COLOR="yellow"; fi
+          echo '{ "schemaVersion": 1, "label": "coverage", "message": "'$COVERAGE'%", "color": "'$COLOR'" }' > coverage-badge.json  
+      
+      - name: Push badge to branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin
+          git checkout -B soham
+          mv coverage-badge.json coverage.json
+          git add coverage.json
+          git commit -m "Update coverage badge"
+          git push origin soham --force
