@@ -1,0 +1,20 @@
+name: Pycodestyle Check
+
+on:
+  push:
+    branches: ["soham"]
+  pull_request:
+    branches: ["soham"]
+
+jobs:
+  pycodestyle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: pip install poetry
+      - run: poetry install --no-interaction --no-root
+      - run: |
+          echo '----------- Pycodestyle check ----------'
+          poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
