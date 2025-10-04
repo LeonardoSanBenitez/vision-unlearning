@@ -59,15 +59,16 @@ jobs:
           git fetch origin
           git checkout -B soham
           
-          if cmp -s coverage-badge.json coverage.json; then
-              echo "No changes detected. Skipping commit."
-          else
-              echo "Commiting new badge"
-              mv coverage-badge.json coverage.json
-              git add coverage.json
-              git restore pyproject.toml
-              git clean -fd
+          mv coverage-badge.json coverage.json
+                    git add coverage.json
+          
+          git restore pyproject.toml
+          git clean -fd
+          
+          # Commit only if there are staged changes
+          if ! git diff --cached --quiet; then
               git commit -m "Update coverage badge"
               git push origin soham
+          else
+              echo "No changes to commit. Skipping."
           fi
-
