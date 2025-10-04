@@ -59,13 +59,14 @@ jobs:
           git fetch origin
           git checkout -B soham
           
-          # Compare files
           if cmp -s coverage-badge.json coverage.json; then
               echo "No changes detected. Skipping commit."
           else
+              echo "Commiting new badge"
               mv coverage-badge.json coverage.json
               git add coverage.json
+              git clean -fd
               git commit -m "Update coverage badge"
-              git push origin soham --force
+              git push origin soham
           fi
 
