@@ -55,9 +55,17 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
           git fetch origin
           git checkout -B soham
-          mv coverage-badge.json coverage.json
-          git add coverage.json
-          git commit -m "Update coverage badge"
-          git push origin soham --force
+          
+          # Compare files
+          if cmp -s coverage-badge.json coverage.json; then
+              echo "No changes detected. Skipping commit."
+          else
+              mv coverage-badge.json coverage.json
+              git add coverage.json
+              git commit -m "Update coverage badge"
+              git push origin soham --force
+          fi
+
