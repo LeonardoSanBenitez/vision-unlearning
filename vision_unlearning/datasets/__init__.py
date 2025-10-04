@@ -3,3 +3,4 @@ from vision_unlearning.datasets.cifar import *
 from vision_unlearning.datasets.coco import *
 from vision_unlearning.datasets.imagenette import *
 from vision_unlearning.datasets.local import *
+from vision_unlearning.datasets.others import *

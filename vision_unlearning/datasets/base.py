@@ -10,6 +10,10 @@ import torch
 from torchvision import transforms
 from torchvision.datasets.vision import VisionDataset
 from torch.utils.data import Subset, DataLoader
+from vision_unlearning.utils.logger import get_logger
+
+
+logger = get_logger('datasets')
 
 
 class UnlearnDatasetSplit(Enum):

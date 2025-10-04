@@ -80,6 +80,9 @@ urllib3 = "<=2.0.0"
 black = "*"
 pydantic = "*"
 PyYAML = "*"
+imblearn = "*"
+Unidecode = "~1.4.0"
+deepface = "~0.0.95"  # TODO: maybe this should be made optional
 
 # Needed only for development/build
 # TODO: declare them separately
