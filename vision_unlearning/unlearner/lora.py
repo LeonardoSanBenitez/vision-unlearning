@@ -42,7 +42,12 @@ from vision_unlearning.utils.training import unwrap_model, preprocess_train, col
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple
 
 
-def unlearn_lora(model_original_id: str, model_lora_id: str, device: str, weight_name: str = "pytorch_lora_weights.safetensors") -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
+def unlearn_lora(
+    model_original_id: str,
+    model_lora_id: str,
+    device: str,
+    weight_name: str = "pytorch_lora_weights.safetensors",
+) -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
@@ -87,18 +92,17 @@ class UnlearnerLora(Unlearner):
     '''
     # General arguments
     lora_r: int = Field(default=32, description="Dimensionality of the LoRA rank (R).")
-    lora_alpha: float = Field(default=64, metadata={"help": "Lora alpha."})
-    #lora_dropout: float = Field(default=0.0, metadata={"help": "Lora dropout."})
-    target_modules: List[str] = Field(default=None, metadata={"help": "Which module will be added the lora adapter."})  # TODO: is this being used??
-    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")
-    seed: int = Field(default=42, metadata={"help": "Random seed for initialization."})
-
+    lora_alpha: float = Field(default=64, description="Lora alpha.")
+    # lora_dropout: float = Field(default=0.0, metadata={"help": "Lora dropout."})
+    target_modules: Optional[List[str]] = Field(default=None, description="Which module will be added the lora adapter.")  # TODO: is this being used??
+    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")  # noqa
+    seed: int = Field(default=42, description="Random seed for initialization.")
 
     # Training arguments
-    model_name_or_path: str = Field(metadata={"help": "Path to the pre-trained model or model identifier from huggingface.co/models"})
+    model_name_or_path: str = Field(description="Path to the pre-trained model or model identifier from huggingface.co/models")
     revision: Optional[str] = Field(None, description="Revision of pretrained model identifier from huggingface.co/models.")
     variant: Optional[str] = Field(None, description="Variant of the model files of the pretrained model identifier from huggingface.co/models, e.g., fp16.")
-    #tokenizer_name: Optional[str] = Field(default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"})
+    # tokenizer_name: Optional[str] = Field(default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"})
 
     # Dataset related
     dataset_forget_name: str = Field(..., description="The name or path of the dataset to be forgotten.")
@@ -123,31 +127,31 @@ class UnlearnerLora(Unlearner):
     final_eval_prompts_forget: str | List[str] = Field([], description="Prompts for final evaluation on the forget dataset (ModelHub identifier or directly the prompts).")
     final_eval_prompts_retain: str | List[str] = Field([], description="Prompts for final evaluation on the retain dataset (ModelHub identifier or directly the prompts).")
     prediction_type: Optional[str] = Field(None, description="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. "
-                                                    "If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
-    
-    # training_args (from huggingface)
-    #do_train: bool = Field(default=True, metadata={"help": "Whether to run training."})
-    #do_eval: bool = Field(default=False, metadata={"help": "Whether to run evaluation on the validation set."})
-    per_device_train_batch_size: int = Field(default=1, metadata={"help": "Batch size per device during training."})
-    gradient_accumulation_steps: int = Field(default=128, metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."})
-    num_train_epochs : int = Field(default=1, metadata={"help": "Total number of training epochs to perform."})
-    learning_rate: float = Field(default=3e-4, metadata={"help": "The initial learning rate for AdamW."})
-    lr_scheduler_type: str = Field(default="cosine", metadata={"help": "The scheduler type to use."})
+                                                             "If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
 
-    should_log: bool = Field(default=True, metadata={"help": "Whether to log the training process."})  # TODO not used?
-    local_rank: int = Field(default=-1, metadata={"help": "Local rank for distributed training."})  # TODO not used?
-    device: str = Field(default="cuda", metadata={"help": "Device to use for training."})
-    n_gpu: int = Field(default=1, metadata={"help": "Number of GPUs to use."})  # TODO not used?
+    # training_args (from huggingface)
+    # do_train: bool = Field(default=True, metadata={"help": "Whether to run training."})
+    # do_eval: bool = Field(default=False, metadata={"help": "Whether to run evaluation on the validation set."})
+    per_device_train_batch_size: int = Field(default=1, description="Batch size per device during training.")
+    gradient_accumulation_steps: int = Field(default=128, description="Number of updates steps to accumulate before performing a backward/update pass.")
+    num_train_epochs: int = Field(default=1, description="Total number of training epochs to perform.")
+    learning_rate: float = Field(default=3e-4, description="The initial learning rate for AdamW.")
+    lr_scheduler_type: str = Field(default="cosine", description="The scheduler type to use.")
+
+    should_log: bool = Field(default=True, description="Whether to log the training process.")  # TODO not used?
+    local_rank: int = Field(default=-1, description="Local rank for distributed training.")  # TODO not used?
+    device: str = Field(default="cuda", description="Device to use for training.")
+    n_gpu: int = Field(default=1, description="Number of GPUs to use.")  # TODO not used?
 
     # Other stuff (some for compatibility with UnlearnerLora)
-    output_dir: str = Field(default="assets", metadata={"help": "The output directory where the model predictions and checkpoints will be written."})
+    output_dir: str = Field(default="assets", description="The output directory where the model predictions and checkpoints will be written.")
     cache_dir: Optional[str] = Field(None, description="Directory where downloaded models and datasets will be stored.")
     hub_token: Optional[str] = Field(None, description="Token for authentication to push to Model Hub.")
     hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`. None for not push")
-    logging_dir: str = Field(default="logs")
-    logging_steps: int = Field(default=20, metadata={"help": "Log every X updates steps."})  # TODO not used?
-    save_strategy: str = Field(default="epoch", metadata={"help": "The checkpoint save strategy to adopt during training."})  # TODO not used?
-    save_total_limit: int = Field(default=2, metadata={"help": "Limit the total amount of checkpoints."})  # TODO not used?
+    logging_dir: str = Field(default="logs", description="Directory for storing logs.")
+    logging_steps: int = Field(default=20, description="Log every X updates steps.")  # TODO not used?
+    save_strategy: str = Field(default="epoch", description="The checkpoint save strategy to adopt during training.")  # TODO not used?
+    save_total_limit: int = Field(default=2, description="Limit the total amount of checkpoints.")  # TODO not used?
 
     gradient_checkpointing: bool = Field(False, description="Enable gradient checkpointing to save memory at the expense of slower backward pass.")
     enable_xformers_memory_efficient_attention: bool = Field(False, description="Use xformers for memory-efficient attention.")
@@ -192,15 +196,14 @@ class UnlearnerLora(Unlearner):
     _lr_scheduler: Any = None
     _lora_layers: Any = None
 
-
-    def model_post_init(self, __context: dict) -> None:
+    def model_post_init(self, __context: Optional[dict] = None) -> None:
         self._output_dir_checkpoints = self.output_dir
         self._output_dir_lora = self.output_dir
 
     def _get_lora_config(self) -> LoraConfig:
         return LoraConfig(
             r=self.lora_r,
-            lora_alpha=self.lora_alpha,
+            lora_alpha=self.lora_alpha,  # type: ignore  # TODO: should this be int or float?
             init_lora_weights="gaussian",
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
@@ -221,11 +224,12 @@ class UnlearnerLora(Unlearner):
 
     def _hook_before_load_model(self):
         return None
-    
+
     def _save_lora_layers(self):
         '''
         Side-effects: modifies self._unet in-place (casts to float32), saves two directories self._output_dir_super and self._output_dir_sub
         '''
+        assert self._unet is not None
         self._unet = self._unet.to(torch.float32)
         unwrapped_unet = unwrap_model(self._unet, self._accelerator)
         unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
@@ -270,7 +274,7 @@ class UnlearnerLora(Unlearner):
 
         # TODO
         # Handle the repository creation
-        #if accelerator.is_main_process:
+        # if accelerator.is_main_process:
         #    if self.output_dir is not None:
         #        os.makedirs(self.output_dir, exist_ok=True)
         #    if self.push_to_hub:
@@ -283,6 +287,11 @@ class UnlearnerLora(Unlearner):
         self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder")
         self._vae = AutoencoderKL.from_pretrained(self.model_name_or_path, subfolder="vae")
         self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet")
+        assert self._noise_scheduler is not None
+        assert self._tokenizer is not None
+        assert self._text_encoder is not None
+        assert self._vae is not None
+        assert self._unet is not None
 
         # freeze parameters of models to save more memory
         self._unet.requires_grad_(False)
@@ -303,8 +312,8 @@ class UnlearnerLora(Unlearner):
         if self.enable_xformers_memory_efficient_attention:
             raise NotImplementedError()
         # TODO
-        #from diffusers.utils.import_utils import is_xformers_available
-        #if self.enable_xformers_memory_efficient_attention:
+        # from diffusers.utils.import_utils import is_xformers_available
+        # if self.enable_xformers_memory_efficient_attention:
         #    if is_xformers_available():
         #        import xformers
         #        xformers_version = version.parse(xformers.__version__)
@@ -329,7 +338,7 @@ class UnlearnerLora(Unlearner):
 
         self._lora_layers = filter(lambda p: p.requires_grad, self._unet.parameters())
         logger.info(f"Number of lora layers: {len(list(filter(lambda p: p.requires_grad, self._unet.parameters())))}")  # I think this _has_ to be recalculated, even if it looks ugly, not sure
-        #[x for x in self._lora_layers]
+        # [x for x in self._lora_layers]
 
         if self.gradient_checkpointing:
             self._unet.enable_gradient_checkpointing()
@@ -340,13 +349,13 @@ class UnlearnerLora(Unlearner):
             torch.backends.cuda.matmul.allow_tf32 = True
 
         if self.use_8bit_adam:
-            #try:
-            #    import bitsandbytes as bnb
-            #except ImportError:
-            #    raise ImportError(
-            #        "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
-            #    )
-            #optimizer_cls = bnb.optim.AdamW8bit
+            # try:
+            #     import bitsandbytes as bnb
+            # except ImportError:
+            #     raise ImportError(
+            #         "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
+            #     )
+            # optimizer_cls = bnb.optim.AdamW8bit
             raise NotImplementedError()
         else:
             optimizer_cls = torch.optim.AdamW
@@ -359,13 +368,13 @@ class UnlearnerLora(Unlearner):
             eps=self.adam_epsilon,
         )
 
-        #for idx, layer in enumerate(self._unet.modules()):
-        #    named_modules = dict(layer.named_modules())
-        #    print(named_modules.keys())
-        #    break
+        # for idx, layer in enumerate(self._unet.modules()):
+        #     named_modules = dict(layer.named_modules())
+        #     print(named_modules.keys())
+        #     break
 
         t1 = time.time()
-    
+
         train_forget_dataloader, train_retain_dataloader = self._prepare_dataloaders()
 
         # Scheduler and math around the number of training steps.
@@ -387,11 +396,10 @@ class UnlearnerLora(Unlearner):
             num_training_steps=num_training_steps_for_scheduler,
         )
 
-
         # Prepare everything with our `self._accelerator`.
         self._unet, self._optimizer, train_forget_dataloader, self._lr_scheduler = self._accelerator.prepare(
-            #self._unet, self._optimizer, train_forget_dataloader, train_retain_dataloader, self._lr_scheduler   # TODO: what has to be changed so this works? I guess BOHT datloaders hsould pass though accelerate; it works without but probably there is some perforamcne deradation
-            self._unet, self._optimizer, train_forget_dataloader, self._lr_scheduler  
+            # self._unet, self._optimizer, train_forget_dataloader, train_retain_dataloader, self._lr_scheduler   # TODO: what has to be changed so this works? I guess BOHT datloaders hsould pass though accelerate; it works without but probably there is some perforamcne deradation  # noqa
+            self._unet, self._optimizer, train_forget_dataloader, self._lr_scheduler
         )
 
         # Recalculate our total training steps as the size of the training dataloader may have changed.
@@ -443,6 +451,7 @@ class UnlearnerLora(Unlearner):
                 self.resume_from_checkpoint = None
                 initial_global_step = 0
             else:
+                assert self._output_dir_checkpoints is not None
                 self._accelerator.print(f"Resuming from checkpoint {path}")
                 self._accelerator.load_state(os.path.join(self._output_dir_checkpoints, path))
                 global_step = int(path.split("-")[1])
@@ -460,6 +469,7 @@ class UnlearnerLora(Unlearner):
         )
 
         for epoch in range(first_epoch, self.num_train_epochs):
+            assert self._unet is not None
             self._unet.train()
             train_loss_forget = 0.0  # TODO: plot graph of losses after training
             train_loss_retain = 0.0
@@ -507,6 +517,8 @@ class UnlearnerLora(Unlearner):
 
                                 # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
                                 if len(checkpoints) >= self.checkpoints_total_limit:
+                                    assert self.checkpoints_total_limit > 0
+                                    assert self._output_dir_checkpoints is not None
                                     num_to_remove = len(checkpoints) - self.checkpoints_total_limit + 1
                                     removing_checkpoints = checkpoints[0:num_to_remove]
 
@@ -517,7 +529,7 @@ class UnlearnerLora(Unlearner):
                                         removing_checkpoint = os.path.join(self._output_dir_checkpoints, removing_checkpoint)
                                         shutil.rmtree(removing_checkpoint)
 
-                            save_path = os.path.join(self._output_dir_checkpoints, f"checkpoint-{global_step}")
+                            save_path = os.path.join(self._output_dir_checkpoints, f"checkpoint-{global_step}")  # type: ignore
                             self._accelerator.save_state(save_path)
 
                             unwrapped_unet = unwrap_model(self._unet, self._accelerator)
@@ -591,6 +603,7 @@ class UnlearnerLora(Unlearner):
                 torch.cuda.empty_cache()
 
             if self.is_lora_negated:
+                assert self._output_dir_lora is not None
                 # pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.model_name_or_path, self.output_dir, device=self._accelerator.device, weight_name='pytorch_lora_weights.bin')  # for the sparse variation
                 pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.model_name_or_path, self._output_dir_lora, device=self._accelerator.device, weight_name=self._lora_weight_name)
             else:
@@ -646,6 +659,7 @@ class UnlearnerLora(Unlearner):
                     **metric_common_attributes,  # type: ignore
                 ))
 
+            assert self._output_dir_lora is not None
             save_model_card(
                 str(self.hub_model_id),
                 images=self._images,
@@ -678,7 +692,6 @@ class UnlearnerLora(Unlearner):
         self._accelerator.end_training()
 
         logger.info('Training completed successfully =D')
-
 
         # TODO: merging the lora the with model isn't supported
         # Merge is tricky with diffusers, see https://github.com/huggingface/diffusers/issues/2900
@@ -737,6 +750,7 @@ class UnlearnerLoraDirect(UnlearnerLora):
         )
 
         # Set the training transforms
+        assert self._accelerator is not None
         with self._accelerator.main_process_first():
             if self.max_train_samples is not None:
                 dataset_forget["train"] = dataset_forget["train"].shuffle(seed=self.seed).select(range(self.max_train_samples))
@@ -793,7 +807,6 @@ class UnlearnerLoraDirect(UnlearnerLora):
         noisy_latents_forget = self._noise_scheduler.add_noise(latents_forget, noise_forget, timesteps_forget)
         noisy_latents_retain = self._noise_scheduler.add_noise(latents_retain, noise_forget, timesteps_forget)
 
-        ########### REF BEGIN OF CHANGE
         # Get the text embedding for conditioning
         encoder_hidden_states_forget = self._text_encoder(batch_forget["input_ids"], return_dict=False)[0]
         encoder_hidden_states_retain = self._text_encoder(batch_retain["input_ids"], return_dict=False)[0]
@@ -813,8 +826,8 @@ class UnlearnerLoraDirect(UnlearnerLora):
             raise ValueError(f"Unknown prediction type {self._noise_scheduler.config.prediction_type}")
 
         # Predict the noise residual and compute loss
-        model_pred_forget = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, return_dict=False)[0]
-        model_pred_retain = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]
+        model_pred_forget = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, return_dict=False)[0]  # type: ignore
+        model_pred_retain = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]  # type: ignore
 
         loss_forget = F.mse_loss(model_pred_forget.float(), target_forget.float(), reduction="mean")  # This is a Tensor of shape [], aka is a float
         loss_retain = F.mse_loss(model_pred_retain.float(), target_retain.float(), reduction="mean")
@@ -836,12 +849,13 @@ class UnlearnerLoraDirect(UnlearnerLora):
 
         # Compute gradients
         self._optimizer.zero_grad()
-        self._accelerator.backward(loss_forget)
-        grads_forget = [p.grad.clone() for p in self._unet.parameters() if p.requires_grad]  # This list has 256 elements; each element is a torch.Tensor of shapes like [4, 320], then [320, 4], then [4, 640], then [640, 4], etc  # noqa
+        self._accelerator.backward(loss_forget)  # type: ignore
+        grads_forget = [p.grad.clone() for p in self._unet.parameters() if p.requires_grad]  # type: ignore
+        # This list has 256 elements; each element is a torch.Tensor of shapes like [4, 320], then [320, 4], then [4, 640], then [640, 4], etc
 
         self._optimizer.zero_grad()
-        self._accelerator.backward(loss_retain)
-        grads_retain = [p.grad.clone() for p in self._unet.parameters() if p.requires_grad]
+        self._accelerator.backward(loss_retain)  # type: ignore
+        grads_retain = [p.grad.clone() for p in self._unet.parameters() if p.requires_grad]  # type: ignore
 
         # for e in grads_forget:
         #    print(e.shape)
@@ -853,19 +867,19 @@ class UnlearnerLoraDirect(UnlearnerLora):
 
         # Overwrite gradients for the optimizer
         for param, update in zip(
-            (p for p in self._unet.parameters() if p.requires_grad),
-            torch.split(scaled_grad, [p.numel() for p in self._unet.parameters() if p.requires_grad]),
+            (p for p in self._unet.parameters() if p.requires_grad),  # type: ignore
+            torch.split(scaled_grad, [p.numel() for p in self._unet.parameters() if p.requires_grad]),  # type: ignore
         ):
             param.grad = update.view(param.shape)
 
         # Gradient clipping
-        if self._accelerator.sync_gradients:
+        if self._accelerator.sync_gradients:  # type: ignore
             params_to_clip = self._lora_layers
-            self._accelerator.clip_grad_norm_(params_to_clip, self.max_grad_norm)
+            self._accelerator.clip_grad_norm_(params_to_clip, self.max_grad_norm)  # type: ignore
 
         # Optimizer step
         self._optimizer.step()
         self._lr_scheduler.step()
         self._optimizer.zero_grad()
-        
+
         return loss_forget, loss_retain

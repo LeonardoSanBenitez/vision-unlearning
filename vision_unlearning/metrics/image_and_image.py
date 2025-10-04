@@ -9,12 +9,14 @@ import tempfile
 from typing import Union
 from PIL import Image
 
+
 class MetricImageImage(Metric):
     _loss_alex: lpips.lpips.LPIPS
     _loss_vgg: Optional[lpips.lpips.LPIPS]
     metrics: List[Literal['rmse', 'psnr', 'ssim', 'fsim', 'issm', 'sre', 'sam', 'uiq', 'lpips_alex', 'lpips_vgg']]
     # SSIM interpertation: 1.0 → Images are identical. -1.0 → Images are totaly different
-    def model_post_init(self, __context: dict) -> None:
+
+    def model_post_init(self, __context: Optional[dict]) -> None:
         if 'lpips_alex' in self.metrics:
             self._loss_alex = lpips.LPIPS(net='alex')
         if 'lpips_vgg' in self.metrics:
@@ -33,7 +35,7 @@ class MetricImageImage(Metric):
     def _score_from_paths(self, org_img_path: str, pred_img_path: str) -> Dict[str, float]:
         distances = {}
         metrics_remaining = self.metrics.copy()
-    
+
         if 'lpips_alex' in metrics_remaining:
             distances['lpips_alex'] = self._evaluate_lpips(org_img_path, pred_img_path, self._loss_alex)
             metrics_remaining.remove('lpips_alex')
@@ -42,14 +44,14 @@ class MetricImageImage(Metric):
             metrics_remaining.remove('lpips_vgg')
         if len(metrics_remaining) > 0:
             distances.update(evaluation(org_img_path, pred_img_path, metrics_remaining))
-    
+
         assert len(distances) == len(self.metrics)
         return distances  # TODO: ensure distances are float
-    
+
     def score(self, org_img: Union[str, Image.Image], pred_img: Union[str, Image.Image]) -> Dict[str, float]:
         if isinstance(org_img, str) and isinstance(pred_img, str):
             return self._score_from_paths(org_img, pred_img)
-    
+
         with tempfile.NamedTemporaryFile(suffix=".png") as tmp_org, tempfile.NamedTemporaryFile(suffix=".png") as tmp_pred:
             if isinstance(org_img, Image.Image):
                 org_img.save(tmp_org, format="PNG")
@@ -57,12 +59,12 @@ class MetricImageImage(Metric):
                 org_path = tmp_org.name
             else:
                 org_path = org_img
-    
+
             if isinstance(pred_img, Image.Image):
                 pred_img.save(tmp_pred, format="PNG")
                 tmp_pred.flush()
                 pred_path = tmp_pred.name
             else:
                 pred_path = pred_img
-    
+
             return self._score_from_paths(org_path, pred_path)

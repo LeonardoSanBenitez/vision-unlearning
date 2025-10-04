@@ -13,7 +13,7 @@ class MetricImageTextSimilarity(Metric):
     metrics: List[Literal['clip']]
     _clip_score_fn: Optional[Callable] = None
 
-    def model_post_init(self, __context: dict) -> None:
+    def model_post_init(self, __context: Optional[dict]) -> None:
         # Download the models, if required
         if 'clip' in self.metrics:
             self._clip_score_fn = partial(clip_score, model_name_or_path="openai/clip-vit-base-patch16")

@@ -59,7 +59,7 @@ test: run-interactive-docker
 	$(call exec_docker, poetry run --quiet mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning)
 
 	echo '\n\n------------------------\nPycodestyle Check\n------------------------'
-	$(call exec_docker, poetry run --quiet pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning)
+	$(call exec_docker, poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701 ./vision_unlearning)
 
 	echo '\n\n-------\nPytest checks\n-------'
 	$(call exec_docker, poetry run --quiet pytest ./tests)

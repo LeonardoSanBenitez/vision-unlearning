@@ -14,7 +14,7 @@ class MetricPaintingStyle(Metric):
     device: Union[int, str, torch.device] = 'cuda'
     _pipeline: Optional[ImageClassificationPipeline] = None
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context: Optional[dict] = None) -> None:
         self._pipeline = pipeline('image-classification', model=self.model_path, device=self.device)
 
     def score(self, image: Image.Image) -> Dict[str, bool | float]:

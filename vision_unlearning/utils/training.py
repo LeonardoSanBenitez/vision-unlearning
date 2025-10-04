@@ -47,7 +47,8 @@ def forget_tokens(examples, tokenizer, caption_column, forget_prompt: str):
         captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
     )
     return inputs.input_ids
-    
+
+
 def preprocess_train(examples, tokenizer, caption_column, image_column, train_transforms, concept_overwrite: Optional[str] = None):
     '''
     Adapted from The HuggingFace Inc. team. All rights reserved.

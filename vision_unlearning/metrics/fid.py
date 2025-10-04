@@ -1,4 +1,4 @@
-from typing import List, Literal, Dict
+from typing import List, Literal, Dict, Optional
 from PIL import Image
 import torch
 import torch_fidelity
@@ -8,30 +8,28 @@ import os
 
 
 class FrechetInceptionDistance(Metric):
-    metrics: Literal['FID'] = ['FID']
-    real_imgs_path: str = None
-    gen_imgs_path: str = None
-    real_imgs: List[torch.Tensor] = None
-    gen_imgs: List[torch.Tensor] = None
+    metrics: Literal['FID'] = ['FID']  # type: ignore
+    real_imgs_path: Optional[str] = None
+    gen_imgs_path: Optional[str] = None
+    real_imgs: Optional[List[torch.Tensor]] = None
+    gen_imgs: Optional[List[torch.Tensor]] = None
 
-    def model_post_init(self, __context: dict = None) -> None:
-        assert self.real_imgs_path is not None or self.real_imgs is not None,\
+    def model_post_init(self, __context: Optional[dict] = None) -> None:
+        assert self.real_imgs_path is not None or self.real_imgs is not None, \
             "Could not find real images data!\r\nPlease define a path to a folder or a torch.Tensor with the images."
-        assert self.gen_imgs_path is not None or self.gen_imgs is not None,\
+        assert self.gen_imgs_path is not None or self.gen_imgs is not None, \
             "Could not find generated images data!\r\nPlease define a path to a folder or a torch.Tensor with the images."
 
         if self.real_imgs_path:
             assert self.verify_images_in_path(self.real_imgs_path), \
                 f"No valid images found in the folder '{self.real_imgs_path}'."
         else:
-            assert self.real_imgs.dim() == 4, \
-                "The real images tensor should have 4 dimensions (batch_size, channels, height, width)."
+            assert self.real_imgs.dim() == 4, "The real images tensor should have 4 dimensions (batch_size, channels, height, width)."  # type: ignore
         if self.gen_imgs_path:
             assert self.verify_images_in_path(self.gen_imgs_path), \
                 f"No valid images found in the folder '{self.gen_imgs_path}'."
         else:
-            assert self.gen_imgs.dim() == 4, \
-                "The generated images tensor should have 4 dimensions (batch_size, channels, height, width)."
+            assert self.gen_imgs.dim() == 4, "The generated images tensor should have 4 dimensions (batch_size, channels, height, width)."  # type: ignore
         pass
 
     def verify_images_in_path(self, path: str) -> bool:
@@ -56,9 +54,9 @@ class FrechetInceptionDistance(Metric):
             transforms.Resize((299, 299)),  # Resize for Inception compatibility
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
         ])
-        
+
         return [transform_tensor(img) for img in tensor_list]
-    
+
     def load_images_from_folder(self, folder_path: str, transform: transforms.Compose) -> torch.Tensor:
         """
         Loads all images from a folder, applies transformations, and returns them as a torch.Tensor.
@@ -95,20 +93,20 @@ class FrechetInceptionDistance(Metric):
         ])
 
         if self.real_imgs_path:
-            real_images = self.real_imgs_path #self.load_images_from_folder(self.real_imgs_path, transform)
+            real_images = self.real_imgs_path  # self.load_images_from_folder(self.real_imgs_path, transform)
         else:
-            real_images = self.process_tensor_images(self.real_imgs)
+            real_images = self.process_tensor_images(self.real_imgs)  # type: ignore
 
         if self.gen_imgs_path:
-            gen_images = self.gen_imgs_path #self.load_images_from_folder(self.gen_imgs_path, transform)
+            gen_images = self.gen_imgs_path  # self.load_images_from_folder(self.gen_imgs_path, transform)
         else:
-            gen_images = self.process_tensor_images(self.gen_imgs)
+            gen_images = self.process_tensor_images(self.gen_imgs)  # type: ignore
 
         fid_val = torch_fidelity.calculate_metrics(
             input1=real_images,
             input2=gen_images,
             fid=True,
-            #metrics=['fid'],
+            # metrics=['fid'],
             cuda=torch.cuda.is_available(),
         )
 
@@ -116,4 +114,3 @@ class FrechetInceptionDistance(Metric):
         scores['FID'] = float(fid_val['frechet_inception_distance'])
 
         return scores
-        

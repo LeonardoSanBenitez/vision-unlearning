@@ -31,8 +31,7 @@ class EvaluatorTextToImage(BaseModel):
     prompts_retain: List[str]
     metric_clip: MetricImageTextSimilarity
     compute_runtimes: bool = True
-        
-    
+
     def evaluate(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         eval_results = []
         images = {}
