@@ -48,8 +48,8 @@ jobs:
           COLOR="red"
           if [ ${COVERAGE%.*} -ge 90 ]; then COLOR="brightgreen"; 
           elif [ ${COVERAGE%.*} -ge 75 ]; then COLOR="green"; 
-          elif [ ${COVERAGE%.*} -ge 50 ]; then COLOR="yellow"; fi
-          echo '{ "schemaVersion": 1, "label": "coverage", "message": "'$COVERAGE'", "color": "'$COLOR'" }' > coverage-badge.json  
+          elif [ ${COVERAGE%.*} -ge 10 ]; then COLOR="yellow"; fi
+          echo '{ "schemaVersion": 1, "label": "coverage", "message": "'$COVERAGE'%", "color": "'$COLOR'" }' > coverage-badge.json  
 
       - name: Push badge to branch
         run: |
