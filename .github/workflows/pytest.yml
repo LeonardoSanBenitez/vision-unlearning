@@ -65,6 +65,7 @@ jobs:
               echo "Commiting new badge"
               mv coverage-badge.json coverage.json
               git add coverage.json
+              git restore pyproject.toml
               git clean -fd
               git commit -m "Update coverage badge"
               git push origin soham
