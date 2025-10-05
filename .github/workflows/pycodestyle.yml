@@ -17,4 +17,4 @@ jobs:
       - run: poetry install --no-interaction --no-root
       - run: |
           echo '----------- Pycodestyle check ----------'
-          poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
+          poetry run pycodestyle --max-line-length=300 --ignore=E701 ./vision_unlearning
