@@ -175,9 +175,6 @@ class EvaluatorTextToImage(BaseModel):
                 **metric_common_attributes,  # type: ignore
             ))
 
-
-            #ORIGINAL AND LEARNED
-
         if self.compute_runtimes:
             metric_common_attributes["dataset_name"] = "Forget and Retain sets"
             eval_results.append(EvalResult(

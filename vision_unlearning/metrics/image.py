@@ -10,7 +10,6 @@ from transformers import (
     SiglipForImageClassification,
 )
 from transformers.pipelines.image_classification import ImageClassificationPipeline
-from deepface import DeepFace
 import piq
 
 from vision_unlearning.metrics.base import Metric
@@ -71,14 +70,22 @@ class MetricRace(MetricImage):
     Race classification using Hugging Face model:
     syntheticbot/clip-face-attribute-classifier
 
-    tf_keras = "~2.19.0" 
-    tensorrt = "~10.13.2"
-    blinker = "~1.9.0"
+    Requires the following additional dependencies:
+    * tf_keras = "~2.19.0"
+    * tensorrt = "~10.13.2"
+    * blinker = "~1.9.0"
     """
     # TODO: if we could do this with a HF model model be better, no need for additional libs
 
+    def model_post_init(self, __context: Optional[dict] = None) -> None:
+        try:
+            from deepface import DeepFace  # noqa
+            self.DeepFace = DeepFace
+        except ImportError as e:
+            raise ImportError("DeepFace library is required for MetricRace. Please install it via 'pip install deepface'. Recommended version: deepfaces = '~0.0.95', tf_keras = '~2.19.0', tensorrt = '~10.13.2'") from e
+
     def score(self, image: Image.Image) -> Dict[str, str]:
-        results = DeepFace.analyze(
+        results = self.DeepFace.analyze(
             np.array(image.convert('RGB')),
             actions=['race'],
             enforce_detection=False,

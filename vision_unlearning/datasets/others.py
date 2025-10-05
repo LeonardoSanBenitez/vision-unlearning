@@ -325,7 +325,7 @@ def akc_find_closest_match(df, name: str, group: str) -> Optional[str]:
     assert 'group_pawsome' in df.columns, 'Dataframe must have been enriched with Pawsome data'
     assert 'Other Names' in df.columns, 'Dataframe must have been enriched with Pawsome data'
     name_original = name
-    
+
     # Exact match
     if (df['name_akc'] == name).sum() == 1:
         return name
@@ -436,7 +436,7 @@ def pantheon_find_closest_match(df, name: str) -> Optional[str]:
 
     df_temp = df_temp[df_temp['name'].str.count(' ') == name.count('_')]
     if df_temp.shape[0] == 1:
-        return df_temp['slug'].iloc[0]    
+        return df_temp['slug'].iloc[0]
     if df_temp.shape[0] > 1:
         logger.warning(f'Entity {name} is duplicated in pantheon, by AND match')
         print(df_temp)
