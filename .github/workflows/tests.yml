@@ -1,0 +1,91 @@
+# name: Automated Testing
+
+# on:
+#   push:
+#     branches: ["soham"]
+#   pull_request:
+#     branches: ["soham"]
+
+# permissions:
+#   contents: write
+
+# jobs:
+#   mypy:
+#     name: Mypy Check
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with: { python-version: "3.10" }
+#       - run: pip install poetry
+#       - run: poetry install --no-interaction --no-root
+#       - run: |
+#           echo '----------- Mypy check ---------------'
+#           poetry run mypy --install-types --non-interactive ./vision_unlearning
+#           poetry run mypy --no-warn-incompatible-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
+
+#   pycodestyle:
+#     name: Pycodestyle Check
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with: { python-version: "3.10" }
+#       - run: pip install poetry
+#       - run: poetry install --no-interaction --no-root
+#       - run: |
+#           echo '----------- Pycodestyle check ----------'
+#           poetry run pycodestyle --max-line-length=200 --ignore=E701 ./vision_unlearning
+
+#   pytest_coverage:
+#     name : Pytest + Coverage  
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with: { python-version: "3.10" }
+
+#       - name: Free Disk Space
+#         run: |
+#           sudo rm -rf /opt/ghc /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+#           df -h
+
+#       - name: Install Poetry
+#         run: pip install poetry
+
+#       - name: Install dependencies
+#         run: poetry install --no-interaction --no-root
+
+#       - name: Add pytest-cov
+#         run: poetry add --dev pytest-cov
+
+#       - name: Install package (editable mode)
+#         run: poetry run pip install -e .
+
+#       - name: Run tests with coverage
+#         run: |
+#           echo '------------ Pytest + Coverage check -------------'
+#           poetry run pytest --cov=vision_unlearning \
+#           --cov-report=xml:coverage.xml \
+#           --cov-report=json:coverage.json \
+#           --junitxml=reports/tests-results.xml tests
+
+#       - name: Create the Sheilds.io badge
+#         run: |
+#           COVERAGE=$(jq '.totals.percent_covered_display' coverage.json | tr -d '"')
+#           COLOR="red"
+#           if [ ${COVERAGE%.*} -ge 90 ]; then COLOR="brightgreen"; 
+#           elif [ ${COVERAGE%.*} -ge 75 ]; then COLOR="green"; 
+#           elif [ ${COVERAGE%.*} -ge 50 ]; then COLOR="yellow"; fi
+#           echo '{ "schemaVersion": 1, "label": "coverage", "message": "'$COVERAGE'%", "color": "'$COLOR'" }' > coverage-badge.json  
+      
+#       - name: Push badge to branch
+#         run: |
+#           git config --global user.name "github-actions[bot]"
+#           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+#           git fetch origin
+#           git checkout -B soham
+#           mv coverage-badge.json coverage.json
+#           git add coverage.json
+#           git commit -m "Update coverage badge"
+#           git push origin soham --force
