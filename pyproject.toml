@@ -83,6 +83,9 @@ PyYAML = "*"
 imblearn = "*"
 Unidecode = "~1.4.0"
 deepface = "~0.0.95"  # TODO: maybe this should be made optional
+tf_keras = "~2.19.0"  # needed for deepface?
+tensorrt = "~10.13.2"  # needed for deepface?
+blinker = "~1.4.0"  # Not direclty needed, but poetry seems to struggle to determine the right version; needed for deepface?
 
 # Needed only for development/build
 # TODO: declare them separately

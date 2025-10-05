@@ -33,7 +33,7 @@ endef
 # TODO: push the image to dockerhub
 run-interactive-docker:
 	echo '\n-------------------------------------------------------------------------\n'
-	echo 'Go to http://localhost:8888/tree?token=7e500f07-fe1c-44b4-b2c5-bad27bbb17f9"'
+	echo 'Go to http://localhost:8889/tree?token=7e500f07-fe1c-44b4-b2c5-bad27bbb17f9"'
 	echo '\n-------------------------------------------------------------------------\n'
 	if $(call is_docker_running,vision-unlearning-notebooks); then \
 		echo 'Container is already running.'

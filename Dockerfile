@@ -39,5 +39,5 @@ RUN poetry install --no-root --no-interaction --no-ansi
 RUN poetry add jupyter pickleshare
 ADD https://github.com/krallin/tini/releases/download/v0.6.0/tini /usr/bin/tini
 RUN chmod +x /usr/bin/tini
-EXPOSE 8888
+EXPOSE 8889
 ENTRYPOINT ["/usr/bin/tini", "--"]

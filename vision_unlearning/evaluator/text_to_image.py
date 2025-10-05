@@ -48,6 +48,7 @@ class EvaluatorTextToImage(BaseModel):
             scores_unlearned: List[float] = []
             scores_difference_learned_unlearned: List[float] = []
             scores_difference_original_unlearned: List[float] = []
+            scores_difference_original_learned: List[float] = []
             latencies: List[float] = []
 
             for prompt in prompts:
@@ -65,6 +66,7 @@ class EvaluatorTextToImage(BaseModel):
                 scores_unlearned.append(score_unlearned)
                 scores_difference_learned_unlearned.append(score_learned - score_unlearned)
                 scores_difference_original_unlearned.append(score_original - score_unlearned)
+                scores_difference_original_learned.append(score_original - score_learned)
 
                 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
                 axes[0].imshow(image_original)
@@ -158,6 +160,23 @@ class EvaluatorTextToImage(BaseModel):
                 metric_value=float(np.std(scores_difference_original_unlearned)),
                 **metric_common_attributes,  # type: ignore
             ))
+
+            eval_results.append(EvalResult(
+                metric_type='clip',
+                metric_name=f'{scope.capitalize()}Set clip score difference between original and learned mean ({"↓" if scope == "forget" else "↑"})',
+                metric_value=float(np.mean(scores_difference_original_learned)),
+                **metric_common_attributes,  # type: ignore
+            ))
+
+            eval_results.append(EvalResult(
+                metric_type='clip',
+                metric_name=f'{scope.capitalize()}Set clip score difference between original and learned std (~↓)',
+                metric_value=float(np.std(scores_difference_original_learned)),
+                **metric_common_attributes,  # type: ignore
+            ))
+
+
+            #ORIGINAL AND LEARNED
 
         if self.compute_runtimes:
             metric_common_attributes["dataset_name"] = "Forget and Retain sets"

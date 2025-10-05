@@ -24,6 +24,7 @@ from datasets import load_dataset
 
 from vision_unlearning.datasets.base import logger
 
+
 ################################
 # General utilities
 ################################
@@ -41,15 +42,18 @@ def create_metadata_jsonl(folder: Path):
             f.write(json.dumps(record) + "\n")
     print(f"Created {out_file}")
 
+
 def jsonl_dump(data: list, path: str) -> None:
     with open(path, "w") as f:
         for entry in data:
             f.write(json.dumps(entry) + "\n")
 
+
 def jsonl_load(path: str) -> list:
     with open(path, "r") as f:
         data = [json.loads(line.strip()) for line in f if line.strip()]
     return data
+
 
 def balanced_subsample_lib(
     df: pd.DataFrame,
@@ -89,10 +93,7 @@ def balanced_subsample_lib(
         return df2.iloc[0:0].copy()
 
     if total_available <= target:
-        return (
-            df2.sort_values(priority_col, ascending=False)
-               .reset_index(drop=True)
-        )
+        return df2.sort_values(priority_col, ascending=False).reset_index(drop=True)
 
     # base allocation
     base = target // n_cells
@@ -135,6 +136,7 @@ def balanced_subsample_lib(
 
     return result.drop(columns='__strata__')
 
+
 ################################
 # LFW (famous people)
 ################################
@@ -159,7 +161,7 @@ def download_dataset_lfw(dataset_forget_name: str, dataset_retain_name: str, tar
     os.makedirs(dataset_retain_name, exist_ok=True)
 
     # Save images
-    class_to_number = defaultdict(int)
+    class_to_number: Dict[str, int] = defaultdict(int)
     for ex in ds:
         filename = ex["filename"]
         person = "_".join(filename.split("_")[:-1])  # extract name
@@ -216,7 +218,7 @@ def split_dataset_taras_breeds(downloaded_folder: str, dataset_forget_name: str,
     os.makedirs(dataset_retain_name, exist_ok=True)
 
     # Save images
-    class_to_number = defaultdict(int)
+    class_to_number: Dict[str, int] = defaultdict(int)
     for label in os.listdir(downloaded_folder):
         folder_path = os.path.join(downloaded_folder, label)
         if label == '.git':
@@ -245,13 +247,14 @@ def split_dataset_taras_breeds(downloaded_folder: str, dataset_forget_name: str,
                     src_path = os.path.join(folder_path, sample)
                     dst_path = os.path.join(dataset_retain_name, f"{label}_{uuid.uuid4().hex}.jpg")
                     os.symlink(os.path.abspath(src_path), dst_path)
-                #print(f"Saving the {class_to_number[label]}th image of class {label}")
+                # print(f"Saving the {class_to_number[label]}th image of class {label}")
 
     # Create metadata (class as the caption)
     create_metadata_jsonl(Path(dataset_forget_name))
     create_metadata_jsonl(Path(dataset_retain_name))
 
     return class_to_number
+
 
 def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> None:
     '''
@@ -263,28 +266,28 @@ def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> 
     if not os.path.exists(dataset_base_path):
         if not os.path.exists(cache_folder):
             subprocess.run(["git", "clone", "https://github.com/AtharvaTaras/Dog-Breeds-Dataset", cache_folder], check=True)
-    
+
         # Convert all to jpg
         for root, dirs, files in os.walk(cache_folder):
             # TODO: do not transverse the root of the repo, only folders
             # Copy csv in the root in a more elegant way
-        
+
             if ".git" in root:
                 continue
-            
+
             # figure out the relative path to recreate structure
             rel_path = os.path.relpath(root, cache_folder)
             dst_dir = os.path.join(dataset_base_path, rel_path)
             os.makedirs(dst_dir, exist_ok=True)
-            
+
             for file in files:
                 src_path = os.path.join(root, file)
                 filename, ext = os.path.splitext(file)
                 ext = ext.lower()
-                
+
                 # define destination path (always .jpg extension)
                 dst_path = os.path.join(dst_dir, filename + ".jpg")
-                
+
                 try:
                     if ext in [".jpg", ".jpeg"]:
                         # just copy if already jpg
@@ -299,6 +302,9 @@ def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> 
     else:
         logger.info('Already exists, not downloading')
 
+    # TODO
+    # return pd.read_csv(os.path.join(dataset_base_path, 'FCI Breeds.csv'), index_col='id')
+
 
 ################################
 # AKC (attribute only)
@@ -312,6 +318,7 @@ def normalize_string(s: str) -> str:
     s = re.sub(r"(.)\1+", r"\1", s)   # collapse repeats
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
 
 def akc_find_closest_match(df, name: str, group: str) -> Optional[str]:
     assert 'group_akc' in df.columns, 'Dataframe must be AKC data'
@@ -343,7 +350,7 @@ def akc_find_closest_match(df, name: str, group: str) -> Optional[str]:
     df_temp['Other Names'] += ', ' + df_temp['name_akc']
     df_temp['Other Names'] = df_temp['Other Names'].str.split(',')
     df_temp = df_temp.explode('Other Names')
-    df_temp = df_temp[df_temp['Other Names']!='nan']  # rows without synonyms were duplicated
+    df_temp = df_temp[df_temp['Other Names'] != 'nan']  # rows without synonyms were duplicated
     df_temp['Other Names'] = df_temp['Other Names'].str.upper().str.replace('DOG', '').str.strip()
     if (df_temp['Other Names'] == name).sum() == 1:
         return df_temp[df_temp['Other Names'] == name].iloc[0]['name_akc']
@@ -368,7 +375,7 @@ def akc_find_closest_match(df, name: str, group: str) -> Optional[str]:
     # For example, 'hungar point viz' counts as having two matches with 'hungarian pointing vizsla'
     # If one option is isolated the best match (the only one with n matches), return it
     df_temp['Other Names'] = df_temp['Other Names'] + ' ' + df_temp['group_akc'].apply(normalize_string)
-    name += ' ' + normalize_string(group.replace('sheepdogs', 'shep').replace('catledogs', 'catle').replace('pointing', 'point').replace('terriers', 'terrier').replace('retrievers', 'retriever').replace('sighthounds', 'sight').replace('dachshunds', 'dachs').replace('_and', '').replace('_related_breeds', '').replace('_primitive_types', ''))
+    name += ' ' + normalize_string(group.replace('sheepdogs', 'shep').replace('catledogs', 'catle').replace('pointing', 'point').replace('terriers', 'terrier').replace('retrievers', 'retriever').replace('sighthounds', 'sight').replace('dachshunds', 'dachs').replace('_and', '').replace('_related_breeds', '').replace('_primitive_types', ''))  # noqa
     name = name.replace('(', '').replace(')', '').replace('_', ' ').replace('-', ' ')
     name = name.replace('ian ', ' ').replace('ish ', ' ').replace('ese ', ' ').replace('an ', ' ').replace('en ', ' ').replace('er ', ' ').replace('s ', ' ')
     name_words = set(name.split())
@@ -379,10 +386,11 @@ def akc_find_closest_match(df, name: str, group: str) -> Optional[str]:
         if len(filtered) == 1:
             return filtered.iloc[0]['name_akc']
 
-    #print(name_original)
-    #print(filtered[['name_akc', 'Other Names', 'match_count']])
+    # print(name_original)
+    # print(filtered[['name_akc', 'Other Names', 'match_count']])
     logger.error(f"Could not match breed {name_original}")
     return None
+
 
 def download_dataset_akc(output_path: str) -> pd.DataFrame:
     # TODO: make output_path optional, and save to temp file?
@@ -393,14 +401,15 @@ def download_dataset_akc(output_path: str) -> pd.DataFrame:
         urllib.request.urlretrieve(url, output_path)
     return pd.read_csv(output_path)
 
+
 ################################
 # Pantheon (attribute only)
 ################################
 
 def download_dataset_pantheon(
-    url: str = "https://storage.googleapis.com/pantheon-public-data/person_2025_update.csv.bz2", 
-    bz2_path: str = "assets/datasets/person_2025_update.csv.bz2", 
-    csv_path: str = "assets/datasets/person_2025_update.csv"
+    url: str = "https://storage.googleapis.com/pantheon-public-data/person_2025_update.csv.bz2",
+    bz2_path: str = "assets/datasets/person_2025_update.csv.bz2",
+    csv_path: str = "assets/datasets/person_2025_update.csv",
 ) -> pd.DataFrame:
     # https://pantheon.world/data/datasets
     if not os.path.exists(bz2_path):
@@ -410,6 +419,7 @@ def download_dataset_pantheon(
                 f_out.write(f_in.read())
         logger.info(f'Downloaded {csv_path}')
     return pd.read_csv(csv_path)
+
 
 def pantheon_find_closest_match(df, name: str) -> Optional[str]:
     if (df['slug'] == name).sum() == 1:

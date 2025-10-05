@@ -1,18 +1,19 @@
-from typing import Union, Optional, Any, Dict, List, Literal
-from PIL import Image
-import torch
-from transformers import pipeline
-from transformers.pipelines.image_classification import ImageClassificationPipeline
-from vision_unlearning.metrics.base import Metric
-from typing import Any, Dict, Union, List
-import torch
-from PIL import Image
-from transformers import AutoImageProcessor, AutoModelForImageClassification
-from pydantic import BaseModel, ConfigDict
-from abc import ABC
-from deepface import DeepFace
-import numpy as np
 from abc import ABC, abstractmethod
+from typing import Union, Optional, Any, Dict, List, Literal
+import numpy as np
+from PIL import Image
+
+import torch
+from transformers import (
+    pipeline,
+    AutoImageProcessor,
+    SiglipForImageClassification,
+)
+from transformers.pipelines.image_classification import ImageClassificationPipeline
+from deepface import DeepFace
+import piq
+
+from vision_unlearning.metrics.base import Metric
 
 
 # TODO take these pseudo tests and examples and transform into automated test
@@ -26,6 +27,7 @@ class MetricImage(Metric, ABC):
     @abstractmethod
     def score(self, image: Image.Image) -> Dict[str, Any]:
         pass
+
 
 class MetricPaintingStyle(MetricImage):
     metrics: List[Literal['is_desired_style', 'desired_style_confidence']] = []  # TODO: this is currently ignored
@@ -64,14 +66,15 @@ class MetricPaintingStyle(MetricImage):
 # print(result)
 
 
-
-########################################################################
 class MetricRace(MetricImage):
     """
     Race classification using Hugging Face model:
     syntheticbot/clip-face-attribute-classifier
+
+    tf_keras = "~2.19.0" 
+    tensorrt = "~10.13.2"
+    blinker = "~1.9.0"
     """
-    # !pip install deepface tf-keras tensorrt
     # TODO: if we could do this with a HF model model be better, no need for additional libs
 
     def score(self, image: Image.Image) -> Dict[str, str]:
@@ -80,35 +83,22 @@ class MetricRace(MetricImage):
             actions=['race'],
             enforce_detection=False,
         )
-        
+
         # DeepFace may return list if multiple faces
         if isinstance(results, list):
             results = results[0]
-    
+
         return {
             "race": results.get("dominant_race"),
         }
 
 
 # Example usage
-
 '''
 img = Image.open("assets/datasets/lfw_splits/George_W_Bush/train_forget/George_W_Bush_0001.jpg")
 metric_race = MetricRace()
 print(metric_race.score(img))
 '''
-
-
-
-
-########################################################################
-from pydantic import BaseModel, ConfigDict
-from abc import ABC, abstractmethod
-from typing import Union, Dict, Literal, Any
-from PIL import Image
-import torch
-from transformers import AutoImageProcessor, SiglipForImageClassification
-
 
 
 class MetricGender(MetricImage):
@@ -123,8 +113,6 @@ class MetricGender(MetricImage):
         self._processor = AutoImageProcessor.from_pretrained(self._model_name)
         self._model = SiglipForImageClassification.from_pretrained(self._model_name)
         self._model.to(self.device).eval()
-
-        
 
     def score(self, image: Image.Image) -> Dict[str, Union[Literal['male', 'female'], float]]:
         # ensure RGB and prepare batch
@@ -157,19 +145,8 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 metric_gender = MetricGender(device=device)
 result = metric_gender.score(image)
 print(result)
-''';
+'''
 
-
-
-
-########################################################################
-
-from pydantic import BaseModel, ConfigDict
-from abc import ABC, abstractmethod
-from typing import Union, Dict, Literal, Any
-from PIL import Image
-import piq
-import numpy as np
 
 class MetricQuality(MetricImage):
     '''
@@ -178,13 +155,12 @@ class MetricQuality(MetricImage):
     def score(self, image: Image.Image) -> Dict[str, float]:
         image_tensor = torch.from_numpy(np.array(image)).float()
         image_tensor = image_tensor.permute(2, 0, 1).unsqueeze(0) / 255.0
-        
+
         return {
             'brisque': float(piq.brisque(image_tensor, data_range=1.0).item()),
         }
 
 
-###########
 # This is how to use it
 '''
 import torch
@@ -194,4 +170,4 @@ image = Image.open('assets/male.jpg')
 metric_quality = MetricQuality()
 result = metric_quality.score(image)
 print(result)
-''';
+'''

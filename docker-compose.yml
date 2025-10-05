@@ -4,10 +4,10 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    command: ["poetry", "run", "jupyter", "notebook", "--port=8888", "--no-browser", "--ip=0.0.0.0", "--allow-root", "--NotebookApp.token=7e500f07-fe1c-44b4-b2c5-bad27bbb17f9"]
+    command: ["poetry", "run", "jupyter", "notebook", "--port=8889", "--no-browser", "--ip=0.0.0.0", "--allow-root", "--NotebookApp.token=7e500f07-fe1c-44b4-b2c5-bad27bbb17f9"]
     volumes:
       - ./:/src
     environment:
       - PYTHONPATH=.:/src
     ports:
-       - 8888:8888
+       - 8889:8889
