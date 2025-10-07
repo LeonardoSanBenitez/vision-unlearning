@@ -22,12 +22,12 @@ class Unlearner(BaseModel, ABC):
 
 class UCEUnlearner(Unlearner):
     model_id:str = "CompVis/stable-diffusion-v1-4"
-    device = 'cuda:0'
+    device: str = 'cuda:0'
     erase_scale : int = 1
     preserve_scale : int = 1
     lamb : float = 0.5
     save_dir = '../uce_models'
-    exp_name = None
+    exp_name :str = None
     edit_concepts : str = None
     guide_concepts : str = None
     preserve_concepts : str = None
@@ -35,7 +35,7 @@ class UCEUnlearner(Unlearner):
     expand_prompts : str = "true" #or "false"
 
     def train(self):
-        torch_dtype = torch.float32
+        torch_dtype :torch.dtype = torch.float32
         Path(self.save_dir).mkdir(parents = True,exists_ok = True)
 
         if self.exp_name == None:
