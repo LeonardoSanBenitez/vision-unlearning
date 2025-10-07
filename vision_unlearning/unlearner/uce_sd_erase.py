@@ -1,5 +1,5 @@
 import torch
-torch.set_grad_enabled(False)
+
 import argparse
 import os
 import copy
@@ -7,7 +7,7 @@ import time
 
 from safetensors.torch import save_file
 from diffusers import DiffusionPipeline
-from base import UCEUnlearner
+
 
 def collect_text_embeddings(pipe, concepts, device, torch_dtype):
     """Return dict {concept: last_token_embedding}."""
@@ -93,7 +93,7 @@ def save_uce_weights(uce_modules, uce_module_names, save_dir, exp_name):
 def uce_run(pipe, edit_concepts, guide_concepts, preserve_concepts,
         erase_scale, preserve_scale, lamb, save_dir, exp_name,
         device="cuda:0", torch_dtype=torch.float32):
-
+    torch.set_grad_enabled(False)
     start_time = time.time()
 
     # Find relevant modules
@@ -126,8 +126,14 @@ def uce_run(pipe, edit_concepts, guide_concepts, preserve_concepts,
     end_time = time.time()
     print(f"\n\nErased concepts using UCE\nModel edited in {end_time-start_time:.2f} seconds\n")
 
+def main():
+    from .base import UCEUnlearner
+    uce = UCEUnlearner(model_id='CompVis/stable-diffusion-v1-4',edit_concepts='Van Gogh; Picasso',guide_concepts='art',preserve_concepts='Monet; Rembrandt; Warhol',device='cuda:0',concept_type='art',exp_name='vangogh_uce_sd') 
 
-uce = UCEUnlearner(model_id='CompVis/stable-diffusion-v1-4',edit_concepts='Van Gogh; Picasso',guide_concepts='art',preserve_concepts='Monet; Rembrandt; Warhol',device='cuda:0',concept_type='art',exp_name='vangogh_uce_sd') 
+    output_path = uce.train()
+    print("UCE weights trained at: ",output_path)
 
-output_path = uce.train()
-print("UCE weights trained at: ",output_path)
+
+if __name__ == "__main__":
+    main()
+
