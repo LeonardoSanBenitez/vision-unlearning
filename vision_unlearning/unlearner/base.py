@@ -26,7 +26,7 @@ class UCEUnlearner(Unlearner):
     erase_scale : int = 1
     preserve_scale : int = 1
     lamb : float = 0.5
-    save_dir = '../uce_models'
+    save_dir : str = '../uce_models'
     exp_name :str = None
     edit_concepts : str = None
     guide_concepts : str = None
@@ -36,7 +36,7 @@ class UCEUnlearner(Unlearner):
 
     def train(self):
         torch_dtype :torch.dtype = torch.float32
-        Path(self.save_dir).mkdir(parents = True,exists_ok = True)
+        Path(self.save_dir).mkdir(parents = True,exist_ok = True)
 
         if self.exp_name == None:
             self.exp_name = 'uce_test'
