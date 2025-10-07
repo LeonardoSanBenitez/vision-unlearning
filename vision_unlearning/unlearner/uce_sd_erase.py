@@ -127,8 +127,8 @@ def uce_run(pipe, edit_concepts, guide_concepts, preserve_concepts,
     print(f"\n\nErased concepts using UCE\nModel edited in {end_time-start_time:.2f} seconds\n")
 
 def main():
-    from .base import UCEUnlearner
-    uce = UCEUnlearner(model_id='CompVis/stable-diffusion-v1-4',edit_concepts='Van Gogh; Picasso',guide_concepts='art',preserve_concepts='Monet; Rembrandt; Warhol',device='cuda:0',concept_type='art',exp_name='vangogh_uce_sd') 
+    import base
+    uce = base.UCEUnlearner(model_id='CompVis/stable-diffusion-v1-4',edit_concepts='Van Gogh; Picasso',guide_concepts='art',preserve_concepts='Monet; Rembrandt; Warhol',device='cuda:0',concept_type='art',exp_name='vangogh_uce_sd') 
 
     output_path = uce.train()
     print("UCE weights trained at: ",output_path)
