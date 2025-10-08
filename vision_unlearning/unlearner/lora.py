@@ -4,6 +4,7 @@ import math
 import shutil
 import time
 from pathlib import Path
+import random
 from typing import List, Optional, Tuple, Dict, Any
 from pydantic import Field
 from abc import abstractmethod
@@ -261,6 +262,11 @@ class UnlearnerLora(Unlearner):
         os.makedirs(self.output_dir, exist_ok=True)
 
         set_seed(self.seed)
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
+        random.seed(self.seed)
+        np.random.seed(self.seed)
 
         # Acelerator config
         self._accelerator = self._get_accelerator()
