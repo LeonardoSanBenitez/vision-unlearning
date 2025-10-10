@@ -4,7 +4,7 @@ import time
 import copy
 from pathlib import Path
 from enum import Enum
-
+from typing import Optional
 import torch #noqa: F401(imported but unused)
 from pydantic import Field
 from safetensors.torch import save_file
@@ -17,19 +17,19 @@ class ConceptType(str, Enum):
     Art = "art"
 
 class UCE(base.Unlearner):
-    pretrained_model_name_or_path:str = Field(..., description="Path to pretrained model or model identifier from huggingface.co/models.",default="CompVis/stable-diffusion-v1-4") #noqa : E501
+    pretrained_model_name_or_path:str = Field(default="CompVis/stable-diffusion-v1-4", description="Path to pretrained model or model identifier from huggingface.co/models.") #noqa : E501
     device: str = 'cuda:0'
     erase_scale : int = 1
     preserve_scale : int = 1
     lamb : float = 0.5
-    output_dir: str = Field(..., description="Output directory for model predictions and checkpoints.",default='../uce_models')
-    edit_concepts : str = None
-    guide_concepts : str = None
-    preserve_concepts : str = None
+    output_dir: str = Field(default='../uce_models', description="Output directory for model predictions and checkpoints.")
+    edit_concepts : Optional[str] = None
+    guide_concepts : Optional[str] = None
+    preserve_concepts : Optional[str] = None
     concept_type : ConceptType = Field(default=ConceptType.Object, description="Type of concept to unlearn")
     expand_prompts : bool = True #or false
 
-    def train(self):
+    def train(self) -> None:
         torch_dtype :torch.dtype = torch.float32
         Path(self.output_dir).mkdir(parents = True,exist_ok = True)
         

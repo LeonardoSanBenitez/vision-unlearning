@@ -1,4 +1,4 @@
-from typing import List, Literal, Dict
+from typing import List, Literal, Dict, Optional
 from PIL import Image
 import torch
 import torch_fidelity
@@ -8,13 +8,14 @@ import os
 
 
 class FrechetInceptionDistance(Metric):
-    metrics: Literal['FID'] = ['FID']
-    real_imgs_path: str = None
-    gen_imgs_path: str = None
+    # metrics: Literal['FID'] = ['FID']
+    metrics: list[str] = ["FID"]
+    real_imgs_path: Optional[str] = None
+    gen_imgs_path: Optional[str] = None
     real_imgs: List[torch.Tensor] = None
     gen_imgs: List[torch.Tensor] = None
 
-    def model_post_init(self, __context: dict = None) -> None:
+    def model_post_init(self,  __context: Optional[dict] = None) -> None:
         assert self.real_imgs_path is not None or self.real_imgs is not None,\
             "Could not find real images data!\r\nPlease define a path to a folder or a torch.Tensor with the images."
         assert self.gen_imgs_path is not None or self.gen_imgs is not None,\
@@ -95,12 +96,12 @@ class FrechetInceptionDistance(Metric):
         ])
 
         if self.real_imgs_path:
-            real_images = self.real_imgs_path #self.load_images_from_folder(self.real_imgs_path, transform)
+            real_images = self.real_imgs_path  # self.load_images_from_folder(self.real_imgs_path, transform)
         else:
             real_images = self.process_tensor_images(self.real_imgs)
 
         if self.gen_imgs_path:
-            gen_images = self.gen_imgs_path #self.load_images_from_folder(self.gen_imgs_path, transform)
+            gen_images = self.gen_imgs_path  # self.load_images_from_folder(self.gen_imgs_path, transform)
         else:
             gen_images = self.process_tensor_images(self.gen_imgs)
 
@@ -108,7 +109,7 @@ class FrechetInceptionDistance(Metric):
             input1=real_images,
             input2=gen_images,
             fid=True,
-            #metrics=['fid'],
+            # metrics=['fid'],
             cuda=torch.cuda.is_available(),
         )
 
