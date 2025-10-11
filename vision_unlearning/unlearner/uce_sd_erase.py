@@ -1,7 +1,15 @@
+'''
+Taken the reference of Unified Concept Editing Github Repo:
+Github repository:- https://github.com/rohitgandikota/unified-concept-editing
+Arxiv Paper:- https://arxiv.org/pdf/2308.14761.pdf
+'''
+
+
 #Import formatted
 import os
 import time
 import copy
+import logging
 from pathlib import Path
 from enum import Enum
 from typing import Optional
@@ -32,6 +40,9 @@ class UCE(base.Unlearner):
     def train(self) -> None:
         torch_dtype :torch.dtype = torch.float32
         Path(self.output_dir).mkdir(parents = True,exist_ok = True)
+
+        if self.pretrained_model_name_or_path != "CompVis/stable-diffusion-v1-4" :
+            logging.warning("UCE was not tested with this base model, we do not ensure correct working.")
         
         self.edit_concepts = [concept.strip() for concept in self.edit_concepts.split(';')]
 
