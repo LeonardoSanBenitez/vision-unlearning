@@ -38,20 +38,41 @@ class UCE(base.Unlearner):
     expand_prompts : bool = True #or false
 
     def train(self) -> None:
+        
+        assert self.pretrained_model_name_or_path, "Pretrained model path must not be empty."
+        assert isinstance(self.erase_scale, (int, float)) and self.erase_scale > 0, "Erase scale must be positive."
+        assert isinstance(self.preserve_scale, (int, float)) and self.preserve_scale >= 0, "Preserve scale must be non-negative."
+        assert 0.0 <= self.lamb <= 1.0, "Lambda must be between 0 and 1."
+
+        assert self.device in ["cpu", "cuda", "cuda:0", "cuda:1"], f"Invalid device specified: {self.device}"
+        assert isinstance(self.concept_type, ConceptType), "concept_type must be of type ConceptType Enum."
+
+        if "cuda" in self.device : 
+            assert torch.cuda_is_available(), "CUDA device specified but not available!"
+
         torch_dtype :torch.dtype = torch.float32
         Path(self.output_dir).mkdir(parents = True,exist_ok = True)
 
         if self.pretrained_model_name_or_path != "CompVis/stable-diffusion-v1-4" :
             logging.warning("UCE was not tested with this base model, we do not ensure correct working.")
         
-        self.edit_concepts = [concept.strip() for concept in self.edit_concepts.split(';')]
+        assert self.edit_concepts, "Atleast one edit concept must be provided"
+        if self.edit_concepts :
+            self.edit_concepts = [concept.strip() for concept in self.edit_concepts.split(';')]
+        else:
+            self.edit_concepts = []
+        
+        assert len(self.edit_concepts) > 0, "Edit concepts list cannot be empty after parsing"
 
         if self.guide_concepts == None:
             self.guide_concepts = ''
             if self.concept_type.value == "art":
                 self.guide_concepts = "art"
         
+        
         self.guide_concepts = [concept.strip() for concept in  self.guide_concepts.split(';')]
+        
+
 
         if len(self.guide_concepts) == 1:
             self.guide_concepts = self.guide_concepts * len(self.edit_concepts)
@@ -100,7 +121,8 @@ class UCE(base.Unlearner):
         pipe = DiffusionPipeline.from_pretrained(self.pretrained_model_name_or_path,torch_dtype = torch_dtype,
                                                  safety_checker = None,
                                                  vae = None).to(self.device) # type: ignore
-        
+                
+
         uce_run(pipe,self.edit_concepts,self.guide_concepts,self.preserve_concepts,self.erase_scale,self.preserve_scale,self.lamb,self.output_dir,self.device,torch_dtype) #noqa : E501
 
 
@@ -198,11 +220,15 @@ def uce_run(pipe, edit_concepts, guide_concepts, preserve_concepts,
         if 'attn2' in name and (name.endswith('to_v') or name.endswith('to_k')):
             uce_modules.append(module)
             uce_module_names.append(name)
+    
+    assert len(uce_modules) > 0, "No attention modules found for UCE to operate on"
     original_modules = copy.deepcopy(uce_modules) #type : ignore
 
     # 1. collect embeddings
     all_concepts = edit_concepts + guide_concepts + preserve_concepts
     erase_embeds = collect_text_embeddings(pipe, all_concepts, device, torch_dtype)
+
+    assert all(c in erase_embeds for c in all_concepts), "Some concepts failed to produce embeddings."
 
     # 2. collect guide outputs
     guide_outputs = collect_guide_outputs(guide_concepts + preserve_concepts,

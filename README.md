@@ -51,7 +51,7 @@ Vision Unlearning standardizes the following components:
 
 - **Metric**: Evaluates a model (e.g., FID, CLIP Score, MIA, NudeNet, etc.).
 - **Unlearner**: Encapsulates the unlearning algorithm.
-- **UCE Unlearner**: Encapsulates the UCE unlearning method for editing the model without training.[Github](https://github.com/rohitgandikota/unified-concept-editing)[Arxiv Paper](https://arxiv.org/pdf/2308.14761.pdf)
+- **UCE Unlearner**: Encapsulates the UCE unlearning method for editing the model without training.[Github](https://github.com/rohitgandikota/unified-concept-editing)\[Arxiv Paper](https://arxiv.org/pdf/2308.14761.pdf)
 - **Dataset**: Encapsulates the dataset, including data splitting.
 
 Additionally, common tasks and evaluation setups are provided as example notebooks. Several platform integrations, such as Hugging Face and Weights & Biases, are also included.
