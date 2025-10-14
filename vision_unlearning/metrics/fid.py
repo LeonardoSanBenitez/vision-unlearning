@@ -12,8 +12,8 @@ class FrechetInceptionDistance(Metric):
     metrics: list[str] = ["FID"]
     real_imgs_path: Optional[str] = None
     gen_imgs_path: Optional[str] = None
-    real_imgs: List[torch.Tensor] = None
-    gen_imgs: List[torch.Tensor] = None
+    real_imgs: Optional[List[torch.Tensor]] = None
+    gen_imgs: Optional[List[torch.Tensor]] = None
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         assert (
@@ -35,14 +35,18 @@ class FrechetInceptionDistance(Metric):
             assert self.verify_images_in_path(self.real_imgs_path), \
                 f"No valid images found in the folder '{self.real_imgs_path}'."
         else:
-            assert self.real_imgs.dim() == 4, \
-                "The real images tensor should have 4 dimensions (batch_size, channels, height, width)."
+            # Ensure the list is not empty
+            assert self.real_imgs is not None and len(self.real_imgs) > 0, "real_imgs cannot be empty"
+            # Check dimensions of the first tensor
+            assert self.real_imgs[0].dim() == 3, \
+                "Each real image tensor should have 3 dimensions (channels, height, width)"
         if self.gen_imgs_path:
             assert self.verify_images_in_path(self.gen_imgs_path), \
                 f"No valid images found in the folder '{self.gen_imgs_path}'."
         else:
-            assert self.gen_imgs.dim() == 4, \
-                "The generated images tensor should have 4 dimensions (batch_size, channels, height, width)."
+            assert self.gen_imgs is not None and len(self.gen_imgs) > 0, "gen_imgs cannot be empty"
+            assert self.gen_imgs[0].dim() == 3, \
+                "Each generated image tensor should have 3 dimensions (channels, height, width)"
         pass
 
     def verify_images_in_path(self, path: str) -> bool:
@@ -64,7 +68,7 @@ class FrechetInceptionDistance(Metric):
 
     def process_tensor_images(self, tensor_list: List[torch.Tensor]):
         transform_tensor = transforms.Compose([
-            transforms.Resize((299, 299)),  # Resize for Inception compatibility
+            transforms.Resize((299,299)),  # Resize for Inception compatibility
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
         ])
         return [transform_tensor(img) for img in tensor_list]
@@ -117,8 +121,8 @@ class FrechetInceptionDistance(Metric):
             input1=real_images,
             input2=gen_images,
             fid=True,
-            #metrics=['fid'],
-            cuda=torch.cuda.is_available(),
+            # metrics=['fid'],
+            cuda=torch.cuda.is_available()
         )
         assert fid_val is not None
         scores['FID'] = float(fid_val['frechet_inception_distance'])

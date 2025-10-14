@@ -37,7 +37,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
         text_enc.eval()
         vae.eval()
         logger.debug("Models loaded")
-        ################### Prepare dataset 
+        # Prepare dataset 
         logger.debug("Loading dataset and casting image column...")
         ds = load_dataset(dataset_name, split="train")  # TODO: add support for other splits
         ds = ds.cast_column(image_column, Image())
@@ -49,7 +49,6 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
             transforms.Normalize([0.5] * 3, [0.5] * 3),
         ])
         # map to tensors
-        
         def preprocess(batch):
             batch["pixel_values"] = [pipe(img) for img in batch[image_column]]
             return batch
@@ -59,7 +58,6 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
         logger.debug(f"Dataset ready: {len(ds)} examples.")
         loader = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=1)
         logger.debug("DataLoader created.")
-        ##################
         # Accumulate saliency
         logger.debug("Initializing saliency storage...")
         saliency = {name: torch.zeros_like(param, device=device)

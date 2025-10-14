@@ -11,9 +11,10 @@ import copy
 import logging
 from pathlib import Path
 from enum import Enum
-from typing import Optional, Any
+from typing import Optional, Any, cast
 
 import torch  # noqa: F401
+import torch.nn as nn
 from pydantic import Field
 from safetensors.torch import save_file
 from diffusers import DiffusionPipeline
@@ -198,9 +199,18 @@ def update_weights(original_modules: list[torch.nn.Module],
     uce_modules = copy.deepcopy(original_modules)
 
     for module_idx, module in enumerate(original_modules):
-        w_old = module.weight
-        mat1 = lamb * w_old
-        mat2 = lamb * torch.eye(w_old.shape[1], device=device, dtype=torch_dtype)
+        if isinstance(module, nn.Module):
+            w_old: torch.Tensor = cast(torch.Tensor, module.weight)
+        else:
+            w_old = cast(torch.Tensor, module)  # fallback if somehow not a module
+
+        # Compute mat1 safely
+        mat1: torch.Tensor = lamb * w_old
+
+        # Compute mat2 safely
+        mat2: torch.Tensor = lamb * torch.eye(
+            w_old.shape[1], device=w_old.device, dtype=w_old.dtype
+        )
 
         # Erase concepts
         for erase_concept, guide_concept in zip(edit_concepts, guide_concepts):
@@ -229,7 +239,8 @@ def save_uce_weights(uce_modules: list[torch.nn.Module],
     """Save updated module weights to a safetensors file."""
     uce_state_dict: dict[str, torch.Tensor] = {}
     for name, parameter in zip(uce_module_names, uce_modules):
-        uce_state_dict[name + ".weight"] = parameter.weight
+        weight_tensor: torch.Tensor = cast(torch.Tensor, parameter.weight)
+        uce_state_dict[name + ".weight"] = weight_tensor
 
     # You can customize filename here
     save_file(uce_state_dict, os.path.join(save_dir, "uce_sd_weights.safetensors"))
