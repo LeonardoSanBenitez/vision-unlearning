@@ -49,7 +49,7 @@ DATASET_NAME_MAPPING = {  # TODO: is this necessary?
 }
 
 
-def unlearn_lora(model_original_id: str, model_lora_id: str, device: str, weight_name: str = "pytorch_lora_weights.safetensors") -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
+def unlearn_lora(model_original_id: str, model_lora_id: str, device: str, weight_name: str = "pytorch_lora_weights.safetensors") -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]: # noqa: E501
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
@@ -100,7 +100,7 @@ class UnlearnerLora(Unlearner):
     hub_token: Optional[str] = Field(None, description="Token for authentication to push to Model Hub.")
     hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`.")
     report_to: str = Field("tensorboard", description="Logging integration for reporting results (e.g., tensorboard, wandb).")
-    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")
+    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage") # noqa: E501
 
     # Specific to this unlearner, training related
     pretrained_model_name_or_path: str = Field(..., description="Path to pretrained model or model identifier from huggingface.co/models.")
@@ -152,8 +152,16 @@ class UnlearnerLora(Unlearner):
 
     final_eval_prompts_forget: str | List[str] = Field([], description="Prompts for final evaluation on the forget dataset (ModelHub identifier or directly the prompts).")
     final_eval_prompts_retain: str | List[str] = Field([], description="Prompts for final evaluation on the retain dataset (ModelHub identifier or directly the prompts).")
-    prediction_type: Optional[str] = Field(None, description="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. "
-                                                    "If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediction_type` is chosen.")
+    prediction_type: Optional[str] = Field(
+        None,
+        description=(
+            "The prediction_type that shall be used for training. "
+            "Choose between 'epsilon' or 'v_prediction' or leave `None`. "
+            "If left to `None`, the default prediction type of the scheduler "
+            "`noise_scheduler.config.prediction_type` is chosen."
+        ),
+    )
+
 
     # Training args from huggingface
     gradient_accumulation_steps: int = Field(1, description="Number of steps to accumulate before performing backward/update pass.")
@@ -180,8 +188,7 @@ class UnlearnerLora(Unlearner):
         if not self.is_lora_negated:
             # TODO: this shiould be a simple matter of following the gradinet or its negation
             raise NotImplementedError()
-
-
+        
         # Acelerator config
         accelerator_project_config = accelerate.utils.ProjectConfiguration(project_dir=self.output_dir, logging_dir=Path(self.output_dir, self.logging_dir))
 

@@ -15,7 +15,7 @@ class FrechetInceptionDistance(Metric):
     real_imgs: List[torch.Tensor] = None
     gen_imgs: List[torch.Tensor] = None
 
-    def model_post_init(self,  __context: Optional[dict] = None) -> None:
+    def model_post_init(self, __context: Optional[dict] = None) -> None:
         assert self.real_imgs_path is not None or self.real_imgs is not None,\
             "Could not find real images data!\r\nPlease define a path to a folder or a torch.Tensor with the images."
         assert self.gen_imgs_path is not None or self.gen_imgs is not None,\
@@ -57,7 +57,6 @@ class FrechetInceptionDistance(Metric):
             transforms.Resize((299, 299)),  # Resize for Inception compatibility
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
         ])
-        
         return [transform_tensor(img) for img in tensor_list]
     
     def load_images_from_folder(self, folder_path: str, transform: transforms.Compose) -> torch.Tensor:
@@ -67,7 +66,6 @@ class FrechetInceptionDistance(Metric):
         :param transform: Transformations to apply to each image.
         :return: A torch.Tensor containing all images in the folder.
         """
-
         valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
         image_tensors = []
 
@@ -112,9 +110,7 @@ class FrechetInceptionDistance(Metric):
             # metrics=['fid'],
             cuda=torch.cuda.is_available(),
         )
-
         assert fid_val is not None
         scores['FID'] = float(fid_val['frechet_inception_distance'])
-
         return scores
         

@@ -44,9 +44,14 @@ def forget_tokens(examples, tokenizer, caption_column, forget_prompt: str):
     length = len(examples[caption_column])
     captions = [forget_prompt] * length
     inputs = tokenizer(
-        captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+        captions, 
+        max_length=tokenizer.model_max_length, 
+        padding="max_length", 
+        truncation=True, 
+        return_tensors="pt"
     )
     return inputs.input_ids
+
     
 def preprocess_train(examples, tokenizer, caption_column, image_column, train_transforms, concept_overwrite: Optional[str] = None):
     '''

@@ -36,14 +36,14 @@ class SplitNotAvailableError(Exception):
 
 
 class UnlearnDataset(BaseModel, ABC):
-    '''
+    """
     Wrapper around huggingface datasets
     Organize the forget-retain splits
-    '''
+    """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     split_mode: UnlearnDatasetSplitMode
-    split_kwargs: dict = {} # Should contain the required by the mode-specific downstream methods (_split_class, _split_random, _split_temporal)
+    split_kwargs: dict = {}  #  Should contain the required mode-specific downstream args (_split_class, _split_random, _split_temporal)
 
     _dataset_splits: Dict[UnlearnDatasetSplit, Union[Subset, VisionDataset]] = {}
     _classes: Optional[List[str]] = None
@@ -53,26 +53,26 @@ class UnlearnDataset(BaseModel, ABC):
     std: Optional[Sequence[float]] = None
 
     def model_post_init(self, __context: dict) -> None:
-        # TODO: using pydantic's model_post_init makes this hard to debug... maybe just overwritting the constructor is better
+        # TODO: using pydantic's model_post_init makes this hard to debug... maybe just overwriting the constructor is better
         self._load()
         self._split()
-        assert set([e.value for e in UnlearnDatasetSplit]) == set([key.value for key in list(self._dataset_splits.keys())]), "All possible splits should be filled"
+        assert set([e.value for e in UnlearnDatasetSplit]) == set(
+            [key.value for key in list(self._dataset_splits.keys())]
+        ), "All possible splits should be filled"
         pass
 
     @abstractmethod
     def _load(self) -> None:
-        '''
+        """
         Load the dataset from disk or download it.
         Side effects: updates the properties _dataset_splits, _classes, _n_classes
-        '''
+        """
         pass
 
     def _split(self) -> None:
-        '''
+        """
         Split the dataset based on the specified mode.
-        Side effects: updates the property dataset_splits
-        Raised exceptions: none
-        '''
+        """
         if self.split_mode == UnlearnDatasetSplitMode.Class:
             self._split_class(**self.split_kwargs)
         elif self.split_mode == UnlearnDatasetSplitMode.Random:
@@ -107,10 +107,11 @@ class UnlearnDataset(BaseModel, ABC):
         assert type(c) == list  # noqa
         assert all([type(e) == int for e in c])  # noqa
         assert len(c) > 0, "Forget should be a list integers"
-        
+
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Train], VisionDataset), "Train should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Validation], VisionDataset), "Valid should be a VisionDataset"
         assert isinstance(self._dataset_splits[UnlearnDatasetSplit.Test], VisionDataset), "Test should be a VisionDataset"
+
         trainf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Train].targets), c)  # type: ignore
         validf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Validation].targets), c)  # type: ignore
         testf_mask = np.isin(np.array(self._dataset_splits[UnlearnDatasetSplit.Test].targets), c)  # type: ignore
@@ -146,41 +147,48 @@ class UnlearnDataset(BaseModel, ABC):
     def _split_temporal(self, n_forget: int) -> None:
         raise NotImplementedError("Temporal split not implemented")
 
-    def get_loader(self, split: UnlearnDatasetSplit, batchsize: int, shuffle: bool = True, num_workers: int = 0, pin_memory: bool = True) -> Optional[DataLoader]:
-        '''
-        Return this split for this dataset.
-        Side effects: none
-        Raised exceptions: SplitNotAvailableError, if the requested split is not available
-        '''
+    def get_loader(
+        self,
+        split: UnlearnDatasetSplit,
+        batchsize: int,
+        shuffle: bool = True,
+        num_workers: int = 0,
+        pin_memory: bool = True,
+    ) -> Optional[DataLoader]:
+        """
+        Return DataLoader for this dataset split.
+        """
         if split not in self._dataset_splits:
             raise SplitNotAvailableError(f"Split {split} not available")
-        return DataLoader(self._dataset_splits[split], batch_size=batchsize, shuffle=shuffle, num_workers=num_workers, pin_memory=pin_memory)
+        return DataLoader(
+            self._dataset_splits[split],
+            batch_size=batchsize,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
 
     def get_splits(self) -> Dict[UnlearnDatasetSplit, Union[Subset, VisionDataset]]:
-        '''
-        Return the available splits.
-        Side effects: none
-        Raised exceptions: none
-        '''
+        """
+        Return the available dataset splits.
+        """
         return self._dataset_splits
-    
-    def denormalize(self, normalized: torch.Tensor) -> torch.Tensor:
-        return normalized * torch.Tensor(self.std).view(-1,1,1) + torch.Tensor(self.mean).view(-1,1,1)
 
-    def save(self, path: str, format: Literal['pkl', 'jpg'] = 'pkl', save_unsplit: bool = False) -> None:
-        '''
+    def denormalize(self, normalized: torch.Tensor) -> torch.Tensor:
+        return normalized * torch.Tensor(self.std).view(-1, 1, 1) + torch.Tensor(self.mean).view(-1, 1, 1)
+
+    def save(self, path: str, format: Literal["pkl", "jpg"] = "pkl", save_unsplit: bool = False) -> None:
+        """
         Save each split to disk.
-        Side effects: saves files to disk
-        Raised exceptions: OS-related errors
-        '''
+        """
         assert self._classes is not None, "Classes should be loaded before saving"
         os.makedirs(path, exist_ok=True)
         for split, data in self._dataset_splits.items():
-            if save_unsplit or (split != UnlearnDatasetSplit.Train and split != UnlearnDatasetSplit.Validation and split != UnlearnDatasetSplit.Test):
-                if format == 'pkl':
-                    with open(os.path.join(path, f"{split.value}.pkl"), 'wb') as f:
+            if save_unsplit or (split not in {UnlearnDatasetSplit.Train, UnlearnDatasetSplit.Validation, UnlearnDatasetSplit.Test}):
+                if format == "pkl":
+                    with open(os.path.join(path, f"{split.value}.pkl"), "wb") as f:
                         pickle.dump(data, f)
-                elif format == 'jpg':
+                elif format == "jpg":
                     split_path = os.path.join(path, split.value)
                     os.makedirs(split_path, exist_ok=True)
                     metadata = []
@@ -188,17 +196,18 @@ class UnlearnDataset(BaseModel, ABC):
                         image, label = data[idx]
                         assert type(label) == int  # noqa
                         image_path = os.path.join(split_path, f"{idx}.jpg")
-                        # Convert tensor to PIL image and save
                         if isinstance(image, torch.Tensor):
                             if self.mean is not None or self.std is not None:
                                 image = self.denormalize(image)
                             image = transforms.ToPILImage()(image)
                         image.save(image_path)
-                        metadata.append({
-                            "file_name": f"{idx}.jpg",
-                            "text": self.make_prompt_for_label(label)
-                        })
-                    with open(os.path.join(split_path, "metadata.jsonl"), 'w') as f:
+                        metadata.append(
+                            {
+                                "file_name": f"{idx}.jpg",
+                                "text": self.make_prompt_for_label(label),
+                            }
+                        )
+                    with open(os.path.join(split_path, "metadata.jsonl"), "w") as f:
                         for entry in metadata:
                             f.write(json.dumps(entry) + "\n")
                 else:
