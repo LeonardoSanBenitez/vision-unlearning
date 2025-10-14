@@ -55,7 +55,6 @@ class MetricImageImage(Metric):
                 org_path = tmp_org.name
             else:
                 org_path = org_img
-    
             if isinstance(pred_img, Image.Image):
                 pred_img.save(tmp_pred, format="PNG")
                 tmp_pred.flush()

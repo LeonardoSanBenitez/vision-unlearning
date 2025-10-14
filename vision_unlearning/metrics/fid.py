@@ -16,10 +16,20 @@ class FrechetInceptionDistance(Metric):
     gen_imgs: List[torch.Tensor] = None
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
-        assert self.real_imgs_path is not None or self.real_imgs is not None,\
-            "Could not find real images data!\r\nPlease define a path to a folder or a torch.Tensor with the images."
-        assert self.gen_imgs_path is not None or self.gen_imgs is not None,\
-            "Could not find generated images data!\r\nPlease define a path to a folder or a torch.Tensor with the images."
+        assert (
+            self.real_imgs_path is not None or self.real_imgs is not None
+        ), (
+            "Could not find real images data!\r\n"
+            "Please define a path to a folder or a torch.Tensor with the images."
+        )
+
+        assert (
+            self.gen_imgs_path is not None or self.gen_imgs is not None
+        ), (
+            "Could not find generated images data!\r\n"
+            "Please define a path to a folder or a torch.Tensor with the images."
+        )
+
 
         if self.real_imgs_path:
             assert self.verify_images_in_path(self.real_imgs_path), \
@@ -107,7 +117,7 @@ class FrechetInceptionDistance(Metric):
             input1=real_images,
             input2=gen_images,
             fid=True,
-            # metrics=['fid'],
+            #metrics=['fid'],
             cuda=torch.cuda.is_available(),
         )
         assert fid_val is not None

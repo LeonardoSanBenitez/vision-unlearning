@@ -44,12 +44,13 @@ def forget_tokens(examples, tokenizer, caption_column, forget_prompt: str):
     length = len(examples[caption_column])
     captions = [forget_prompt] * length
     inputs = tokenizer(
-        captions, 
-        max_length=tokenizer.model_max_length, 
-        padding="max_length", 
-        truncation=True, 
+        captions,
+        max_length=tokenizer.model_max_length,
+        padding="max_length",
+        truncation=True,
         return_tensors="pt"
     )
+
     return inputs.input_ids
 
     

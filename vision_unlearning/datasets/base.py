@@ -43,7 +43,7 @@ class UnlearnDataset(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     split_mode: UnlearnDatasetSplitMode
-    split_kwargs: dict = {}  #  Should contain the required mode-specific downstream args (_split_class, _split_random, _split_temporal)
+    split_kwargs: dict = {}  # Should contain the required mode-specific downstream args (_split_class, _split_random, _split_temporal)
 
     _dataset_splits: Dict[UnlearnDatasetSplit, Union[Subset, VisionDataset]] = {}
     _classes: Optional[List[str]] = None

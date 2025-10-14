@@ -13,6 +13,7 @@ from vision_unlearning.utils.logger import get_logger
 
 logger = get_logger('utils')
 
+
 class ParameterAttributionMethod(BaseModel, ABC):
     @abstractmethod
     def attribute(self, model_name_or_path: str, dataset_name: str, device: str) -> Dict[str, torch.Tensor]:
@@ -36,8 +37,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
         text_enc.eval()
         vae.eval()
         logger.debug("Models loaded")
-        ##################
-        # Prepare dataset 
+        ################### Prepare dataset 
         logger.debug("Loading dataset and casting image column...")
         ds = load_dataset(dataset_name, split="train")  # TODO: add support for other splits
         ds = ds.cast_column(image_column, Image())
@@ -46,9 +46,10 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
             transforms.Resize(512),
             transforms.CenterCrop(512),
             transforms.ToTensor(),
-            transforms.Normalize([0.5]*3, [0.5]*3),
+            transforms.Normalize([0.5] * 3, [0.5] * 3),
         ])
         # map to tensors
+        
         def preprocess(batch):
             batch["pixel_values"] = [pipe(img) for img in batch[image_column]]
             return batch

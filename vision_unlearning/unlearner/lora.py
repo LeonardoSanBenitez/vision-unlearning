@@ -49,7 +49,7 @@ DATASET_NAME_MAPPING = {  # TODO: is this necessary?
 }
 
 
-def unlearn_lora(model_original_id: str, model_lora_id: str, device: str, weight_name: str = "pytorch_lora_weights.safetensors") -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]: # noqa: E501
+def unlearn_lora(model_original_id: str, model_lora_id: str, device: str, weight_name: str = "pytorch_lora_weights.safetensors") -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:  # noqa: E501
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
@@ -100,7 +100,7 @@ class UnlearnerLora(Unlearner):
     hub_token: Optional[str] = Field(None, description="Token for authentication to push to Model Hub.")
     hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`.")
     report_to: str = Field("tensorboard", description="Logging integration for reporting results (e.g., tensorboard, wandb).")
-    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage") # noqa: E501
+    is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggested by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")  # noqa: E501
 
     # Specific to this unlearner, training related
     pretrained_model_name_or_path: str = Field(..., description="Path to pretrained model or model identifier from huggingface.co/models.")
@@ -161,13 +161,10 @@ class UnlearnerLora(Unlearner):
             "`noise_scheduler.config.prediction_type` is chosen."
         ),
     )
-
-
     # Training args from huggingface
     gradient_accumulation_steps: int = Field(1, description="Number of steps to accumulate before performing backward/update pass.")
     num_train_epochs: int = Field(100, description="Number of training epochs.")
     learning_rate: float = Field(1e-4, description="Initial learning rate after warmup period.")
-
     output_dir: str = Field("sd-model-finetuned-lora", description="Output directory for model predictions and checkpoints.")
     logging_dir: str = Field("logs", description="Directory for TensorBoard logs.")
     seed: Optional[int] = Field(None, description="A seed for reproducible training.")
@@ -184,7 +181,6 @@ class UnlearnerLora(Unlearner):
                 "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
                 " Please use `huggingface-cli login` to authenticate with the Hub."
             )
-
         if not self.is_lora_negated:
             # TODO: this shiould be a simple matter of following the gradinet or its negation
             raise NotImplementedError()
