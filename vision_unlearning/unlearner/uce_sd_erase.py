@@ -16,7 +16,7 @@ from typing import Optional, Any, cast
 import torch  # noqa: F401
 import torch.nn as nn
 from pydantic import Field
-from safetensors.torch import save_file
+from safetensors.torch import save_file, load_file
 from diffusers import DiffusionPipeline
 
 import base
@@ -140,6 +140,42 @@ class UCE(base.Unlearner):
             self.erase_scale, self.preserve_scale, self.lamb,
             self.output_dir, self.device, torch_dtype
         )
+    
+    def generate_images(self, prompt): 
+        device = self.device
+        pipe = DiffusionPipeline.from_pretrained(
+            self.pretrained_model_name_or_path,
+            torch_dtype=torch.float16,
+            safety_checker=None      
+        ).to(device)
+
+        print("Base model is loaded.\n")
+
+        uce_weight_path = "../uce_models/uce_sd_weights.safetensors"
+        uce_state_dict = load_file(uce_weight_path)
+
+        print(f"Loaded {len(uce_state_dict)} UCE weight tensors")
+
+        # Applying the modified weights
+        with torch.no_grad():
+            for name, param in pipe.unet.named_parameters():
+                if name in uce_state_dict:
+                    print(f"Updating: {name}")
+                    param.copy_(uce_state_dict[name])
+        
+        output = pipe(prompt, num_inference_steps=30, guidance_scale=7.5)
+        image = output.images[0]
+        image.save("../generated_images/erased_output.png")
+        print("Image saved as 'erased_output.png")
+        
+
+
+
+
+
+
+
+    
 
 
 # ===================== Helper Functions ===================== #
