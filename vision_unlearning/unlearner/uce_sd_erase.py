@@ -328,13 +328,15 @@ def main() -> None:
     """Run UCE training with example inputs."""
     uce = UCE(
         model_id="CompVis/stable-diffusion-v1-4",
-        edit_concepts="Van Gogh; Picasso",
+        edit_concepts="cat; dog", #Van Gogh; Picasso
         guide_concepts="art",
-        preserve_concepts="Monet; Rembrandt; Warhol",
+        preserve_concepts="lion, tiger, leopard", #Monet; Rembrandt; Warhol
         device="cuda:0",
-        concept_type=ConceptType.Art
+        concept_type=ConceptType.Object
     )
     uce.train()
+    prompt = input("Enter the prompt:-\n")
+    uce.generate_images(prompt)
 
 
 if __name__ == "__main__":
