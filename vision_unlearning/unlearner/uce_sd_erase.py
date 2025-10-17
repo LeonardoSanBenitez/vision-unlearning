@@ -18,6 +18,7 @@ import torch.nn as nn
 from pydantic import Field
 from safetensors.torch import save_file, load_file
 from diffusers import DiffusionPipeline
+from IPython.display import display
 
 import base
 
@@ -36,7 +37,7 @@ class UCE(base.Unlearner):
         description="Path to pretrained model or model identifier from huggingface.co/models."
     )
     device: str = "cuda:0"
-    erase_scale: float = 1.0
+    erase_scale: float = 0.5
     preserve_scale: float = 1.0
     lamb: float = 0.5
     output_dir: str = Field(
@@ -83,6 +84,9 @@ class UCE(base.Unlearner):
             guide_list = [c.strip() for c in self.guide_concepts.split(';') if c.strip()]
         elif self.concept_type == ConceptType.Art:
             guide_list = ["art"] * len(edit_list)
+        else:
+            #default guide for objects: use a neutral object class or same as edit concept
+            guide_list = [e for e in edit_list] 
 
         if len(guide_list) == 1:
             guide_list *= len(edit_list)
@@ -117,12 +121,12 @@ class UCE(base.Unlearner):
                     edit_list.extend([
                         f"image of {concept}", f"photo of {concept}",
                         f"portrait of {concept}", f"picture of {concept}",
-                        f"painting of {concept}"
+                        f"painting of {concept}", f"picture of {concept} doing something"
                     ])
                     guide_list.extend([
                         f"image of {guide_concept}", f"photo of {guide_concept}",
                         f"portrait of {guide_concept}", f"picture of {guide_concept}",
-                        f"painting of {guide_concept}"
+                        f"painting of {guide_concept}", f"picture of {concept} doing something"
                     ])
 
         print(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list}\n")
@@ -165,6 +169,8 @@ class UCE(base.Unlearner):
         
         output = pipe(prompt, num_inference_steps=30, guidance_scale=7.5)
         image = output.images[0]
+        display(image)
+        os.makedirs("../generated_images",exist_ok=True)
         image.save("../generated_images/erased_output.png")
         print("Image saved as 'erased_output.png")
         
@@ -262,8 +268,14 @@ def update_weights(original_modules: list[torch.nn.Module],
             mat1 += preserve_scale * (v_i_star @ c_i.T)
             mat2 += preserve_scale * (c_i @ c_i.T)
 
+        # uce_modules[module_idx].weight = torch.nn.Parameter(
+        #     mat1 @ torch.inverse(mat2.float()).to(torch_dtype)
+        # )
+
+        eps = 1e-6
+        mat2_float = mat2.float() + eps * torch.eye(mat2.shape[0], device=mat2.device)
         uce_modules[module_idx].weight = torch.nn.Parameter(
-            mat1 @ torch.inverse(mat2.float()).to(torch_dtype)
+            (mat1 @ torch.inverse(mat2_float)).to(torch_dtype)
         )
 
     return uce_modules
@@ -330,7 +342,7 @@ def main() -> None:
         model_id="CompVis/stable-diffusion-v1-4",
         edit_concepts="cat; dog", #Van Gogh; Picasso
         guide_concepts="art",
-        preserve_concepts="lion, tiger, leopard", #Monet; Rembrandt; Warhol
+        preserve_concepts="lion; tiger; leopard", #Monet; Rembrandt; Warhol
         device="cuda:0",
         concept_type=ConceptType.Object
     )

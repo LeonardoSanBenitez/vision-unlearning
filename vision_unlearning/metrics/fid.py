@@ -12,8 +12,8 @@ class FrechetInceptionDistance(Metric):
     metrics: list[str] = ["FID"]
     real_imgs_path: Optional[str] = None
     gen_imgs_path: Optional[str] = None
-    real_imgs: Optional[List[torch.Tensor]] = None
-    gen_imgs: Optional[List[torch.Tensor]] = None
+    real_imgs: Optional[List[torch.Tensor]]
+    gen_imgs: Optional[List[torch.Tensor]]
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         assert (
