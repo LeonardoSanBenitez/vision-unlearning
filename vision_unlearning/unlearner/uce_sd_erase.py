@@ -53,6 +53,23 @@ class UCE(base.Unlearner):
     )
     expand_prompts: bool = True
 
+    def __init__(self, **data: Any):
+        """Custom initializer for UCE with informative logging."""
+        super().__init__(**data)
+
+        print("\n[INFO] Initializing Unified Concept Eraser (UCE)...")
+        print(f" - Base model:        {self.pretrained_model_name_or_path}")
+        print(f" - Device:            {self.device}")
+        print(f" - Erase scale:       {self.erase_scale}")
+        print(f" - Preserve scale:    {self.preserve_scale}")
+        print(f" - Regularization λ:  {self.lamb}")
+        print(f" - Edit concepts:     {self.edit_concepts}")
+        print(f" - Guide concepts:    {self.guide_concepts}")
+        print(f" - Preserve concepts: {self.preserve_concepts}")
+        print(f" - Concept type:      {self.concept_type}")
+        print(f" - Output directory:  {self.output_dir}")
+        print(f" - Expand prompts:    {self.expand_prompts}\n")
+
     def train(self) -> None:
         """Main UCE training and concept erasure logic."""
 
@@ -129,7 +146,7 @@ class UCE(base.Unlearner):
                         f"painting of {guide_concept}", f"picture of {concept} doing something"
                     ])
 
-        print(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list}\n")
+        print(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")
 
         # ==== Diffusion pipeline ====
         pipe = DiffusionPipeline.from_pretrained(
@@ -339,12 +356,15 @@ def uce_run(pipe: Any, edit_concepts: list[str], guide_concepts: list[str],
 def main() -> None:
     """Run UCE training with example inputs."""
     uce = UCE(
-        model_id="CompVis/stable-diffusion-v1-4",
-        edit_concepts="cat; dog", #Van Gogh; Picasso
-        guide_concepts="art",
-        preserve_concepts="lion; tiger; leopard", #Monet; Rembrandt; Warhol
+        pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4",
+        erase_scale=0.9,
+        preserve_scale=1.0,
+        lamb=0.5,
+        edit_concepts="cat; dog", # Van Gogh; Picasso
+        guide_concepts="animals",
+        preserve_concepts="lion; tiger; leopard", # Monet; Rembrandt; Warhol
         device="cuda:0",
-        concept_type=ConceptType.Object
+        concept_type=ConceptType.Object # Can be ConceptType.Art
     )
     uce.train()
     prompt = input("Enter the prompt:-\n")
@@ -353,3 +373,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
