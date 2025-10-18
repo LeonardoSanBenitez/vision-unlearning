@@ -25,6 +25,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
     def attribute(self, model_name_or_path: str, dataset_name: str, device: str, image_column: str = 'image', caption_column: str = 'text', batch_size: int = 1) -> Dict[str, torch.Tensor]:
         '''
         @return saliency: keys like "down_blocks.1.attentions.1.transformer_blocks.0.attn1.to_v.weight", values are tensors of same shape as the parameter, containing the accumulated saliency values.
+        Tensor are of type torch.float32.
         '''
         logger.debug("Loading scheduler and models...")
         sched = DDPMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
@@ -40,6 +41,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
 
         ##################
         # Prepare dataset
+        # TODO: this should already receive the dataloaders
         logger.debug("Loading dataset and casting image column...")
         ds = load_dataset(dataset_name, split="train")  # TODO: add support for other splits
         ds = ds.cast_column(image_column, Image())
