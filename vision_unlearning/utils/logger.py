@@ -17,6 +17,7 @@ def get_logger(name: str, level=logging.INFO) -> logging.Logger:
     stdout_handler.setFormatter(FORMATTER)
     logger.addHandler(stdout_handler)
     logger.setLevel(level)
+    logger.propagate = False
     return logger
 
 

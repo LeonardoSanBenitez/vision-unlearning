@@ -24,7 +24,7 @@ from vision_unlearning.unlearner.base import Unlearner
 from vision_unlearning.utils.logger import get_logger
 
 
-logger = get_logger('trainer')
+logger = get_logger('trainer.uce')
 
 
 class ConceptType(str, Enum):
