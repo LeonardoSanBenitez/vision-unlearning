@@ -20,7 +20,11 @@ from safetensors.torch import save_file, load_file
 from diffusers import DiffusionPipeline
 from IPython.display import display
 
-import base
+from vision_unlearning.unlearner.base import Unlearner
+from vision_unlearning.utils.logger import get_logger
+
+
+logger = get_logger('trainer')
 
 
 class ConceptType(str, Enum):
@@ -29,7 +33,7 @@ class ConceptType(str, Enum):
     Art = "art"
 
 
-class UCE(base.Unlearner):
+class UCE(Unlearner):
     """Unified Concept Eraser class."""
 
     pretrained_model_name_or_path: str = Field(
@@ -57,18 +61,198 @@ class UCE(base.Unlearner):
         """Custom initializer for UCE with informative logging."""
         super().__init__(**data)
 
-        print("\n[INFO] Initializing Unified Concept Eraser (UCE)...")
-        print(f" - Base model:        {self.pretrained_model_name_or_path}")
-        print(f" - Device:            {self.device}")
-        print(f" - Erase scale:       {self.erase_scale}")
-        print(f" - Preserve scale:    {self.preserve_scale}")
-        print(f" - Regularization λ:  {self.lamb}")
-        print(f" - Edit concepts:     {self.edit_concepts}")
-        print(f" - Guide concepts:    {self.guide_concepts}")
-        print(f" - Preserve concepts: {self.preserve_concepts}")
-        print(f" - Concept type:      {self.concept_type}")
-        print(f" - Output directory:  {self.output_dir}")
-        print(f" - Expand prompts:    {self.expand_prompts}\n")
+        logger.info("\n[INFO] Initializing Unified Concept Eraser (UCE)...")
+        logger.info(f" - Base model:        {self.pretrained_model_name_or_path}")
+        logger.info(f" - Device:            {self.device}")
+        logger.info(f" - Erase scale:       {self.erase_scale}")
+        logger.info(f" - Preserve scale:    {self.preserve_scale}")
+        logger.info(f" - Regularization λ:  {self.lamb}")
+        logger.info(f" - Edit concepts:     {self.edit_concepts}")
+        logger.info(f" - Guide concepts:    {self.guide_concepts}")
+        logger.info(f" - Preserve concepts: {self.preserve_concepts}")
+        logger.info(f" - Concept type:      {self.concept_type}")
+        logger.info(f" - Output directory:  {self.output_dir}")
+        logger.info(f" - Expand prompts:    {self.expand_prompts}\n")
+
+
+    def _collect_text_embeddings(
+        self,
+        pipe: Any,
+        concepts: list[str],
+        device: str,
+        torch_dtype: torch.dtype
+    ) -> dict[str, torch.Tensor]:
+        """Return dict {concept: last_token_embedding}."""
+        uce_embeds: dict[str, torch.Tensor] = {}
+
+        for e in concepts:
+            if e in uce_embeds:
+                continue
+            t_emb = pipe.encode_prompt(
+                prompt=e,
+                device=device,
+                num_images_per_prompt=1,
+                do_classifier_free_guidance=False
+            )
+
+            last_token_idx = (
+                pipe.tokenizer(
+                    e,
+                    padding="max_length",
+                    max_length=pipe.tokenizer.model_max_length,
+                    truncation=True,
+                    return_tensors="pt"
+                )["attention_mask"]
+            ).sum() - 2
+
+            uce_embeds[e] = t_emb[0][:, last_token_idx, :]
+        return uce_embeds
+
+
+    def _collect_guide_outputs(
+        self,
+        concepts: list[str],
+        embeds: dict[str, torch.Tensor],
+        modules: list[torch.nn.Module]
+    ) -> dict[str, list[torch.Tensor]]:
+        """Collect cross-attention outputs for guide/preserve concepts."""
+        outputs: dict[str, list[torch.Tensor]] = {}
+
+        for g in concepts:
+            if g in outputs:
+                continue
+            t_emb = embeds[g]
+            for module in modules:
+                outputs[g] = outputs.get(g, []) + [module(t_emb)]
+        return outputs
+
+
+    def _update_weights(
+        self,
+        original_modules: list[torch.nn.Module],
+        erase_embeds: dict[str, torch.Tensor],
+        guide_outputs: dict[str, list[torch.Tensor]],
+        edit_concepts: list[str],
+        guide_concepts: list[str],
+        preserve_concepts: list[str],
+        erase_scale: float,
+        preserve_scale: float,
+        lamb: float,
+        device: str,
+        torch_dtype: torch.dtype
+    ) -> list[torch.nn.Module]:
+        """Apply the UCE weight update to each module and return new modules."""
+        uce_modules = copy.deepcopy(original_modules)
+
+        for module_idx, module in enumerate(original_modules):
+            if isinstance(module, nn.Module):
+                w_old: torch.Tensor = cast(torch.Tensor, module.weight)
+            else:
+                w_old = cast(torch.Tensor, module)  # fallback if somehow not a module
+
+            # Compute mat1 safely
+            mat1: torch.Tensor = lamb * w_old
+
+            # Compute mat2 safely
+            mat2: torch.Tensor = lamb * torch.eye(
+                w_old.shape[1], device=w_old.device, dtype=w_old.dtype
+            )
+
+            # Erase concepts
+            for erase_concept, guide_concept in zip(edit_concepts, guide_concepts):
+                c_i = erase_embeds[erase_concept].T
+                v_i_star = guide_outputs[guide_concept][module_idx].T
+                mat1 += erase_scale * (v_i_star @ c_i.T)
+                mat2 += erase_scale * (c_i @ c_i.T)
+
+            # Preserve concepts
+            for preserve_concept in preserve_concepts:
+                c_i = erase_embeds[preserve_concept].T
+                v_i_star = guide_outputs[preserve_concept][module_idx].T
+                mat1 += preserve_scale * (v_i_star @ c_i.T)
+                mat2 += preserve_scale * (c_i @ c_i.T)
+
+            # uce_modules[module_idx].weight = torch.nn.Parameter(
+            #     mat1 @ torch.inverse(mat2.float()).to(torch_dtype)
+            # )
+
+            eps = 1e-6
+            mat2_float = mat2.float() + eps * torch.eye(mat2.shape[0], device=mat2.device)
+            uce_modules[module_idx].weight = torch.nn.Parameter(
+                (mat1 @ torch.inverse(mat2_float)).to(torch_dtype)
+            )
+
+        return uce_modules
+
+
+    def _save_uce_weights(
+        self,
+        uce_modules: list[torch.nn.Module],
+        uce_module_names: list[str],
+    ) -> None:
+        """Save updated module weights to a safetensors file."""
+        uce_state_dict: dict[str, torch.Tensor] = {}
+        for name, parameter in zip(uce_module_names, uce_modules):
+            weight_tensor: torch.Tensor = cast(torch.Tensor, parameter.weight)
+            uce_state_dict[name + ".weight"] = weight_tensor
+
+        # Just modified weights
+        save_file(uce_state_dict, os.path.join(self.output_dir, "uce_sd_weights.safetensors"))
+
+        # Entire model
+        pipe = self.get_pipeline_from_modified_weights()
+        pipe.save_pretrained(self.output_dir)
+
+
+    def _uce_run(
+        self,
+        pipe: Any,
+        edit_concepts: list[str],
+        guide_concepts: list[str],
+        preserve_concepts: list[str],
+        erase_scale: float,
+        preserve_scale: float,
+        lamb: float,
+        device: str = "cuda:0",
+        torch_dtype: torch.dtype = torch.float32
+    ) -> None:
+        """Main execution routine for Unified Concept Erasure."""
+        torch.set_grad_enabled(False)
+        start_time = time.time()
+
+        # Find relevant modules
+        uce_modules: list[torch.nn.Module] = []
+        uce_module_names: list[str] = []
+
+        for name, module in pipe.unet.named_modules():
+            if "attn2" in name and (name.endswith("to_v") or name.endswith("to_k")):
+                uce_modules.append(module)
+                uce_module_names.append(name)
+
+        assert len(uce_modules) > 0, "No attention modules found for UCE to operate on."
+        original_modules = copy.deepcopy(uce_modules)
+
+        # 1. Collect embeddings
+        all_concepts = edit_concepts + guide_concepts + preserve_concepts
+        erase_embeds = self._collect_text_embeddings(pipe, all_concepts, device, torch_dtype)
+        assert all(c in erase_embeds for c in all_concepts), "Some concepts failed to produce embeddings."
+
+        # 2. Collect guide outputs
+        guide_outputs = self._collect_guide_outputs(guide_concepts + preserve_concepts, erase_embeds, original_modules)
+
+        # 3. Apply weight updates
+        updated_modules = self._update_weights(
+            original_modules, erase_embeds, guide_outputs,
+            edit_concepts, guide_concepts, preserve_concepts,
+            erase_scale, preserve_scale, lamb, device, torch_dtype
+        )
+
+        # 4. Save weights
+        self._save_uce_weights(updated_modules, uce_module_names)
+
+        duration = time.time() - start_time
+        logger.info(f"\nErased concepts using UCE.\nModel edited in {duration:.2f} seconds.\n")
+
 
     def train(self) -> None:
         """Main UCE training and concept erasure logic."""
@@ -146,231 +330,48 @@ class UCE(base.Unlearner):
                         f"painting of {guide_concept}", f"picture of {concept} doing something"
                     ])
 
-        print(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")
+        logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")
 
         # ==== Diffusion pipeline ====
         pipe = DiffusionPipeline.from_pretrained(
             self.pretrained_model_name_or_path,
             torch_dtype=torch_dtype,
             safety_checker=None,
-            vae=None
         ).to(self.device)
 
-        uce_run(
-            pipe, edit_list, guide_list, preserve_list,
-            self.erase_scale, self.preserve_scale, self.lamb,
-            self.output_dir, self.device, torch_dtype
+        self._uce_run(
+            pipe,
+            edit_list,
+            guide_list,
+            preserve_list,
+            self.erase_scale,
+            self.preserve_scale,
+            self.lamb,
+            self.device,
+            torch_dtype
         )
-    
-    def generate_images(self, prompt): 
-        device = self.device
+
+    def get_pipeline_from_modified_weights(self) -> DiffusionPipeline:
         pipe = DiffusionPipeline.from_pretrained(
             self.pretrained_model_name_or_path,
             torch_dtype=torch.float16,
             safety_checker=None      
-        ).to(device)
+        ).to(self.device)
 
-        print("Base model is loaded.\n")
+        logger.debug("Base model is loaded.\n")
 
-        uce_weight_path = "../uce_models/uce_sd_weights.safetensors"
-        uce_state_dict = load_file(uce_weight_path)
-
-        print(f"Loaded {len(uce_state_dict)} UCE weight tensors")
+        uce_state_dict = load_file(os.path.join(self.output_dir, "uce_sd_weights.safetensors"))
+        logger.debug(f"Loaded {len(uce_state_dict)} UCE weight tensors")
 
         # Applying the modified weights
         with torch.no_grad():
             for name, param in pipe.unet.named_parameters():
                 if name in uce_state_dict:
-                    print(f"Updating: {name}")
+                    logger.debug(f"Updating: {name}")
                     param.copy_(uce_state_dict[name])
-        
-        output = pipe(prompt, num_inference_steps=30, guidance_scale=7.5)
-        image = output.images[0]
-        display(image)
-        os.makedirs("../generated_images",exist_ok=True)
-        image.save("../generated_images/erased_output.png")
-        print("Image saved as 'erased_output.png")
-        
+
+        return pipe
 
 
 
-
-
-
-
-    
-
-
-# ===================== Helper Functions ===================== #
-
-def collect_text_embeddings(pipe: Any, concepts: list[str],
-                            device: str, torch_dtype: torch.dtype) -> dict[str, torch.Tensor]:
-    """Return dict {concept: last_token_embedding}."""
-    uce_embeds: dict[str, torch.Tensor] = {}
-
-    for e in concepts:
-        if e in uce_embeds:
-            continue
-        t_emb = pipe.encode_prompt(
-            prompt=e,
-            device=device,
-            num_images_per_prompt=1,
-            do_classifier_free_guidance=False
-        )
-
-        last_token_idx = (
-            pipe.tokenizer(
-                e,
-                padding="max_length",
-                max_length=pipe.tokenizer.model_max_length,
-                truncation=True,
-                return_tensors="pt"
-            )["attention_mask"]
-        ).sum() - 2
-
-        uce_embeds[e] = t_emb[0][:, last_token_idx, :]
-    return uce_embeds
-
-
-def collect_guide_outputs(concepts: list[str], embeds: dict[str, torch.Tensor],
-                          modules: list[torch.nn.Module]) -> dict[str, list[torch.Tensor]]:
-    """Collect cross-attention outputs for guide/preserve concepts."""
-    outputs: dict[str, list[torch.Tensor]] = {}
-
-    for g in concepts:
-        if g in outputs:
-            continue
-        t_emb = embeds[g]
-        for module in modules:
-            outputs[g] = outputs.get(g, []) + [module(t_emb)]
-    return outputs
-
-
-def update_weights(original_modules: list[torch.nn.Module],
-                   erase_embeds: dict[str, torch.Tensor],
-                   guide_outputs: dict[str, list[torch.Tensor]],
-                   edit_concepts: list[str], guide_concepts: list[str],
-                   preserve_concepts: list[str],
-                   erase_scale: float, preserve_scale: float,
-                   lamb: float, device: str, torch_dtype: torch.dtype
-                   ) -> list[torch.nn.Module]:
-    """Apply the UCE weight update to each module and return new modules."""
-    uce_modules = copy.deepcopy(original_modules)
-
-    for module_idx, module in enumerate(original_modules):
-        if isinstance(module, nn.Module):
-            w_old: torch.Tensor = cast(torch.Tensor, module.weight)
-        else:
-            w_old = cast(torch.Tensor, module)  # fallback if somehow not a module
-
-        # Compute mat1 safely
-        mat1: torch.Tensor = lamb * w_old
-
-        # Compute mat2 safely
-        mat2: torch.Tensor = lamb * torch.eye(
-            w_old.shape[1], device=w_old.device, dtype=w_old.dtype
-        )
-
-        # Erase concepts
-        for erase_concept, guide_concept in zip(edit_concepts, guide_concepts):
-            c_i = erase_embeds[erase_concept].T
-            v_i_star = guide_outputs[guide_concept][module_idx].T
-            mat1 += erase_scale * (v_i_star @ c_i.T)
-            mat2 += erase_scale * (c_i @ c_i.T)
-
-        # Preserve concepts
-        for preserve_concept in preserve_concepts:
-            c_i = erase_embeds[preserve_concept].T
-            v_i_star = guide_outputs[preserve_concept][module_idx].T
-            mat1 += preserve_scale * (v_i_star @ c_i.T)
-            mat2 += preserve_scale * (c_i @ c_i.T)
-
-        # uce_modules[module_idx].weight = torch.nn.Parameter(
-        #     mat1 @ torch.inverse(mat2.float()).to(torch_dtype)
-        # )
-
-        eps = 1e-6
-        mat2_float = mat2.float() + eps * torch.eye(mat2.shape[0], device=mat2.device)
-        uce_modules[module_idx].weight = torch.nn.Parameter(
-            (mat1 @ torch.inverse(mat2_float)).to(torch_dtype)
-        )
-
-    return uce_modules
-
-
-def save_uce_weights(uce_modules: list[torch.nn.Module],
-                     uce_module_names: list[str],
-                     save_dir: str) -> None:
-    """Save updated module weights to a safetensors file."""
-    uce_state_dict: dict[str, torch.Tensor] = {}
-    for name, parameter in zip(uce_module_names, uce_modules):
-        weight_tensor: torch.Tensor = cast(torch.Tensor, parameter.weight)
-        uce_state_dict[name + ".weight"] = weight_tensor
-
-    # You can customize filename here
-    save_file(uce_state_dict, os.path.join(save_dir, "uce_sd_weights.safetensors"))
-
-
-def uce_run(pipe: Any, edit_concepts: list[str], guide_concepts: list[str],
-            preserve_concepts: list[str], erase_scale: float,
-            preserve_scale: float, lamb: float, save_dir: str,
-            device: str = "cuda:0", torch_dtype: torch.dtype = torch.float32) -> None:
-    """Main execution routine for Unified Concept Erasure."""
-    torch.set_grad_enabled(False)
-    start_time = time.time()
-
-    # Find relevant modules
-    uce_modules: list[torch.nn.Module] = []
-    uce_module_names: list[str] = []
-
-    for name, module in pipe.unet.named_modules():
-        if "attn2" in name and (name.endswith("to_v") or name.endswith("to_k")):
-            uce_modules.append(module)
-            uce_module_names.append(name)
-
-    assert len(uce_modules) > 0, "No attention modules found for UCE to operate on."
-    original_modules = copy.deepcopy(uce_modules)
-
-    # 1. Collect embeddings
-    all_concepts = edit_concepts + guide_concepts + preserve_concepts
-    erase_embeds = collect_text_embeddings(pipe, all_concepts, device, torch_dtype)
-    assert all(c in erase_embeds for c in all_concepts), "Some concepts failed to produce embeddings."
-
-    # 2. Collect guide outputs
-    guide_outputs = collect_guide_outputs(guide_concepts + preserve_concepts, erase_embeds, original_modules)
-
-    # 3. Apply weight updates
-    updated_modules = update_weights(
-        original_modules, erase_embeds, guide_outputs,
-        edit_concepts, guide_concepts, preserve_concepts,
-        erase_scale, preserve_scale, lamb, device, torch_dtype
-    )
-
-    # 4. Save weights
-    save_uce_weights(updated_modules, uce_module_names, save_dir)
-
-    duration = time.time() - start_time
-    print(f"\nErased concepts using UCE.\nModel edited in {duration:.2f} seconds.\n")
-
-
-def main() -> None:
-    """Run UCE training with example inputs."""
-    uce = UCE(
-        pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4",
-        erase_scale=0.9,
-        preserve_scale=1.0,
-        lamb=0.5,
-        edit_concepts="cat; dog", # Van Gogh; Picasso
-        guide_concepts="animals",
-        preserve_concepts="lion; tiger; leopard", # Monet; Rembrandt; Warhol
-        device="cuda:0",
-        concept_type=ConceptType.Object # Can be ConceptType.Art
-    )
-    uce.train()
-    prompt = input("Enter the prompt:-\n")
-    uce.generate_images(prompt)
-
-
-if __name__ == "__main__":
-    main()
 

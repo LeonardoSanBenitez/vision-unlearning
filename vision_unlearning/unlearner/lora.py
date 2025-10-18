@@ -170,6 +170,7 @@ class UnlearnerLora(Unlearner):
     seed: Optional[int] = Field(None, description="A seed for reproducible training.")
     local_rank: int = Field(-1, description="Local rank for distributed training.")
 
+
     def train(self):
         if isinstance(self.final_eval_prompts_retain, str):
             raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")
