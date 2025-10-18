@@ -22,11 +22,9 @@ class ParameterAttributionMethod(BaseModel, ABC):
 
 
 class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
-    q: float  # increasing q selects more parameters; between 0 and 1
-
     def attribute(self, model_name_or_path: str, dataset_name: str, device: str, image_column: str = 'image', caption_column: str = 'text', batch_size: int = 1) -> Dict[str, torch.Tensor]:
         '''
-        @return mask_dict: keys like "down_blocks.1.attentions.1.transformer_blocks.0.attn1.to_v.weight"
+        @return saliency: keys like "down_blocks.1.attentions.1.transformer_blocks.0.attn1.to_v.weight", values are tensors of same shape as the parameter, containing the accumulated saliency values.
         '''
         logger.debug("Loading scheduler and models...")
         sched = DDPMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
@@ -106,20 +104,4 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
 
         logger.debug("Finished accumulating saliency.")
 
-        ##################
-        # Flatten & threshold → mask
-        logger.debug("Flattening saliency values to compute threshold...")
-        all_vals = torch.cat([v.flatten() for v in saliency.values()])
-
-        k = int(len(all_vals) * self.q)
-        # find the value that’s the cutoff for the top-q
-        # since we want the largest values, we take the (N-k+1)-th smallest
-        cutoff = torch.kthvalue(all_vals, len(all_vals) - k + 1).values.item()
-        logger.debug(f"Threshold for top {self.q*100:.0f}% saliency is {cutoff:.6f}")
-
-        logger.debug("Building binary mask dict...")
-        mask_dict = {}
-        for name, tensor in saliency.items():
-            mask_dict[name] = (tensor >= cutoff).to(torch.uint8)
-
-        return mask_dict
+        return {name: tensor.clone().detach() for name, tensor in saliency.items()}

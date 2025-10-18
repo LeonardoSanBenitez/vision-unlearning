@@ -56,13 +56,15 @@ def preprocess_train(examples, tokenizer, caption_column, image_column, train_tr
     Source: https://github.com/huggingface/diffusers/blob/main/examples/text_to_image/train_text_to_image_lora.py
 
     concept_overwrite: concept to be used for overwriting, described as an textual string (used to modify the prompt).
-    TODO: this handling of concept_overwrite is weird... I wish this were somewhat more structured/organized/clear
+
+    TODO: this handling of concept_overwrite is weird... I wish this were somewhat more structured/organized/clear.
+    For example, the overwriting string may need a more complex prompt than just "an image of f{concept_overwrite}", or with a different article
     '''
     images = [image.convert("RGB") for image in examples[image_column]]
     examples["pixel_values"] = [train_transforms(image) for image in images]
     examples["input_ids"] = tokenize_captions(examples, tokenizer, caption_column)
     if concept_overwrite:
-        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, "an image of garbage_truck")  # TODO hardcoded
+        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, f"an image of f{concept_overwrite}")
     return examples
 
 

@@ -93,9 +93,9 @@ class UnlearnerLora(Unlearner):
     '''
     # General arguments
     lora_r: int = Field(default=32, description="Dimensionality of the LoRA rank (R).")
-    lora_alpha: float = Field(default=64, description="Lora alpha.")
+    lora_alpha: int = Field(default=64, description="Lora alpha.")
     # lora_dropout: float = Field(default=0.0, metadata={"help": "Lora dropout."})
-    target_modules: Optional[List[str]] = Field(default=None, description="Which module will be added the lora adapter.")  # TODO: is this being used??
+    target_modules: List[str] = Field(default=["to_k", "to_q", "to_v", "to_out.0"], description="Which module will be added the lora adapter.")
     is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")  # noqa
     seed: int = Field(default=42, description="Random seed for initialization.")
 
@@ -206,7 +206,7 @@ class UnlearnerLora(Unlearner):
             r=self.lora_r,
             lora_alpha=self.lora_alpha,  # type: ignore  # TODO: should this be int or float?
             init_lora_weights="gaussian",
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+            target_modules=self.target_modules,
         )
 
     def _get_accelerator(self):
