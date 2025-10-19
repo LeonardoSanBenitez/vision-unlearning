@@ -41,9 +41,9 @@ class UCE(Unlearner):
         description="Path to pretrained model or model identifier from huggingface.co/models."
     )
     device: str = "cuda:0"
-    erase_scale: float = 0.5
-    preserve_scale: float = 1.0
-    lamb: float = 0.5
+    erase_scale: float = Field(0.5, description="Must be positive. Higher = more aggressive erasure?? TODO explain")
+    preserve_scale: float = Field(1.0, description="Must be non-negative. Higher = more careful preservation?? TODO explain")
+    lamb: float = Field(0.5, description="Must be between 0 and 1. Higher = ?? TODO explain")
     output_dir: str = Field(
         default="../uce_models",
         description="Output directory for model predictions and checkpoints."
