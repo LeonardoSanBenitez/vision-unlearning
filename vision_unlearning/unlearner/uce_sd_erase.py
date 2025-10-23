@@ -23,7 +23,7 @@ from IPython.display import display
 from vision_unlearning.unlearner.base import Unlearner
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.evaluator import EvaluatorTextToImage, plot_gradient_conflict_hist, log_validation
-
+from vision_unlearning.metrics import MetricImageTextSimilarity
 
 
 logger = get_logger('trainer.uce')
