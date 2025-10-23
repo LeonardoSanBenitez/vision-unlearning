@@ -17,11 +17,13 @@ import torch  # noqa: F401
 import torch.nn as nn
 from pydantic import Field
 from safetensors.torch import save_file, load_file
-from diffusers import DiffusionPipeline
+from diffusers import DiffusionPipeline, AutoPipelineForText2Image
 from IPython.display import display
 
 from vision_unlearning.unlearner.base import Unlearner
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.evaluator import EvaluatorTextToImage, plot_gradient_conflict_hist, log_validation
+
 
 
 logger = get_logger('trainer.uce')
@@ -56,6 +58,7 @@ class UCE(Unlearner):
         description="Type of concept to unlearn."
     )
     expand_prompts: bool = True
+    compute_runtimes: bool = Field(True, description="Whether to compute the runtimes of the training, for evaluation purposes.")
 
     def __init__(self, **data: Any):
         """Custom initializer for UCE with informative logging."""
@@ -73,6 +76,8 @@ class UCE(Unlearner):
         logger.info(f" - Concept type:      {self.concept_type}")
         logger.info(f" - Output directory:  {self.output_dir}")
         logger.info(f" - Expand prompts:    {self.expand_prompts}\n")
+        logger.info(f" - Compute runtimes:  {self.compute_runtimes}\n")
+        
 
 
     def _collect_text_embeddings(
@@ -351,6 +356,8 @@ class UCE(Unlearner):
             torch_dtype
         )
 
+        return edit_list, guide_list, preserve_list
+
     def get_pipeline_from_modified_weights(self) -> DiffusionPipeline:
         pipe = DiffusionPipeline.from_pretrained(
             self.pretrained_model_name_or_path,
@@ -371,6 +378,25 @@ class UCE(Unlearner):
                     param.copy_(uce_state_dict[name])
 
         return pipe
+
+    def evaluate(self, edit_list, preserve_list):
+        pipeline_original = AutoPipelineForText2Image.from_pretrained(self.pretrained_model_name_or_path, torch_dtype=torch.float16, safety_checker=None).to(self.device)
+        pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(self.output_dir, torch_dtype=torch.float16, safety_checker=None).to(self.device)
+        pipelined_learned = pipeline_unlearned
+
+        evaluator = EvaluatorTextToImage(
+            pipeline_original=pipeline_original,
+            pipeline_unlearned=pipeline_unlearned,
+            pipeline_learned=pipelined_learned,
+            prompts_forget= edit_list,
+            prompts_retain= preserve_list
+            metric_clip= MetricImageTextSimilarity(metrics=['clip']),
+            compute_runtimes= self.compute_runtimes
+        )
+
+        eval_result, eval_images = evaluator.evaluate()
+
+        return eval_result, eval_images
 
 
 
