@@ -389,7 +389,7 @@ class UCE(Unlearner):
             pipeline_unlearned=pipeline_unlearned,
             pipeline_learned=pipelined_learned,
             prompts_forget= edit_list,
-            prompts_retain= preserve_list
+            prompts_retain= preserve_list,
             metric_clip= MetricImageTextSimilarity(metrics=['clip']),
             compute_runtimes= self.compute_runtimes
         )
