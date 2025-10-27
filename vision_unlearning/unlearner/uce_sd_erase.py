@@ -1,9 +1,3 @@
-"""
-Taken from the Unified Concept Editing (UCE) repository:
-GitHub: https://github.com/rohitgandikota/unified-concept-editing
-Arxiv: https://arxiv.org/pdf/2308.14761.pdf
-"""
-
 from __future__ import annotations
 import os
 import time
@@ -11,19 +5,23 @@ import copy
 import logging
 from pathlib import Path
 from enum import Enum
-from typing import Optional, Any, cast
+from typing import Optional, List, Tuple, Dict, Any, cast
+from PIL import Image
+
 
 import torch  # noqa: F401
 import torch.nn as nn
 from pydantic import Field
 from safetensors.torch import save_file, load_file
 from diffusers import DiffusionPipeline, AutoPipelineForText2Image
-from IPython.display import display
+from huggingface_hub.repocard_data import EvalResult
+from huggingface_hub import upload_folder
 
 from vision_unlearning.unlearner.base import Unlearner
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.evaluator import EvaluatorTextToImage, plot_gradient_conflict_hist, log_validation
+from vision_unlearning.evaluator import EvaluatorTextToImage
 from vision_unlearning.metrics import MetricImageTextSimilarity
+from vision_unlearning.utils.model_management import save_model_card
 
 
 logger = get_logger('trainer.uce')
@@ -36,20 +34,27 @@ class ConceptType(str, Enum):
 
 
 class UCE(Unlearner):
-    """Unified Concept Eraser class."""
+    """
+    Unified Concept Editing for unlearning in Stable Diffusion models.
+    Adapted from:
+        GitHub: https://github.com/rohitgandikota/unified-concept-editing
+        Arxiv: https://arxiv.org/pdf/2308.14761.pdf
+        Gandikota, R., Orgad, H., Belinkov, Y., Materzyńska, J., & Bau, D. (2024). 
+        Unified concept editing in diffusion models. In Proceedings of the IEEE/CVF
+        Winter Conference on Applications of Computer Vision (pp. 5111-5120).
+    This unlearner do not use LoRA, and do not perform any fine-tuning (instead, it performs a closed-form weight update).
+    """
 
+    # Specific to this unlearner
     pretrained_model_name_or_path: str = Field(
         default="CompVis/stable-diffusion-v1-4",
         description="Path to pretrained model or model identifier from huggingface.co/models."
     )
-    device: str = "cuda:0"
     erase_scale: float = Field(0.5, description="Must be positive. Higher = more aggressive erasure?? TODO explain")
     preserve_scale: float = Field(1.0, description="Must be non-negative. Higher = more careful preservation?? TODO explain")
     lamb: float = Field(0.5, description="Must be between 0 and 1. Higher = ?? TODO explain")
-    output_dir: str = Field(
-        default="../uce_models",
-        description="Output directory for model predictions and checkpoints."
-    )
+
+    # Dataset related
     edit_concepts: Optional[str] = None
     guide_concepts: Optional[str] = None
     preserve_concepts: Optional[str] = None
@@ -58,7 +63,18 @@ class UCE(Unlearner):
         description="Type of concept to unlearn."
     )
     expand_prompts: bool = True
+    final_eval_prompts_forget: str | List[str] = Field([], description="Prompts for final evaluation on the forget dataset (ModelHub identifier or directly the prompts).")
+    final_eval_prompts_retain: str | List[str] = Field([], description="Prompts for final evaluation on the retain dataset (ModelHub identifier or directly the prompts).")
+
+    # Other stuff (some for compatibility with UnlearnerLora)
+    output_dir: str = Field(
+        default="../uce_models",
+        description="Output directory for model predictions and checkpoints."
+    )
+    device: str = "cuda:0"
     compute_runtimes: bool = Field(True, description="Whether to compute the runtimes of the training, for evaluation purposes.")
+    hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`. None for not push")
+
 
     def __init__(self, **data: Any):
         """Custom initializer for UCE with informative logging."""
@@ -77,7 +93,6 @@ class UCE(Unlearner):
         logger.info(f" - Output directory:  {self.output_dir}")
         logger.info(f" - Expand prompts:    {self.expand_prompts}\n")
         logger.info(f" - Compute runtimes:  {self.compute_runtimes}\n")
-        
 
 
     def _collect_text_embeddings(
@@ -209,66 +224,22 @@ class UCE(Unlearner):
         pipe.save_pretrained(self.output_dir)
 
 
-    def _uce_run(
-        self,
-        pipe: Any,
-        edit_concepts: list[str],
-        guide_concepts: list[str],
-        preserve_concepts: list[str],
-        erase_scale: float,
-        preserve_scale: float,
-        lamb: float,
-        device: str = "cuda:0",
-        torch_dtype: torch.dtype = torch.float32
-    ) -> None:
-        """Main execution routine for Unified Concept Erasure."""
-        torch.set_grad_enabled(False)
-        start_time = time.time()
-
-        # Find relevant modules
-        uce_modules: list[torch.nn.Module] = []
-        uce_module_names: list[str] = []
-
-        for name, module in pipe.unet.named_modules():
-            if "attn2" in name and (name.endswith("to_v") or name.endswith("to_k")):
-                uce_modules.append(module)
-                uce_module_names.append(name)
-
-        assert len(uce_modules) > 0, "No attention modules found for UCE to operate on."
-        original_modules = copy.deepcopy(uce_modules)
-
-        # 1. Collect embeddings
-        all_concepts = edit_concepts + guide_concepts + preserve_concepts
-        erase_embeds = self._collect_text_embeddings(pipe, all_concepts, device, torch_dtype)
-        assert all(c in erase_embeds for c in all_concepts), "Some concepts failed to produce embeddings."
-
-        # 2. Collect guide outputs
-        guide_outputs = self._collect_guide_outputs(guide_concepts + preserve_concepts, erase_embeds, original_modules)
-
-        # 3. Apply weight updates
-        updated_modules = self._update_weights(
-            original_modules, erase_embeds, guide_outputs,
-            edit_concepts, guide_concepts, preserve_concepts,
-            erase_scale, preserve_scale, lamb, device, torch_dtype
-        )
-
-        # 4. Save weights
-        self._save_uce_weights(updated_modules, uce_module_names)
-
-        duration = time.time() - start_time
-        logger.info(f"\nErased concepts using UCE.\nModel edited in {duration:.2f} seconds.\n")
-
-
-    def train(self) -> None:
+    def train(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         """Main UCE training and concept erasure logic."""
 
         # ==== Sanity checks ====
+        t0 = time.time()
         assert self.pretrained_model_name_or_path, "Pretrained model path must not be empty."
         assert isinstance(self.erase_scale, (int, float)) and self.erase_scale > 0, "Erase scale must be positive."
         assert isinstance(self.preserve_scale, (int, float)) and self.preserve_scale >= 0, "Preserve scale must be non-negative."
         assert 0.0 <= self.lamb <= 1.0, "Lambda must be between 0 and 1."
         assert self.device in ["cpu", "cuda", "cuda:0", "cuda:1"], f"Invalid device specified: {self.device}"
         assert isinstance(self.concept_type, ConceptType), "concept_type must be of type ConceptType Enum."
+
+        if isinstance(self.final_eval_prompts_retain, str):
+            raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")
+        if isinstance(self.final_eval_prompts_forget, str):
+            raise NotImplementedError("final_eval_prompts_forget should be a list of prompts, not a string.")
 
         if "cuda" in self.device:
             assert torch.cuda.is_available(), "CUDA device specified but not available!"
@@ -278,6 +249,8 @@ class UCE(Unlearner):
 
         if self.pretrained_model_name_or_path != "CompVis/stable-diffusion-v1-4":
             logging.warning("UCE was not tested with this base model; results may differ.")
+        
+        t1 = time.time()
 
         # ==== Concept parsing ====
         assert self.edit_concepts, "At least one edit concept must be provided."
@@ -335,28 +308,110 @@ class UCE(Unlearner):
                         f"painting of {guide_concept}", f"picture of {concept} doing something"
                     ])
 
+        t2 = time.time()
         logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")
 
-        # ==== Diffusion pipeline ====
+        # ==== Weight update ====
         pipe = DiffusionPipeline.from_pretrained(
             self.pretrained_model_name_or_path,
             torch_dtype=torch_dtype,
             safety_checker=None,
         ).to(self.device)
 
-        self._uce_run(
-            pipe,
-            edit_list,
-            guide_list,
-            preserve_list,
-            self.erase_scale,
-            self.preserve_scale,
-            self.lamb,
-            self.device,
-            torch_dtype
+        torch.set_grad_enabled(False)
+
+        # Find relevant modules
+        uce_modules: list[torch.nn.Module] = []
+        uce_module_names: list[str] = []
+
+        for name, module in pipe.unet.named_modules():
+            if "attn2" in name and (name.endswith("to_v") or name.endswith("to_k")):
+                uce_modules.append(module)
+                uce_module_names.append(name)
+
+        assert len(uce_modules) > 0, "No attention modules found for UCE to operate on."
+        original_modules = copy.deepcopy(uce_modules)
+
+        # Collect embeddings
+        all_concepts = edit_list + guide_list + preserve_list
+        erase_embeds = self._collect_text_embeddings(pipe, all_concepts, self.device, torch_dtype)
+        assert all(c in erase_embeds for c in all_concepts), "Some concepts failed to produce embeddings."
+
+        # Collect guide outputs
+        guide_outputs = self._collect_guide_outputs(guide_list + preserve_list, erase_embeds, original_modules)
+
+        # Apply weight updates
+        updated_modules = self._update_weights(
+            original_modules, erase_embeds, guide_outputs,
+            edit_list, guide_list, preserve_list,
+            self.erase_scale, self.preserve_scale, self.lamb, self.device, torch_dtype
         )
 
-        return edit_list, guide_list, preserve_list
+        # ==== Post training ====
+        t3 = time.time()
+        self._save_uce_weights(updated_modules, uce_module_names)
+        eval_results, eval_images = self.evaluate()
+        t4 = time.time()
+
+        metric_common_attributes = {
+            "task_type": "text-to-image",
+            "dataset_type": f"forget-and-retain-together",
+            "dataset_name": f"{self.dataset_forget_name} (forget) and {self.dataset_retain_name} (retain) sets",
+        }
+
+        if self.compute_runtimes:
+            eval_results.append(EvalResult(
+                metric_type='runtime',
+                metric_name=f'Runtime init seconds (~↓)',
+                metric_value=t1 - t0,
+                **metric_common_attributes,  # type: ignore
+            ))
+            eval_results.append(EvalResult(
+                metric_type='runtime',
+                metric_name=f'Runtime data loading seconds (~↓)',
+                metric_value=t2 - t1,
+                **metric_common_attributes,  # type: ignore
+            ))
+            eval_results.append(EvalResult(
+                metric_type='runtime',
+                metric_name=f'Runtime training seconds (↓)',
+                metric_value=t3 - t2,
+                **metric_common_attributes,  # type: ignore
+            ))
+            eval_results.append(EvalResult(
+                metric_type='runtime',
+                metric_name=f'Runtime eval seconds (~↓)',
+                metric_value=t4 - t3,
+                **metric_common_attributes,  # type: ignore
+            ))
+
+        save_model_card(
+            str(self.hub_model_id),
+            images=eval_images,
+            base_model=self.pretrained_model_name_or_path,
+            dataset_forget_name=self.edit_concepts,
+            dataset_retain_name=self.preserve_concepts,
+            repo_folder=self.output_dir,
+            eval_results=eval_results,
+            tags=[
+                "stable-diffusion",
+                "stable-diffusion-diffusers",
+                "text-to-image",
+                "diffusers",
+                "diffusers-training",
+            ],
+            hyperparameters={k: v for k, v in self.model_dump().items() if isinstance(v, (str, float, int, type(None)))},
+        )
+
+        if self.hub_model_id is not None:
+            upload_folder(
+                repo_id=self.hub_model_id,
+                folder_path=self.output_dir,
+                commit_message="End of training",
+                ignore_patterns=["step_*", "epoch_*"],
+            )
+
+        return eval_results, eval_images
 
     def get_pipeline_from_modified_weights(self) -> DiffusionPipeline:
         pipe = DiffusionPipeline.from_pretrained(
@@ -379,25 +434,24 @@ class UCE(Unlearner):
 
         return pipe
 
-    def evaluate(self, edit_list, preserve_list):
+    def evaluate(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         pipeline_original = AutoPipelineForText2Image.from_pretrained(self.pretrained_model_name_or_path, torch_dtype=torch.float16, safety_checker=None).to(self.device)
         pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(self.output_dir, torch_dtype=torch.float16, safety_checker=None).to(self.device)
         pipelined_learned = pipeline_unlearned
+
+        assert type(self.final_eval_prompts_forget) == list  # noqa
+        assert type(self.final_eval_prompts_retain) == list  # noqa
 
         evaluator = EvaluatorTextToImage(
             pipeline_original=pipeline_original,
             pipeline_unlearned=pipeline_unlearned,
             pipeline_learned=pipelined_learned,
-            prompts_forget= edit_list,
-            prompts_retain= preserve_list,
-            metric_clip= MetricImageTextSimilarity(metrics=['clip']),
-            compute_runtimes= self.compute_runtimes
+            prompts_forget=self.final_eval_prompts_forget,
+            prompts_retain=self.final_eval_prompts_retain,
+            metric_clip=MetricImageTextSimilarity(metrics=['clip']),
+            compute_runtimes=self.compute_runtimes
         )
 
         eval_result, eval_images = evaluator.evaluate()
 
         return eval_result, eval_images
-
-
-
-
