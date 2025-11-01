@@ -93,6 +93,8 @@ class UCE(Unlearner):
         logger.info(f" - Output directory:  {self.output_dir}")
         logger.info(f" - Expand prompts:    {self.expand_prompts}\n")
         logger.info(f" - Compute runtimes:  {self.compute_runtimes}\n")
+        logger.info(f" - Hub Model Id:      {self.hub_model_id}\n")
+
 
 
     def _collect_text_embeddings(
@@ -356,7 +358,7 @@ class UCE(Unlearner):
         metric_common_attributes = {
             "task_type": "text-to-image",
             "dataset_type": f"forget-and-retain-together",
-            "dataset_name": f"{self.dataset_forget_name} (forget) and {self.dataset_retain_name} (retain) sets",
+            "dataset_name": f"{edit_list} (forget) and {preserve_list} (retain) sets",
         }
 
         if self.compute_runtimes:
