@@ -110,11 +110,13 @@ class FrechetInceptionDistance(Metric):
         if self.real_imgs_path:
             real_images = self.real_imgs_path  # self.load_images_from_folder(self.real_imgs_path, transform)
         else:
+            assert self.real_imgs is not None
             real_images = self.process_tensor_images(self.real_imgs)
 
         if self.gen_imgs_path:
             gen_images = self.gen_imgs_path  # self.load_images_from_folder(self.gen_imgs_path, transform)
         else:
+            assert self.gen_imgs is not None
             gen_images = self.process_tensor_images(self.gen_imgs)
 
         fid_val = torch_fidelity.calculate_metrics(

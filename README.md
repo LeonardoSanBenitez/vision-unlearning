@@ -45,6 +45,8 @@ For practitioners, Vision Unlearning provides:
 
 ## Tutorials
 [Replace _George W. Bush_ by _Tony Blair_ using FADE](https://drive.google.com/file/d/1DtdwZuUDHhu-7O5cgeTHVbTGjyiuIwTQ/view?usp=sharing)
+
+[Model_Editing_using_UCE](https://colab.research.google.com/drive/1HvrRA5ufZUfNyEJ0BeEAiFVy2B2ZqERF#scrollTo=b66d6844-6437-493d-b134-a27a0a734008)
 ## Main Interfaces
 
 Vision Unlearning standardizes the following components:
