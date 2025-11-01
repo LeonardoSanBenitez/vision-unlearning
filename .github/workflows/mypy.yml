@@ -18,4 +18,4 @@ jobs:
       - run: |
           echo '----------- Mypy check ---------------'
           poetry run mypy --install-types --non-interactive ./vision_unlearning
-          poetry run mypy --no-warn-incompatible-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
+          poetry run mypy --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
