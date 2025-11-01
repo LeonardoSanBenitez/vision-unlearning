@@ -403,7 +403,7 @@ class UCE(Unlearner):
                 "diffusers-training",
             ],
             hyperparameters={k: v for k, v in self.model_dump().items() if isinstance(v, (str, float, int, type(None)))},
-        )
+        )  # type: ignore[arg-type]
 
         if self.hub_model_id is not None:
             upload_folder(
