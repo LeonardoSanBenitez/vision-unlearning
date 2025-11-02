@@ -1,4 +1,4 @@
-# noqa
+
 
 from typing import List, Literal, Dict, Optional
 from PIL import Image
@@ -32,8 +32,7 @@ class FrechetInceptionDistance(Metric):
             "Please define a path to a folder or a torch.Tensor with the images."
         )
 
-
-        if self.real_imgs_path: # noqa
+        if self.real_imgs_path:  # noqa
             assert self.verify_images_in_path(self.real_imgs_path), \
                 f"No valid images found in the folder '{self.real_imgs_path}'."
         else:
@@ -70,11 +69,11 @@ class FrechetInceptionDistance(Metric):
 
     def process_tensor_images(self, tensor_list: List[torch.Tensor]):
         transform_tensor = transforms.Compose([
-            transforms.Resize((299,299)),  # Resize for Inception compatibility
+            transforms.Resize((299, 299)),  # Resize for Inception compatibility
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
         ]) # noqa
         return [transform_tensor(img) for img in tensor_list]
-    
+
     def load_images_from_folder(self, folder_path: str, transform: transforms.Compose) -> torch.Tensor:
         """
         Loads all images from a folder, applies transformations, and returns them as a torch.Tensor.

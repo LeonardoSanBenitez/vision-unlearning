@@ -17,6 +17,7 @@ class MetricImageImage(Metric):
     _loss_vgg: Optional[lpips.lpips.LPIPS]
     metrics: List[Literal['rmse', 'psnr', 'ssim', 'fsim', 'issm', 'sre', 'sam', 'uiq', 'lpips_alex', 'lpips_vgg']]
     # SSIM interpertation: 1.0 → Images are identical. -1.0 → Images are totaly different
+    
     def model_post_init(self, __context: dict) -> None:
         if 'lpips_alex' in self.metrics:
             self._loss_alex = lpips.LPIPS(net='alex')
@@ -46,7 +47,7 @@ class MetricImageImage(Metric):
             distances.update(evaluation(org_img_path, pred_img_path, metrics_remaining))
         assert len(distances) == len(self.metrics)
         return distances  # TODO: ensure distances are float
-    
+
     def score(self, org_img: Union[str, Image.Image], pred_img: Union[str, Image.Image]) -> Dict[str, float]:
         if isinstance(org_img, str) and isinstance(pred_img, str):
             return self._score_from_paths(org_img, pred_img)
@@ -64,5 +65,4 @@ class MetricImageImage(Metric):
             else:
                 pred_path = pred_img
             return self._score_from_paths(org_path, pred_path)
-        
-        
+

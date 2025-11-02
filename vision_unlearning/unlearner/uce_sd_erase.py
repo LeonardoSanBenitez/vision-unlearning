@@ -41,7 +41,7 @@ class UCE(Unlearner):
     Adapted from:
         GitHub: https://github.com/rohitgandikota/unified-concept-editing
         Arxiv: https://arxiv.org/pdf/2308.14761.pdf
-        Gandikota, R., Orgad, H., Belinkov, Y., Materzyńska, J., & Bau, D. (2024). 
+        Gandikota, R., Orgad, H., Belinkov, Y., Materzyńska, J., & Bau, D. (2024).
         Unified concept editing in diffusion models. In Proceedings of the IEEE/CVF
         Winter Conference on Applications of Computer Vision (pp. 5111-5120).
     This unlearner do not use LoRA, and do not perform any fine-tuning (instead, it performs a closed-form weight update).
@@ -77,7 +77,6 @@ class UCE(Unlearner):
     compute_runtimes: bool = Field(True, description="Whether to compute the runtimes of the training, for evaluation purposes.")
     hub_model_id: Optional[str] = Field(None, description="Repository name to sync with `output_dir`. None for not push")
 
-
     def __init__(self, **data: Any):
         """Custom initializer for UCE with informative logging."""
         super().__init__(**data)
@@ -96,8 +95,6 @@ class UCE(Unlearner):
         logger.info(f" - Expand prompts:    {self.expand_prompts}\n")
         logger.info(f" - Compute runtimes:  {self.compute_runtimes}\n")
         logger.info(f" - Hub Model Id:      {self.hub_model_id}\n")
-
-
 
     def _collect_text_embeddings(
         self,
@@ -132,7 +129,6 @@ class UCE(Unlearner):
             uce_embeds[e] = t_emb[0][:, last_token_idx, :]
         return uce_embeds
 
-
     def _collect_guide_outputs(
         self,
         concepts: list[str],
@@ -149,7 +145,6 @@ class UCE(Unlearner):
             for module in modules:
                 outputs[g] = outputs.get(g, []) + [module(t_emb)]
         return outputs
-
 
     def _update_weights(
         self,
@@ -208,7 +203,6 @@ class UCE(Unlearner):
 
         return uce_modules
 
-
     def _save_uce_weights(
         self,
         uce_modules: list[torch.nn.Module],
@@ -226,7 +220,6 @@ class UCE(Unlearner):
         # Entire model
         pipe = self.get_pipeline_from_modified_weights()
         pipe.save_pretrained(self.output_dir)
-
 
     def train(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         """Main UCE training and concept erasure logic."""
@@ -253,7 +246,7 @@ class UCE(Unlearner):
 
         if self.pretrained_model_name_or_path != "CompVis/stable-diffusion-v1-4":
             logging.warning("UCE was not tested with this base model; results may differ.")
-        
+
         t1 = time.time()
 
         # ==== Concept parsing ====
@@ -268,8 +261,8 @@ class UCE(Unlearner):
         elif self.concept_type == ConceptType.Art:
             guide_list = ["art"] * len(edit_list)
         else:
-            #default guide for objects: use a neutral object class or same as edit concept
-            guide_list = [e for e in edit_list] 
+            # default guide for objects: use a neutral object class or same as edit concept
+            guide_list = [e for e in edit_list]
 
         if len(guide_list) == 1:
             guide_list *= len(edit_list)
@@ -313,7 +306,7 @@ class UCE(Unlearner):
                     ])
 
         t2 = time.time()
-        logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")
+        logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n") # noqa
 
         # ==== Weight update ====
         pipe = DiffusionPipeline.from_pretrained(
@@ -421,7 +414,7 @@ class UCE(Unlearner):
         pipe = DiffusionPipeline.from_pretrained(
             self.pretrained_model_name_or_path,
             torch_dtype=torch.float16,
-            safety_checker=None      
+            safety_checker=None
         ).to(self.device)
 
         logger.debug("Base model is loaded.\n")
