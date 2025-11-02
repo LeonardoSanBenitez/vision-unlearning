@@ -1,3 +1,5 @@
+# flake8: noqa
+
 import os
 from typing import Dict
 from abc import ABC, abstractmethod

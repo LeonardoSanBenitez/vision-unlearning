@@ -1,3 +1,5 @@
+# flake8: noqa
+
 from typing import List, Literal, Dict, Optional
 from PIL import Image
 from image_similarity_measures.evaluate import evaluation

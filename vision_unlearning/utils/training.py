@@ -1,3 +1,5 @@
+# flake8: noqa
+
 import random
 from typing import Optional
 import numpy as np

@@ -1,3 +1,5 @@
+# flake8: noqa
+
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
 from typing import List

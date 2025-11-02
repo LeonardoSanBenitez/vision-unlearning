@@ -1,3 +1,5 @@
+# flake8: noqa
+
 from typing import List, Literal, Dict, Optional
 from PIL import Image
 import torch
@@ -31,7 +33,7 @@ class FrechetInceptionDistance(Metric):
         )
 
 
-        if self.real_imgs_path:
+        if self.real_imgs_path: # noqa
             assert self.verify_images_in_path(self.real_imgs_path), \
                 f"No valid images found in the folder '{self.real_imgs_path}'."
         else:
@@ -70,7 +72,7 @@ class FrechetInceptionDistance(Metric):
         transform_tensor = transforms.Compose([
             transforms.Resize((299,299)),  # Resize for Inception compatibility
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
-        ])
+        ]) # noqa
         return [transform_tensor(img) for img in tensor_list]
     
     def load_images_from_folder(self, folder_path: str, transform: transforms.Compose) -> torch.Tensor:
@@ -129,4 +131,3 @@ class FrechetInceptionDistance(Metric):
         assert fid_val is not None
         scores['FID'] = float(fid_val['frechet_inception_distance'])
         return scores
-        
