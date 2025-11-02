@@ -1,4 +1,4 @@
-# flake8: noqa
+# noqa
 
 from typing import List, Literal, Dict, Optional
 from PIL import Image

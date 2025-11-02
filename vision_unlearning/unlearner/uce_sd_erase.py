@@ -1,4 +1,4 @@
-# flake8: noqa
+# noqa
 
 from __future__ import annotations
 import os

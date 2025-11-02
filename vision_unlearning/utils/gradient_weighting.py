@@ -1,4 +1,4 @@
-# flake8: noqa
+# noqa
 
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
