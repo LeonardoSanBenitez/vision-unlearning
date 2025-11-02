@@ -47,7 +47,7 @@ class GradientWeightingMethodSimple(GradientWeightingMethod):
     '''
     forget_weight: float = 1.0
     retain_weight: float = 1.0
-    
+
     def weight_grads(self, grads_forget: List[torch.Tensor], grads_retain: List[torch.Tensor], accelerator) -> torch.Tensor:
         grads_forget_scaled = self.forget_weight * torch.cat([g.view(-1) for g in grads_forget])
         grads_retain_scaled = self.retain_weight * torch.cat([g.view(-1) for g in grads_retain])

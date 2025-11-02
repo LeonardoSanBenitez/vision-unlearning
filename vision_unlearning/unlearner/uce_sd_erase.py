@@ -306,7 +306,7 @@ class UCE(Unlearner):
                     ])
 
         t2 = time.time()
-        logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n") # noqa
+        logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")  # noqa
 
         # ==== Weight update ====
         pipe = DiffusionPipeline.from_pretrained(

@@ -51,7 +51,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
             transforms.Normalize([0.5] * 3, [0.5] * 3),
         ])
         # map to tensors
-        
+
         def preprocess(batch):
             batch["pixel_values"] = [pipe(img) for img in batch[image_column]]
             return batch

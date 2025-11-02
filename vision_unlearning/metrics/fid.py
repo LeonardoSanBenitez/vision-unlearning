@@ -71,7 +71,7 @@ class FrechetInceptionDistance(Metric):
         transform_tensor = transforms.Compose([
             transforms.Resize((299, 299)),  # Resize for Inception compatibility
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to [-1, 1]
-        ]) # noqa
+        ])  # noqa
         return [transform_tensor(img) for img in tensor_list]
 
     def load_images_from_folder(self, folder_path: str, transform: transforms.Compose) -> torch.Tensor:
