@@ -44,7 +44,14 @@ For practitioners, Vision Unlearning provides:
 - A standardized interface to experiment with different algorithms.
 
 ## Tutorials
-[Replace _George W. Bush_ by _Tony Blair_ using FADE](https://drive.google.com/file/d/1DtdwZuUDHhu-7O5cgeTHVbTGjyiuIwTQ/view?usp=sharing)
+* [Replace _George W. Bush_ by _Tony Blair_ using FADE](https://drive.google.com/file/d/1penpHELJkM2LtxZ_yuQ09nUPCyDmZzyM/view?usp=sharing)
+* [Forget cat using UCE (with hyperparam tunning)](https://drive.google.com/file/d/1OZtNkntOj-dVpo-T1kQdPMK7TMYX3ctf/view?usp=sharing)
+
+The source code for these tutorials is in `tutorials/`, but their outputs were cleaned to avoid burdening the repo.
+The links above contain Google Drive stored executions with the full outputs.
+
+For developers: every time there is a relevant modification in the codebase, please run the affected tutorials, save the notebook to Drive, clear the output before commiting.
+
 ## Main Interfaces
 
 Vision Unlearning standardizes the following components:

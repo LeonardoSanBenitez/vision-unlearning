@@ -226,6 +226,23 @@ class UnlearnerLora(Unlearner):
         self._output_dir_checkpoints = self.output_dir
         self._output_dir_lora = self.output_dir
 
+    def _pre_checks(self) -> None:
+        # TODO maybe this should use some native pydantic validation?
+        if isinstance(self.final_eval_prompts_retain, str):
+            raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")
+        if isinstance(self.final_eval_prompts_forget, str):
+            raise NotImplementedError("final_eval_prompts_forget should be a list of prompts, not a string.")
+        t0 = time.time()
+        if self.report_to == "wandb" and self.hub_token is not None:
+            raise ValueError(
+                "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
+                " Please use `huggingface-cli login` to authenticate with the Hub."
+            )
+        
+        if not self.is_lora_negated:
+            # TODO: this shiould be a simple matter of following the gradinet or its negation
+            raise NotImplementedError()
+
     def _get_lora_config(self) -> LoraConfig:
         return LoraConfig(
             r=self.lora_r,
@@ -265,20 +282,8 @@ class UnlearnerLora(Unlearner):
             safe_serialization=True,
         )
 
-    def train(self) -> List[EvalResult]:
-        # Checks
-        if isinstance(self.final_eval_prompts_retain, str):
-            raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")
-        if isinstance(self.final_eval_prompts_forget, str):
-            raise NotImplementedError("final_eval_prompts_forget should be a list of prompts, not a string.")
-        t0 = time.time()
-        if self.report_to == "wandb" and self.hub_token is not None:
-            raise ValueError(
-                "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
-                " Please use `huggingface-cli login` to authenticate with the Hub."
-            )
-        if not isinstance(self.gradient_weighting_method, GradientWeightingMethodSimple):
-            logger.warning(f"Self distillation was never tested with more advanced gradient weighting methods")
+    def train(self):
+        self._pre_checks()
 
         os.makedirs(self.output_dir, exist_ok=True)
 

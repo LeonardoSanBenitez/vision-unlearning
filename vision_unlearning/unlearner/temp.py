@@ -217,7 +217,7 @@ class UCE(Unlearner):
             pipe = self.get_pipeline_from_modified_weights()
             pipe.save_pretrained(self.output_dir)  # type: ignore
 
-    def train(self) -> List[EvalResult]:
+    def train(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         """Main UCE training and concept erasure logic."""
 
         # ==== Sanity checks ====
@@ -396,7 +396,7 @@ class UCE(Unlearner):
                 "diffusers",
                 "diffusers-training",
             ],
-            hyperparameters={k: v for k, v in self.model_dump().items() if (isinstance(v, (str, float, int, type(None))) and not isinstance(v, (Enum)))},
+            hyperparameters={k: v for k, v in self.model_dump().items() if isinstance(v, (str, float, int, type(None)))},
         )  # type: ignore[arg-type]
 
         if self.hub_model_id is not None:
@@ -407,7 +407,7 @@ class UCE(Unlearner):
                 ignore_patterns=["step_*", "epoch_*"],
             )
 
-        return eval_results
+        return eval_results, eval_images
 
     def get_pipeline_from_modified_weights(self) -> DiffusionPipeline:
         pipe = DiffusionPipeline.from_pretrained(
