@@ -1,6 +1,6 @@
 import os
 import time
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from pydantic import BaseModel, ConfigDict
 from PIL import Image
 import numpy as np
@@ -24,15 +24,17 @@ logger = get_logger('evaluation')
 
 class EvaluatorTextToImage(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    pipeline_original: StableDiffusionPipeline
-    pipeline_learned: StableDiffusionPipeline
+    pipeline_original: Optional[StableDiffusionPipeline]
+    pipeline_learned: Optional[StableDiffusionPipeline]
     pipeline_unlearned: StableDiffusionPipeline
     prompts_forget: List[str]
     prompts_retain: List[str]
     metric_clip: MetricImageTextSimilarity
     compute_runtimes: bool = True
+    plot_show: bool = True
 
     def evaluate(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
+        # TODO: batch inference for speed; Something similar to how it is done in `generate_dataset` (maybe even call that function saving to tempo folder)
         eval_results = []
         images = {}
 
@@ -53,35 +55,65 @@ class EvaluatorTextToImage(BaseModel):
 
             for prompt in prompts:
                 t0 = time.time()
-                image_original = self.pipeline_original(prompt).images[0]  # type: ignore
-                image_learned = self.pipeline_learned(prompt).images[0]  # type: ignore
+                # Generate images
+                if self.pipeline_original is not None:
+                    image_original = self.pipeline_original(prompt).images[0]  # type: ignore
+                if self.pipeline_learned is not None:
+                    image_learned = self.pipeline_learned(prompt).images[0]  # type: ignore
                 image_unlearned = self.pipeline_unlearned(prompt).images[0]  # type: ignore
                 latencies.append((time.time() - t0) / 3)
 
-                score_original = self.metric_clip.score(image_original, prompt)['clip']
-                score_learned = self.metric_clip.score(image_learned, prompt)['clip']
+                # Compute metrics
+                if self.pipeline_original is not None:
+                    score_original = self.metric_clip.score(image_original, prompt)['clip']
+                    scores_original.append(score_original)
+                if self.pipeline_learned is not None:
+                    score_learned = self.metric_clip.score(image_learned, prompt)['clip']
+                    scores_learned.append(score_learned)
+                
                 score_unlearned = self.metric_clip.score(image_unlearned, prompt)['clip']
-                scores_original.append(score_original)
-                scores_learned.append(score_learned)
                 scores_unlearned.append(score_unlearned)
-                scores_difference_learned_unlearned.append(score_learned - score_unlearned)
-                scores_difference_original_unlearned.append(score_original - score_unlearned)
-                scores_difference_original_learned.append(score_original - score_learned)
+                
+                # Compute differences
+                if self.pipeline_original is not None:
+                    scores_difference_original_unlearned.append(score_original - score_unlearned)
+                if self.pipeline_learned is not None:
+                    scores_difference_learned_unlearned.append(score_learned - score_unlearned)
+                if self.pipeline_original is not None and self.pipeline_learned is not None:
+                    scores_difference_original_learned.append(score_original - score_learned)
 
-                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-                axes[0].imshow(image_original)
-                axes[0].set_title(f"Original\nClip Score={score_original:.2f}")
-                axes[0].axis("off")
-                axes[1].imshow(image_learned)
-                axes[1].set_title(f"Learned\nClip Score={score_learned:.2f}")
-                axes[1].axis("off")
-                axes[2].imshow(image_unlearned)
-                axes[2].set_title(f"Unlearned\nClip Score={score_unlearned:.2f}")
-                axes[2].axis("off")
+                # Plot
+                original_index: int
+                learned_index: int
+                unlearned_index: int = 0
+                if self.pipeline_original is not None:
+                    original_index = 0
+                    unlearned_index = 1
+                if self.pipeline_learned is not None:
+                    if self.pipeline_original is not None:
+                        learned_index = 1
+                        unlearned_index = 2
+                    else:
+                        learned_index = 0
+                        unlearned_index = 1
+                
+                fig, axes = plt.subplots(1, unlearned_index + 1, figsize=(5 * (unlearned_index + 1), 5), squeeze=False)
+                if self.pipeline_original is not None:
+                    axes[0, original_index].imshow(image_original)
+                    axes[0, original_index].set_title(f"Original\nClip Score={score_original:.2f}")
+                    axes[0, original_index].axis("off")
+                if self.pipeline_learned is not None:
+                    axes[0, learned_index].imshow(image_learned)
+                    axes[0, learned_index].set_title(f"Learned\nClip Score={score_learned:.2f}")
+                    axes[0, learned_index].axis("off")
+                axes[0, unlearned_index].imshow(image_unlearned)
+                axes[0, unlearned_index].set_title(f"Unlearned\nClip Score={score_unlearned:.2f}")
+                axes[0, unlearned_index].axis("off")
                 fig.suptitle(prompt, fontsize=16)
                 fig.canvas.draw()
                 images[f"{scope.capitalize()} - {prompt}"] = Image.fromarray(np.uint8(np.array(fig.canvas.buffer_rgba())))  # type: ignore
-                plt.show()
+                if self.plot_show:
+                    plt.show()
 
             # Assemble metrics object
             # EvalResult: https://github.com/huggingface/huggingface_hub/blob/main/src/huggingface_hub/repocard_data.py#L13
@@ -91,33 +123,35 @@ class EvaluatorTextToImage(BaseModel):
             #   - dataset_type: str, hub ID, as searchable in https://hf.co/datasets, or at least satisfying the pattern `/^(?:[\w-]+\/)?[\w-.]+$/`
             #   - dataset_name: str, pretty name
             #   - metric_type: str, whenever possible should have these names: https://hf.co/metrics
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score of original model mean (~↑)',
-                metric_value=float(np.mean(scores_original)),
-                **metric_common_attributes,  # type: ignore
-            ))
 
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score of original model std (~↓)',
-                metric_value=float(np.std(scores_original)),
-                **metric_common_attributes,  # type: ignore
-            ))
+            # Basic stats
+            if self.pipeline_original is not None:
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score of original model mean (~↑)',
+                    metric_value=float(np.mean(scores_original)),
+                    **metric_common_attributes,  # type: ignore
+                ))
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score of original model std (~↓)',
+                    metric_value=float(np.std(scores_original)),
+                    **metric_common_attributes,  # type: ignore
+                ))
 
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score of learned model mean ({"~↑" if scope == "forget" else "~↓"})',
-                metric_value=float(np.mean(scores_learned)),
-                **metric_common_attributes,  # type: ignore
-            ))
-
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score of learned model std (~↓)',
-                metric_value=float(np.std(scores_learned)),
-                **metric_common_attributes,  # type: ignore
-            ))
+            if self.pipeline_learned is not None:
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score of learned model mean ({"~↑" if scope == "forget" else "~↓"})',
+                    metric_value=float(np.mean(scores_learned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score of learned model std (~↓)',
+                    metric_value=float(np.std(scores_learned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
 
             eval_results.append(EvalResult(
                 metric_type='clip',
@@ -125,7 +159,6 @@ class EvaluatorTextToImage(BaseModel):
                 metric_value=float(np.mean(scores_unlearned)),
                 **metric_common_attributes,  # type: ignore
             ))
-
             eval_results.append(EvalResult(
                 metric_type='clip',
                 metric_name=f'{scope.capitalize()}Set clip score of unlearned model std (~↓)',
@@ -133,47 +166,48 @@ class EvaluatorTextToImage(BaseModel):
                 **metric_common_attributes,  # type: ignore
             ))
 
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score difference between learned and unlearned mean ({"↑" if scope == "forget" else "↓"})',
-                metric_value=float(np.mean(scores_difference_learned_unlearned)),
-                **metric_common_attributes,  # type: ignore
-            ))
+            # Differences
+            if self.pipeline_learned is not None:
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score difference between learned and unlearned mean ({"↑" if scope == "forget" else "↓"})',
+                    metric_value=float(np.mean(scores_difference_learned_unlearned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score difference between learned and unlearned std (~↓)',
+                    metric_value=float(np.std(scores_difference_learned_unlearned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
 
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score difference between learned and unlearned std (~↓)',
-                metric_value=float(np.std(scores_difference_learned_unlearned)),
-                **metric_common_attributes,  # type: ignore
-            ))
+            if self.pipeline_original is not None:
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score difference between original and unlearned mean ({"↑" if scope == "forget" else "↓"})',
+                    metric_value=float(np.mean(scores_difference_original_unlearned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score difference between original and unlearned std (~↓)',
+                    metric_value=float(np.std(scores_difference_original_unlearned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
 
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score difference between original and unlearned mean ({"↑" if scope == "forget" else "↓"})',
-                metric_value=float(np.mean(scores_difference_original_unlearned)),
-                **metric_common_attributes,  # type: ignore
-            ))
-
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score difference between original and unlearned std (~↓)',
-                metric_value=float(np.std(scores_difference_original_unlearned)),
-                **metric_common_attributes,  # type: ignore
-            ))
-
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score difference between original and learned mean ({"↓" if scope == "forget" else "↑"})',
-                metric_value=float(np.mean(scores_difference_original_learned)),
-                **metric_common_attributes,  # type: ignore
-            ))
-
-            eval_results.append(EvalResult(
-                metric_type='clip',
-                metric_name=f'{scope.capitalize()}Set clip score difference between original and learned std (~↓)',
-                metric_value=float(np.std(scores_difference_original_learned)),
-                **metric_common_attributes,  # type: ignore
-            ))
+            if self.pipeline_original is not None and self.pipeline_learned is not None:
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score difference between original and learned mean ({"↓" if scope == "forget" else "↑"})',
+                    metric_value=float(np.mean(scores_difference_original_learned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
+                eval_results.append(EvalResult(
+                    metric_type='clip',
+                    metric_name=f'{scope.capitalize()}Set clip score difference between original and learned std (~↓)',
+                    metric_value=float(np.std(scores_difference_original_learned)),
+                    **metric_common_attributes,  # type: ignore
+                ))
 
         if self.compute_runtimes:
             metric_common_attributes["dataset_name"] = "Forget and Retain sets"
@@ -183,7 +217,6 @@ class EvaluatorTextToImage(BaseModel):
                 metric_value=float(np.mean(latencies)),
                 **metric_common_attributes,  # type: ignore
             ))
-
             eval_results.append(EvalResult(
                 metric_type='runtime',
                 metric_name='Inference latency seconds std (~↓)',

@@ -428,7 +428,6 @@ class UCE(Unlearner):
     def evaluate(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         pipeline_original = AutoPipelineForText2Image.from_pretrained(self.pretrained_model_name_or_path, torch_dtype=torch.float16, safety_checker=None).to(self.device)
         pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(self.output_dir, torch_dtype=torch.float16, safety_checker=None).to(self.device)
-        pipelined_learned = pipeline_unlearned
 
         assert type(self.final_eval_prompts_forget) == list  # noqa
         assert type(self.final_eval_prompts_retain) == list  # noqa
@@ -436,7 +435,7 @@ class UCE(Unlearner):
         evaluator = EvaluatorTextToImage(
             pipeline_original=pipeline_original,
             pipeline_unlearned=pipeline_unlearned,
-            pipeline_learned=pipelined_learned,
+            pipeline_learned=None,
             prompts_forget=self.final_eval_prompts_forget,
             prompts_retain=self.final_eval_prompts_retain,
             metric_clip=MetricImageTextSimilarity(metrics=['clip']),

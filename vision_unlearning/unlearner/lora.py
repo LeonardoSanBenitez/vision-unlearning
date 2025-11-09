@@ -75,7 +75,11 @@ def unlearn_lora(
 
     pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
     pipeline_unlearned.load_lora_weights(model_lora_id, weight_name=weight_name)
+
+    
     if requires_inversion:
+        # pipeline_unlearned is inverted, pipeline_learned remains as it was trained
+        # Munba, for example, falls in this case
         total: int = 0
         sum_before_invert: float = sum([float(param.sum()) for name, param in pipeline_unlearned.unet.named_parameters() if "lora_A" in name])
         for name, param in pipeline_unlearned.unet.named_parameters():
@@ -85,9 +89,21 @@ def unlearn_lora(
                 total += 1
         assert sum_before_invert == -sum([float(param.sum()) for name, param in pipeline_unlearned.unet.named_parameters() if "lora_A" in name])
         assert total > 0
-        #logger.debug(f"Inverted {total} params")
-        print(f">>>>>>>>>>>>>Inverted {total} params")
-
+        logger.info(f"Inverted {total} params for pipeline_unlearned")
+    else:
+        # pipeline_unlearned remains as it was trained, pipeline_learned is inverted
+        # FADE, for example, falls in this case
+        if return_learned:
+            total: int = 0
+            sum_before_invert: float = sum([float(param.sum()) for name, param in pipeline_learned.unet.named_parameters() if "lora_A" in name])
+            for name, param in pipeline_learned.unet.named_parameters():
+                if "lora_A" in name:
+                    logger.debug(f"Inverting param {name}")
+                    param.data = -1 * param.data
+                    total += 1
+            assert sum_before_invert == -sum([float(param.sum()) for name, param in pipeline_learned.unet.named_parameters() if "lora_A" in name])
+            assert total > 0
+            logger.info(f"Inverted {total} params for pipeline_learned")
     return pipeline_original, pipeline_learned, pipeline_unlearned
 
 
@@ -617,12 +633,8 @@ class UnlearnerLora(Unlearner):
                 del pipeline
                 torch.cuda.empty_cache()
 
-            if self.is_lora_negated:
-                assert self._output_dir_lora is not None
-                # pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.model_name_or_path, self.output_dir, device=self._accelerator.device, weight_name='pytorch_lora_weights.bin')  # for the sparse variation
-                pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.model_name_or_path, self._output_dir_lora, device=self._accelerator.device, weight_name=self._lora_weight_name)
-            else:
-                raise NotImplementedError()
+            assert self._output_dir_lora is not None
+            pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.model_name_or_path, self._output_dir_lora, device=self._accelerator.device, weight_name=self._lora_weight_name, requires_inversion=self.is_lora_negated)
 
             assert type(self.final_eval_prompts_forget) == list  # noqa
             assert type(self.final_eval_prompts_retain) == list  # noqa
