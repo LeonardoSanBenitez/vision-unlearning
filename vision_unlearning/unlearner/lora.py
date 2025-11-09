@@ -249,7 +249,7 @@ class UnlearnerLora(Unlearner):
             safe_serialization=True,
         )
 
-    def train(self):
+    def train(self) -> List[EvalResult]:
         # Checks
         if isinstance(self.final_eval_prompts_retain, str):
             raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")

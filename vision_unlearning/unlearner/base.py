@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+from typing import List
 from pydantic import BaseModel
+from huggingface_hub.repocard_data import EvalResult
 from vision_unlearning.utils.logger import get_logger
 
 
@@ -14,5 +16,5 @@ class Unlearner(BaseModel, ABC):
     '''
 
     @abstractmethod
-    def train(self):
+    def train(self) -> List[EvalResult]:
         pass
