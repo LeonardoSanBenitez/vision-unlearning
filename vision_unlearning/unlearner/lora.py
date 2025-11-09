@@ -48,7 +48,10 @@ def unlearn_lora(
     model_lora_id: str,
     device: str,
     weight_name: str = "pytorch_lora_weights.safetensors",
-) -> Tuple[StableDiffusionPipeline, StableDiffusionPipeline, StableDiffusionPipeline]:
+    requires_inversion: bool = True,
+    return_original: bool = True,
+    return_learned: bool = True,
+) -> Tuple[Optional[StableDiffusionPipeline], Optional[StableDiffusionPipeline], StableDiffusionPipeline]:
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
@@ -61,23 +64,29 @@ def unlearn_lora(
     }
     Source: https://github.com/hkust-nlp/PEM_composition/tree/main/exps/composition_for_unlearning
     '''
-    pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+    pipeline_original: Optional[StableDiffusionPipeline] = None
+    if return_original:
+        pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
 
-    pipeline_learned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
-    pipeline_learned.load_lora_weights(model_lora_id, weight_name=weight_name)
+    pipeline_learned: Optional[StableDiffusionPipeline] = None
+    if return_learned:
+        pipeline_learned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+        pipeline_learned.load_lora_weights(model_lora_id, weight_name=weight_name)
 
     pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
     pipeline_unlearned.load_lora_weights(model_lora_id, weight_name=weight_name)
-    total: int = 0
-    sum_before_invert: float = sum([float(param.sum()) for name, param in pipeline_unlearned.unet.named_parameters() if "lora_A" in name])
-    for name, param in pipeline_unlearned.unet.named_parameters():
-        if "lora_A" in name:
-            logger.debug(f"Inverting param {name}")
-            param.data = -1 * param.data
-            total += 1
-    assert sum_before_invert == -sum([float(param.sum()) for name, param in pipeline_unlearned.unet.named_parameters() if "lora_A" in name])
-    assert total > 0
-    logger.debug(f"Inverted {total} params")
+    if requires_inversion:
+        total: int = 0
+        sum_before_invert: float = sum([float(param.sum()) for name, param in pipeline_unlearned.unet.named_parameters() if "lora_A" in name])
+        for name, param in pipeline_unlearned.unet.named_parameters():
+            if "lora_A" in name:
+                logger.debug(f"Inverting param {name}")
+                param.data = -1 * param.data
+                total += 1
+        assert sum_before_invert == -sum([float(param.sum()) for name, param in pipeline_unlearned.unet.named_parameters() if "lora_A" in name])
+        assert total > 0
+        #logger.debug(f"Inverted {total} params")
+        print(f">>>>>>>>>>>>>Inverted {total} params")
 
     return pipeline_original, pipeline_learned, pipeline_unlearned
 
