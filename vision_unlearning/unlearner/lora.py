@@ -280,10 +280,6 @@ class UnlearnerLora(Unlearner):
         if not isinstance(self.gradient_weighting_method, GradientWeightingMethodSimple):
             logger.warning(f"Self distillation was never tested with more advanced gradient weighting methods")
 
-        if not self.is_lora_negated:
-            # TODO: this shiould be a simple matter of following the gradinet or its negation
-            raise NotImplementedError()
-
         os.makedirs(self.output_dir, exist_ok=True)
 
         set_seed(self.seed)
@@ -585,13 +581,13 @@ class UnlearnerLora(Unlearner):
 
             if self._accelerator.is_main_process:
                 if self.validation_prompt is not None and epoch % self.validation_epochs == 0:
-                    # create pipeline
                     pipeline = DiffusionPipeline.from_pretrained(
                         self.model_name_or_path,
                         unet=unwrap_model(self._unet, self._accelerator),
                         revision=self.revision,
                         variant=self.variant,
                         torch_dtype=self._weight_dtype,
+                        safety_checker=None,
                     )
                     self._images.update(log_validation(pipeline, self._accelerator, epoch, self.num_validation_images, self.validation_prompt, self.seed))
 
