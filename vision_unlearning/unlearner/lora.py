@@ -104,7 +104,7 @@ class UnlearnerLora(Unlearner):
     lora_r: int = Field(default=32, description="Dimensionality of the LoRA rank (R).")
     lora_alpha: int = Field(default=64, description="Lora alpha.")
     # lora_dropout: float = Field(default=0.0, metadata={"help": "Lora dropout."})
-    target_modules: List[str] = Field(default=["to_k", "to_q", "to_v", "to_out.0"], description="Which module will be added the lora adapter.")
+    target_modules: List[str] = Field(default=["to_k", "to_q", "to_v", "to_out.0"], description="Which module will be added the lora adapter.")  # See docs: https://huggingface.co/docs/peft/v0.17.0/en/package_reference/lora#peft.LoraConfig
     is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")  # noqa
     seed: int = Field(default=42, description="Random seed for initialization.")
 

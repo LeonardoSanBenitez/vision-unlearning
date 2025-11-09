@@ -49,7 +49,7 @@ def forget_tokens(examples, tokenizer, caption_column, forget_prompt: str):
     return inputs.input_ids
 
 
-def preprocess_train(examples, tokenizer, caption_column, image_column, train_transforms, concept_overwrite: Optional[str] = None):
+def preprocess_train(examples, tokenizer, caption_column, image_column, train_transforms, overwrite_column: Optional[str] = None, concept_overwrite: Optional[str] = None):
     '''
     Adapted from The HuggingFace Inc. team. All rights reserved.
     Licensed under the Apache License, Version 2.0.
@@ -63,8 +63,13 @@ def preprocess_train(examples, tokenizer, caption_column, image_column, train_tr
     images = [image.convert("RGB") for image in examples[image_column]]
     examples["pixel_values"] = [train_transforms(image) for image in images]
     examples["input_ids"] = tokenize_captions(examples, tokenizer, caption_column)
-    if concept_overwrite:
-        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, f"an image of f{concept_overwrite}")
+    if overwrite_column is not None:
+        # get tokens from caption_overwrite_column
+        examples["forget_ids"] = tokenize_captions(examples, tokenizer, overwrite_column)
+    elif concept_overwrite is not None:
+        # get tokens from hardcoded example with class
+        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, f"An image of {concept_overwrite}")
+
     return examples
 
 
