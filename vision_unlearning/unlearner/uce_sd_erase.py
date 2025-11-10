@@ -236,7 +236,7 @@ class UCE(Unlearner):
 
         if "cuda" in self.device:
             assert torch.cuda.is_available(), "CUDA device specified but not available!"
-        
+
         if not self.save_entire_model:
             raise NotImplementedError("UCE currently only supports saving the entire model. Set save_entire_model to True.")
 

@@ -70,10 +70,10 @@ class EvaluatorTextToImage(BaseModel):
                 if self.pipeline_learned is not None:
                     score_learned = self.metric_clip.score(image_learned, prompt)['clip']
                     scores_learned.append(score_learned)
-                
+
                 score_unlearned = self.metric_clip.score(image_unlearned, prompt)['clip']
                 scores_unlearned.append(score_unlearned)
-                
+
                 # Compute differences
                 if self.pipeline_original is not None:
                     scores_difference_original_unlearned.append(score_original - score_unlearned)
@@ -96,7 +96,7 @@ class EvaluatorTextToImage(BaseModel):
                     else:
                         learned_index = 0
                         unlearned_index = 1
-                
+
                 fig, axes = plt.subplots(1, unlearned_index + 1, figsize=(5 * (unlearned_index + 1), 5), squeeze=False)
                 if self.pipeline_original is not None:
                     axes[0, original_index].imshow(image_original)

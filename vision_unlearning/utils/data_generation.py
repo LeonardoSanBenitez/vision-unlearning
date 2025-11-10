@@ -27,7 +27,7 @@ def generate_dataset(
         _, _, pipeline = unlearn_lora(
             model_base_name,
             lora_name,
-            device=device,
+            device=str(device),
             weight_name="pytorch_lora_weights.safetensors",
             requires_inversion=lora_requires_inversion,
             return_original=False,
@@ -50,7 +50,7 @@ def generate_dataset(
     metadata: List[Dict[str, str]] = []
     for start in range(0, len(prompts), batch_size):
         batch_prompts = prompts[start:start + batch_size]
-        batch_outputs = pipeline(batch_prompts).images
+        batch_outputs = pipeline(batch_prompts).images  # type: ignore
 
         for i, image in enumerate(batch_outputs):
             idx = start + i
