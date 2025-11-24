@@ -8,7 +8,7 @@ documentation = "https://vision-unlearning.readthedocs.io/"
 
 [tool.poetry]
 name = "vision-unlearning"
-version = "0.1.5"
+version = "0.1.7"
 description = "Vision Unlearning: a tool for Machine Unlearning in Computer Vision"
 readme = "README.md"
 authors = [
@@ -22,6 +22,9 @@ license = "Apache-2.0"
 classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12"
 ]
 keywords = ["machine unlearning", "machine learning", "deep learning", "computer vision"]
 packages = [{ include = "vision_unlearning" }]
