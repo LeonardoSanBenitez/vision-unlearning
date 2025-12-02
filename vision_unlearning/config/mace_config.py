@@ -1,22 +1,34 @@
-from pydantic import BaseModel
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 
-class MACEConfig(BaseModel):
-    # Primary Settings
+@dataclass
+class MACEConfig:
+    # -------------------------
+    # REQUIRED FIELDS (MUST BE FIRST)
+    # -------------------------
     multi_concept: List[List[Tuple[str, str]]]
+    mapping_concept: List[str]
+
+    # -------------------------
+    # DEVICE
+    # -------------------------
+    device: str = "cuda"
+
+    # -------------------------
+    # Primary Settings
+    # -------------------------
     use_pooler: bool = True
     train_batch_size: int = 1
     learning_rate: float = 1e-4
     max_train_steps: int = 50
     train_preserve_scale: float = 1e-4
     fuse_preserve_scale: float = 1e-4
-    mapping_concept: List[str]
     augment: bool = True
     lamb: float = 0.0
     rank: int = 1
     lora: bool = True
-    train_seperate: bool = True
+    train_separate: bool = True   # ✅ fixed spelling
     importance_sampling: bool = True
     max_memory: int = 1000
     aug_length: int = 30
@@ -25,26 +37,38 @@ class MACEConfig(BaseModel):
     generate_data: bool = True
     use_gpt: bool = False
     test_erased_model: bool = False
+
+    # -------------------------
+    # Cache / Preservation
+    # -------------------------
     prior_preservation_cache_path: str = "./cache/cache_coco.pt"
     domain_preservation_cache_path: str = "./cache/cache_art.pt"
     preserve_weight: float = 8.0e4
+
+    # -------------------------
+    # Paths
+    # -------------------------
     input_data_dir: str = "./data/100art"
     output_dir: str = "./saved_model/CFR_with_multi_LoRAs"
     final_save_path: str = "./saved_model/LoRA_fusion_model"
 
-    # Grounded-SAM Settings
+    # -------------------------
+    # Grounded-SAM
+    # -------------------------
     use_gsam_mask: bool = True
     use_sam_hq: bool = True
     grounded_config: Optional[str] = None
     grounded_checkpoint: Optional[str] = None
     sam_hq_checkpoint: Optional[str] = None
-    sam_checkpoint: Optional[str] = None  # fallback if HQ not used
+    sam_checkpoint: Optional[str] = None
 
-    #Diffusion/ Model settings
+    # -------------------------
+    # Diffusion / Model
+    # -------------------------
     pretrained_model_name_or_path: str = "CompVis/stable-diffusion-v1-4"
     with_prior_preservation: bool = False
     preserve_prompt: str = "a person"
-    preserve_data_dir: str = "data/a person"
+    preserve_data_dir: str = "data/a_person" 
     prior_loss_weight: float = 1.0
     with_uncond_loss: bool = False
     negative_guidance: float = 1.0
