@@ -214,7 +214,11 @@ class UCE(Unlearner):
 
         # Entire model
         if self.save_entire_model:
-            pipe = self.get_pipeline_from_modified_weights()
+            pipe = self.__class__.get_pipeline_from_modified_weights(
+                self.pretrained_model_name_or_path,
+                self.device,
+                self.output_dir
+            )
             pipe.save_pretrained(self.output_dir)  # type: ignore
 
     def train(self) -> List[EvalResult]:
@@ -236,9 +240,6 @@ class UCE(Unlearner):
 
         if "cuda" in self.device:
             assert torch.cuda.is_available(), "CUDA device specified but not available!"
-        
-        if not self.save_entire_model:
-            raise NotImplementedError("UCE currently only supports saving the entire model. Set save_entire_model to True.")
 
         torch_dtype: torch.dtype = torch.float32
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
@@ -409,16 +410,17 @@ class UCE(Unlearner):
 
         return eval_results
 
-    def get_pipeline_from_modified_weights(self) -> DiffusionPipeline:
+    @staticmethod
+    def get_pipeline_from_modified_weights(pretrained_model_name_or_path: str, device: str | torch.device, output_dir: str) -> DiffusionPipeline:
         pipe = DiffusionPipeline.from_pretrained(
-            self.pretrained_model_name_or_path,
+            pretrained_model_name_or_path,
             torch_dtype=torch.float16,
             safety_checker=None
-        ).to(self.device)
+        ).to(device)
 
         logger.debug("Base model is loaded.\n")
 
-        uce_state_dict = load_file(os.path.join(self.output_dir, "uce_sd_weights.safetensors"))
+        uce_state_dict = load_file(os.path.join(output_dir, "uce_sd_weights.safetensors"))
         logger.debug(f"Loaded {len(uce_state_dict)} UCE weight tensors")
 
         # Applying the modified weights
@@ -439,7 +441,12 @@ class UCE(Unlearner):
         else:
             # Maybe have a static method that loads the base model and applies the uce weights?
             # Should be easy for the user to do the same
-            raise NotImplementedError("UCE evaluation currently only supports saving the entire model. Set save_entire_model to True.")
+            pipeline_original = AutoPipelineForText2Image.from_pretrained(self.pretrained_model_name_or_path, torch_dtype=torch.float16, safety_checker=None).to(self.device)
+            pipeline_unlearned = self.__class__.get_pipeline_from_modified_weights(
+                self.pretrained_model_name_or_path,
+                self.device,
+                self.output_dir
+            )
 
         evaluator = EvaluatorTextToImage(
             pipeline_original=pipeline_original,

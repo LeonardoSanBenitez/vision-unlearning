@@ -7,7 +7,7 @@ from vision_unlearning.unlearner.lora import unlearn_lora
 
 
 def generate_dataset(
-    model_base_name: str,
+    model_base_name: Optional[str],
     lora_name: Optional[str],
     prompts: List[str],
     output_path: str,
@@ -15,30 +15,37 @@ def generate_dataset(
     batch_size: int = 4,
     device: Union[int, str, torch.device] = 'cuda',
     lora_requires_inversion: bool = False,
+    model_pipeline: Optional[AutoPipelineForText2Image] = None,
 ) -> List[Dict[str, str]]:
     '''
     @param filenames: you must pass extension; Only png accepted (TODO: make configurable?)
+    @param AutoPipelineForText2Image: not used if model_base_name is provided
     '''
     if not os.path.exists(output_path):
         os.makedirs(output_path, exist_ok=True)
 
     # Load model
     if lora_name:
+        assert model_base_name is not None, "model_base_name must be provided if lora_name is used"
         _, _, pipeline = unlearn_lora(
             model_base_name,
             lora_name,
-            device=device,
+            device=str(device),
             weight_name="pytorch_lora_weights.safetensors",
             requires_inversion=lora_requires_inversion,
             return_original=False,
             return_learned=False,
         )
-    else:
+    elif model_base_name:
         pipeline = AutoPipelineForText2Image.from_pretrained(
             model_base_name,
             torch_dtype=torch.float16,
             safety_checker=None,
         ).to(device)
+    elif model_pipeline:
+        pipeline = model_pipeline.to(device)
+    else:
+        raise ValueError("Either model_base_name or model_pipeline must be provided")
 
     # Filenames validation if provided
     if filenames is not None:
@@ -50,7 +57,7 @@ def generate_dataset(
     metadata: List[Dict[str, str]] = []
     for start in range(0, len(prompts), batch_size):
         batch_prompts = prompts[start:start + batch_size]
-        batch_outputs = pipeline(batch_prompts).images
+        batch_outputs = pipeline(batch_prompts).images  # type: ignore
 
         for i, image in enumerate(batch_outputs):
             idx = start + i

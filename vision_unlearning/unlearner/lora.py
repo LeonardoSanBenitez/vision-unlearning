@@ -232,16 +232,15 @@ class UnlearnerLora(Unlearner):
             raise NotImplementedError("final_eval_prompts_retain should be a list of prompts, not a string.")
         if isinstance(self.final_eval_prompts_forget, str):
             raise NotImplementedError("final_eval_prompts_forget should be a list of prompts, not a string.")
-        t0 = time.time()
         if self.report_to == "wandb" and self.hub_token is not None:
             raise ValueError(
                 "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
                 " Please use `huggingface-cli login` to authenticate with the Hub."
             )
-        
         if not self.is_lora_negated:
             # TODO: this shiould be a simple matter of following the gradinet or its negation
-            raise NotImplementedError()
+            # raise NotImplementedError()  # TODO move to direct
+            pass
 
     def _get_lora_config(self) -> LoraConfig:
         return LoraConfig(
@@ -284,7 +283,7 @@ class UnlearnerLora(Unlearner):
 
     def train(self):
         self._pre_checks()
-
+        t0 = time.time()
         os.makedirs(self.output_dir, exist_ok=True)
 
         set_seed(self.seed)
@@ -586,6 +585,7 @@ class UnlearnerLora(Unlearner):
 
             if self._accelerator.is_main_process:
                 if self.validation_prompt is not None and epoch % self.validation_epochs == 0:
+                    # TODO is this accounting for LoRA negation?
                     pipeline = DiffusionPipeline.from_pretrained(
                         self.model_name_or_path,
                         unet=unwrap_model(self._unet, self._accelerator),

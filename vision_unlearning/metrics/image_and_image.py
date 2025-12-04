@@ -46,7 +46,7 @@ class MetricImageImage(Metric):
             distances.update(evaluation(org_img_path, pred_img_path, metrics_remaining))
 
         assert len(distances) == len(self.metrics)
-        return distances  # TODO: ensure distances are float
+        return {k: float(v) for k, v in distances.items()}
 
     def score(self, org_img: Union[str, Image.Image], pred_img: Union[str, Image.Image]) -> Dict[str, float]:
         if isinstance(org_img, str) and isinstance(pred_img, str):
