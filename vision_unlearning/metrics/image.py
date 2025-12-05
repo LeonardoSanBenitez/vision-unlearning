@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Union, Optional, Any, Dict, List, Literal
+import tempfile
 import numpy as np
 from PIL import Image
 
@@ -156,16 +157,82 @@ print(result)
 
 
 class MetricQuality(MetricImage):
-    '''
-    https://ieeexplore.ieee.org/document/6272356
-    '''
-    def score(self, image: Image.Image) -> Dict[str, float]:
-        image_tensor = torch.from_numpy(np.array(image)).float()
-        image_tensor = image_tensor.permute(2, 0, 1).unsqueeze(0) / 255.0
+    def _load_image(self, img: Union[Image.Image, np.ndarray, str]) -> torch.Tensor:
+        if isinstance(img, str):
+            img_obj = Image.open(img)
 
-        return {
-            'brisque': float(piq.brisque(image_tensor, data_range=1.0).item()),
-        }
+        elif isinstance(img, np.ndarray):
+            arr = img
+            if arr.dtype != np.uint8:
+                arr = (arr * 255).astype(np.uint8)
+            img_obj = Image.fromarray(arr)
+
+        else:
+            img_obj = img
+
+        tensor: torch.Tensor = torch.from_numpy(
+            np.array(img_obj, copy=True)
+        ).float()
+
+        assert tensor.ndim == 3
+        assert tensor.shape[2] in {1, 3}
+
+        tensor = tensor.permute(2, 0, 1) / 255.0  # [H, W, C] -> [C, H, W]
+        return tensor.to(self.device, non_blocking=True)
+
+    def score(self, image: Union[Image.Image, np.ndarray, str]) -> Dict[str, float]:
+        image_tensor: torch.Tensor = self._load_image(image).unsqueeze(0)
+
+        assert image_tensor.ndim == 4
+        assert image_tensor.dtype == torch.float32
+        assert 0.0 <= float(image_tensor.min())
+        assert float(image_tensor.max()) <= 1.0
+
+        with torch.no_grad():
+            score: torch.Tensor = piq.brisque(
+                image_tensor, data_range=1.0
+            )
+
+        return {"brisque": float(score.item())}
+
+    def score_batch(
+        self,
+        images: List[Union[Image.Image, np.ndarray, str]],
+    ) -> List[Dict[str, float]]:
+        tensors: List[torch.Tensor] = [self._load_image(img) for img in images]
+
+        shapes = {t.shape for t in tensors}
+        if len(shapes) != 1:
+            raise ValueError(
+                "All images must have identical shape for batching. "
+                f"Found shapes: {shapes}"
+            )
+
+        batch: torch.Tensor = torch.stack(tensors, dim=0).to(self.device, non_blocking=True)  # [N, C, H, W]
+
+        assert batch.ndim == 4
+        assert batch.dtype == torch.float32
+        assert 0.0 <= float(batch.min())
+        assert float(batch.max()) <= 1.0
+
+        with torch.no_grad():
+            scores: torch.Tensor = piq.brisque(  # [N]
+                batch,
+                data_range=1.0,
+                reduction="none",
+            )
+
+        assert scores.ndim == 1, f"Return shape is {scores.ndim}"
+        assert scores.shape[0] == batch.shape[0]
+
+        results: List[Dict[str, float]] = [
+            {"brisque": float(v.item())} for v in scores
+        ]
+
+        assert len(results) == len(images)
+        return results
+
+
 
 
 # This is how to use it
