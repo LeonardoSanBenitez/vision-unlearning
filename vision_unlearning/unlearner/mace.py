@@ -66,6 +66,7 @@ class MACE(Unlearner) :
         self.config = config
 
     def data_preparation(self) :
+        logger.info("data_preparation function entered")
         device = "cuda" if torch.is_cuda_available() else "cpu"
         self.config.device = device
 
@@ -111,6 +112,7 @@ class MACE(Unlearner) :
                     save_mask.save(f"{os.path.join(mask_save_path, file).replace('.jpg','_mask.jpg')}")
 
     def data_preparation_transformers(self) :
+        logger.info("data_preparation_transformers function entered")
         device = "cuda" if torch.is_cuda_available() else "cpu"
         self.config.device = device
 
@@ -150,6 +152,7 @@ class MACE(Unlearner) :
                     cv2.imwrite(f"{os.path.join(mask_save_path, file).replace('.jpg', '_mask.jpg')}", save_mask)
 
     def trasformer_gsam_util(self) :
+        logger.info("transformers_gasm function entered")
         detector_id = "IDEA-Research/grounding-dino-tiny"
         segmenter_id = "facebook/sam-vit-base"
 
@@ -171,6 +174,7 @@ class MACE(Unlearner) :
             cv2.imwrite(f"{os.path.join(mask_save_path, file).replace('.jpg', '_mask.jpg')}", GSAM_mask)
 
     def train(self) :
+        logger.info("train function entered")
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         # stage 1 & 2 (CFR and LORA training)
@@ -191,6 +195,7 @@ class MACE(Unlearner) :
             # })
 
     def inference(self,pretrained_model_name_or_path, generate_training_data,multi_concept, device, steps, output_dir) :
+        logger.info("inference function entered")
         model_id = pretrained_model_name_or_path
         pipe = StableDiffusionPipeline.from_pretrained(model_id).to(device)
         pipe.safety_checker = None
@@ -245,6 +250,7 @@ class MACE(Unlearner) :
 
 
 def main():
+    logger.info("Main function entered.")
     config = MACEConfig(
         multi_concept = [
             [("melania-trump","object")]
