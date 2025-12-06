@@ -38,7 +38,7 @@ from torchvision.transforms.functional import to_pil_image
 import cv2
 
 from vision_unlearning.unlearner.base import Unlearner
-from vision_unlearning.configs.mace_config import MACEConfig
+from vision_unlearning.config.mace_config import MACEConfig
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.unlearner.mace_utils.mace_supplementary import grounded_segmentation
 from vision_unlearning.unlearner.mace_utils.cfr_lora_training import main as cfr_lora_training

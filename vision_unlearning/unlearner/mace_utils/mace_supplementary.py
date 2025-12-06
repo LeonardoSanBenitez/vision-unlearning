@@ -191,7 +191,7 @@ def grounded_segmentation(
     return mask
 
 
-def load_image(image_str: str) -> Image.image:
+def load_image(image_str: str) -> Image.Image:
     if image_str.startswith("http"):
         image = Image.open(requests.get(image_str, stream=True).raw).convert("RGB")
     else:

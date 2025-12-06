@@ -10,7 +10,7 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel
-from src.mace_lora_atten_processor import LoRAAttnProcessor
+from vision_unlearning.unlearner.mace_utils.mace_lora_atten_processor import LoRAAttnProcessor
 from diffusers.loaders import AttnProcsLayers
 from diffusers.optimization import get_scheduler
 from diffusers.utils.import_utils import is_xformers_available
