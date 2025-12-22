@@ -23,9 +23,6 @@ from vision_unlearning.metrics import MetricImageTextSimilarity
 from vision_unlearning.utils.model_management import save_model_card
 from vision_unlearning.utils.prompt_augmentation import ConceptType, uce_prompt_augmentation
 
-
-
-
 class UCE(Unlearner):
     """
     Unified Concept Editing for unlearning in Stable Diffusion models.
@@ -301,7 +298,7 @@ class UCE(Unlearner):
         #                 f"painting of {guide_concept}", f"picture of {concept} doing something"
         #             ])
 
-        edit_list, guide_list = uce_prompt_augmentation(self.expand_prompts,edit_list,guide_list,self.concept_type)
+        edit_list, guide_list = uce_prompt_augmentation(self.expand_prompts, edit_list, guide_list, self.concept_type)
 
         t2 = time.time()
         logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")  # noqa

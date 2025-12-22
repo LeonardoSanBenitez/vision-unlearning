@@ -15,10 +15,12 @@ except ImportError as e:
     raise ImportError("GroundingDino is not installed or not found. Please follow installation instruction")
 import cv2
 import numpy as np
+import numpy.typing as npt
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from PIL import Image
 from transformers import AutoModelForMaskGeneration, AutoProcessor, pipeline
+
 
 @dataclass
 class BoundingBox:
@@ -31,12 +33,13 @@ class BoundingBox:
     def xyxy(self) -> List[float]:
         return [self.xmin, self.ymin, self.xmax, self.ymax]
 
+
 @dataclass
 class DetectionResult:
     score: float
     label: str
     box: BoundingBox
-    mask: Optional[np.array] = None
+    mask: Optional[npt.NDArray[np.int8]] = None
 
     def __getitem__(self, key):
         if isinstance(key, str):
@@ -65,23 +68,6 @@ class DetectionResult:
                                    ymax=detection_dict['box']['ymax']))
 
 
-
-
-# def load_image(image_pil):
-#     # load image
-#     # image_pil = Image.open(image_path).convert("RGB")  # load image
-
-#     transform = T.Compose(
-#         [
-#             # T.RandomResize([800], max_size=1333),
-#             # T.ToTensor(),
-#             T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-#         ]
-#     )
-#     image, _ = transform(image_pil, None)  # 3, h, w
-#     return image
-
-
 def load_model(model_config_path, model_checkpoint_path, device):
     args = SLConfig.fromfile(model_config_path)
     args.device = device
@@ -91,7 +77,6 @@ def load_model(model_config_path, model_checkpoint_path, device):
     print(load_res)
     _ = model.eval()
     return model
-
 
 def get_grounding_output(model, image, caption, box_threshold, text_threshold, with_logits=True, device="cpu"):
     caption = caption.lower()
@@ -132,25 +117,23 @@ def show_mask(mask, ax, random_color=False):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
     else:
-        color = np.array([170/255, 102/255, 253/255, 0.65])
+        color = np.array([170 / 255, 102 / 255, 253 / 255, 0.65])
     h, w = mask.shape[-2:]
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)
 
-
 def show_box(box, ax, label):
     x0, y0 = box[0], box[1]
     w, h = box[2] - box[0], box[3] - box[1]
-    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0, 0, 0, 0), lw=2))
     ax.text(x0, y0, label)
-
 
 def save_mask_data(output_dir, mask_list, box_list, label_list):
     value = 0  # 0 for background
 
     mask_img = torch.zeros(mask_list.shape[-2:])
-    for idx, mask in enumerate(mask_list):
-        mask_img[mask.cpu().numpy()[0] == True] = value + idx + 1
+    for idx, mask in enumerate(mask_list): 
+        mask_img[mask.cpu().numpy()[0] is True] = value + idx + 1
     plt.figure(figsize=(10, 10))
     plt.imshow(mask_img.numpy())
     plt.axis('off')
@@ -163,7 +146,7 @@ def save_mask_data(output_dir, mask_list, box_list, label_list):
     for label, box in zip(label_list, box_list):
         value += 1
         name, logit = label.split('(')
-        logit = logit[:-1] # the last is ')'
+        logit = logit[:-1]  # the last is ')'
         json_data.append({
             'value': value,
             'label': name,
@@ -175,22 +158,22 @@ def save_mask_data(output_dir, mask_list, box_list, label_list):
 
 
 def get_mask(input_image, text_prompt, model, predictor, device, output_dir=None, box_threshold=0.3, text_threshold=0.25):
-    
+
     # make dir
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
-        
+  
     image = input_image
-    
+
     # run grounding dino model
     boxes_filt, _ = get_grounding_output(
         model, image, text_prompt, box_threshold, text_threshold, device=device
     )
-        
+  
     image_np = image.cpu().numpy()
 
-    image_np = ((image_np/max(image_np.max().item(), abs(image_np.min().item())) + 1) * 255 * 0.5).astype(np.uint8)
-    
+    image_np = ((image_np / max(image_np.max().item(), abs(image_np.min().item())) + 1) * 255 * 0.5).astype(np.uint8)
+
     # C x H x W  to  H x W x C
     if image_np.ndim == 3 and image_np.shape[0] in {1, 3}:
         image_np = image_np.transpose(1, 2, 0)
@@ -212,46 +195,31 @@ def get_mask(input_image, text_prompt, model, predictor, device, output_dir=None
         masks = torch.ones((1, 1, H, W), dtype=torch.bool)
     else:
         masks, _, _ = predictor.predict_torch(
-            point_coords = None,
-            point_labels = None,
-            boxes = transformed_boxes.to(device),
-            multimask_output = False,
+            point_coords=None,
+            point_labels=None,
+            boxes=transformed_boxes.to(device),
+            multimask_output=False,
         )
 
-    # # draw output image
-    # plt.figure(figsize=(10, 10))
-    # plt.imshow(image)
-    # for mask in masks:
-    #     show_mask(mask.cpu().numpy(), plt.gca(), random_color=False)
-    # for box, label in zip(boxes_filt, pred_phrases):
-    #     show_box(box.numpy(), plt.gca(), label)
-
-    # plt.axis('off')
-    # plt.savefig(
-    #     os.path.join(output_dir, "grounded_sam_output.jpg"),
-    #     bbox_inches="tight", dpi=300, pad_inches=0.0
-    # )
-            
-    # save_mask_data(output_dir, resized_mask[0], boxes_filt, pred_phrases)
-    
-    
     final_mask = torch.zeros_like(masks[0].unsqueeze(0))
     # if many masks
     if masks.shape[0] > 1:
-         for i in range(masks.shape[0]):
-             final_mask = final_mask | masks[i]
+        for i in range(masks.shape[0]):
+            final_mask = final_mask | masks[i]
     else:
         final_mask = masks
-    
+ 
     return final_mask
+
 
 def get_boxes(results: DetectionResult) -> List[List[List[float]]]:
     boxes = []
     for result in results:
         xyxy = result.box.xyxy
         boxes.append(xyxy)
-    
+
     return [boxes]
+
 
 def mask_to_polygon(mask: np.ndarray) -> List[List[int]]:
     # Find contours in the binary mask
@@ -264,6 +232,7 @@ def mask_to_polygon(mask: np.ndarray) -> List[List[int]]:
     polygon = largest_contour.reshape(-1, 2).tolist()
 
     return polygon
+
 
 def polygon_to_mask(polygon: List[Tuple[int, int]], image_shape: Tuple[int, int]) -> np.ndarray:
     """
@@ -287,6 +256,7 @@ def polygon_to_mask(polygon: List[Tuple[int, int]], image_shape: Tuple[int, int]
 
     return mask
 
+
 def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> List[np.ndarray]:
     masks = masks.cpu().float()
     masks = masks.permute(0, 2, 3, 1)
@@ -304,6 +274,7 @@ def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> L
 
     return masks
 
+
 def detect(
     image: Image.Image,
     labels: List[str],
@@ -317,12 +288,13 @@ def detect(
     detector_id = detector_id if detector_id is not None else "IDEA-Research/grounding-dino-tiny"
     object_detector = pipeline(model=detector_id, task="zero-shot-object-detection", device=device)
 
-    labels = [label if label.endswith(".") else label+"." for label in labels]
+    labels = [label if label.endswith(".") else label + "." for label in labels]
 
-    results = object_detector(image,  candidate_labels=labels, threshold=threshold)
+    results = object_detector(image, candidate_labels=labels, threshold=threshold)
     results = [DetectionResult.from_dict(result) for result in results]
 
     return results
+
 
 def segment(
     image: Image.Image,
@@ -374,7 +346,7 @@ def grounded_segmentation(
     max_index = max(range(len(detections)), key=lambda i: detections[i].score)
 
     mask = detections[max_index].mask
-        # If mask is available, apply it
+    # If mask is available, apply it
     if mask is not None:
         # Convert mask to uint8
         print(np.max(mask), np.min(mask))
@@ -389,4 +361,3 @@ def load_image(image_str: str) -> Image.Image:
         image = Image.open(image_str).convert("RGB")
 
     return image
-

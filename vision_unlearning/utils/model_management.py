@@ -73,4 +73,3 @@ You can find some example images in the following.\n
         logger.info('Saving gradient conflicts')
         with open(os.path.join(repo_folder, "gradient_conflicts.json"), "w") as f:
             json.dump({"forget": similarities_gf, "retain": similarities_gr}, f)
-

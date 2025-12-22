@@ -6,7 +6,8 @@ import torch.nn.functional as F
 from diffusers.models.attention_processor import Attention
 from diffusers.models.lora import LoRALinearLayer
 
-def find_matching_indices(old, new):
+
+def find_matching_indices(old, new): 
     # Find the starting common sequence
     start_common = 0
     for i, j in zip(old, new):
@@ -26,7 +27,8 @@ def find_matching_indices(old, new):
             break
 
     return list(range(start_common)) + list(range(end_common_old + 1, len(old))), \
-           list(range(start_common)) + list(range(end_common_new + 1, len(new)))
+        list(range(start_common)) + list(range(end_common_new + 1, len(new)))
+
 
 def get_ca_layers(unet, with_to_k=True):
 
@@ -35,7 +37,7 @@ def get_ca_layers(unet, with_to_k=True):
     for net in sub_nets:
         if 'up' in net[0] or 'down' in net[0]:
             for block in net[1]:
-                if 'Cross' in block.__class__.__name__ :
+                if 'Cross' in block.__class__.__name__:
                     for attn in block.attentions:
                         for transformer in attn.transformer_blocks:
                             ca_layers.append(transformer.attn2)
@@ -44,54 +46,54 @@ def get_ca_layers(unet, with_to_k=True):
                 for transformer in attn.transformer_blocks:
                     ca_layers.append(transformer.attn2)
 
-    ## get the value and key modules
-    projection_matrices = [l.to_v for l in ca_layers]
-    og_matrices = [copy.deepcopy(l.to_v) for l in ca_layers]
+    # get the value and key modules
+    projection_matrices = [layer.to_v for layer in ca_layers]
+    og_matrices = [copy.deepcopy(layer.to_v) for layer in ca_layers]
     if with_to_k:
-        projection_matrices = projection_matrices + [l.to_k for l in ca_layers]
-        og_matrices = og_matrices + [copy.deepcopy(l.to_k) for l in ca_layers]
-    
+        projection_matrices = projection_matrices + [layer.to_k for layer in ca_layers]
+        og_matrices = og_matrices + [copy.deepcopy(layer.to_k) for layer in ca_layers]
+
     return projection_matrices, ca_layers, og_matrices
 
-class AttnController:
+class AttnController: #Add one line above
     def __init__(self) -> None:
-        self.attn_probs = []
-        self.logs = []
-        
+        self.attn_probs: list[Any] = []
+        self.logs: list[Any] = []
+     
     def __call__(self, attn_prob, m_name, preserve_prior, latent_num) -> Any:
         bs, _ = self.concept_positions.shape
-        
+     
         if preserve_prior:
             attn_prob = attn_prob[:attn_prob.shape[0] // latent_num]
-            
+      
         if self.use_gsam_mask:
             d = int(attn_prob.shape[1] ** 0.5)
             resized_mask = F.interpolate(self.mask, size=(d, d), mode='nearest')
-            
+      
             # # save mask
             # img_array = (resized_mask > 0.5).to(torch.uint8) * 255
             # from PIL import Image
             # img = Image.fromarray(img_array[0][0].cpu().numpy())
             # img.save('./sam_outputs/bool_image.png')
-            
+   
             resized_mask = (resized_mask > 0.5).view(-1)
             attn_prob = attn_prob[:, resized_mask, :]
             target_attns = attn_prob[:, :, self.concept_positions[0]]
         else:
             head_num = attn_prob.shape[0] // bs
-            target_attns = attn_prob.masked_select(self.concept_positions[:,None,:].repeat(head_num, 1, 1)).reshape(-1, self.concept_positions[0].sum())
-        
+            target_attns = attn_prob.masked_select(self.concept_positions[:, None, :].repeat(head_num, 1, 1)).reshape(-1, self.concept_positions[0].sum())
+
         self.attn_probs.append(target_attns)
         self.logs.append(m_name)
-        
+
     def set_concept_positions(self, concept_positions, mask=None, use_gsam_mask=False):
         self.concept_positions = concept_positions
         self.mask = mask
         self.use_gsam_mask = use_gsam_mask
-        
+   
     def loss(self):
         return sum(torch.norm(item) for item in self.attn_probs)
-        
+   
     def zero_attn_probs(self):
         self.attn_probs = []
         self.logs = []
@@ -149,10 +151,10 @@ class AttnProcessor:
         value = attn.head_to_batch_dim(value)
 
         attention_probs = attn.get_attention_scores(query, key, attention_mask)
-        
+
         if key.shape[1] == 77 and self.attn_controller is not None:
             self.attn_controller(attention_probs, self.module_name, preserve_prior=True, latent_num=hidden_states.shape[0])
-            
+   
         hidden_states = torch.bmm(attention_probs, value)
         hidden_states = attn.batch_to_head_dim(hidden_states)
 
@@ -170,7 +172,7 @@ class AttnProcessor:
         hidden_states = hidden_states / attn.rescale_output_factor
 
         return hidden_states
-    
+
 
 class LoRAAttnProcessor(nn.Module):
     r"""
@@ -187,13 +189,13 @@ class LoRAAttnProcessor(nn.Module):
             Equivalent to `alpha` but it's usage is specific to Kohya (A1111) style LoRAs.
     """
 
-    def __init__(self, hidden_size, cross_attention_dim=None, rank=4, attn_controller=None, module_name=None, 
+    def __init__(self, hidden_size, cross_attention_dim=None, rank=4, attn_controller=None, module_name=None,
                  network_alpha=None, **kwargs):
         super().__init__()
 
         self.attn_controller = attn_controller
         self.module_name = module_name
-        
+
         self.hidden_size = hidden_size
         self.cross_attention_dim = cross_attention_dim
         self.rank = rank
@@ -219,7 +221,7 @@ class LoRAAttnProcessor(nn.Module):
         self.to_out_lora = LoRALinearLayer(out_hidden_size, out_hidden_size, out_rank, network_alpha)
 
     def __call__(self, attn: Attention, hidden_states, *args, **kwargs):
-        
+   
         attn.to_q.lora_layer = self.to_q_lora.to(hidden_states.device)
         attn.to_k.lora_layer = self.to_k_lora.to(hidden_states.device)
         attn.to_v.lora_layer = self.to_v_lora.to(hidden_states.device)
