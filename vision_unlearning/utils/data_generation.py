@@ -1,7 +1,8 @@
 import os
 from typing import List, Dict, Optional, Union
+import gc
 import torch
-from diffusers import AutoPipelineForText2Image
+from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler, AutoPipelineForText2Image
 from vision_unlearning.datasets.others import jsonl_dump
 from vision_unlearning.unlearner.lora import unlearn_lora
 
@@ -67,3 +68,57 @@ def generate_dataset(
     jsonl_dump(metadata, os.path.join(output_path, "metadata.jsonl"))
 
     return metadata
+
+# def inference(self,pretrained_model_name_or_path, generate_training_data,multi_concept, device, steps, output_dir) :
+#         model_id = pretrained_model_name_or_path
+#         pipe = StableDiffusionPipeline.from_pretrained(model_id,torch_dtype=torch.float16).to(device)
+#         pipe.safety_checker = None
+#         pipe.requires_safety_checker = False
+#         torch.Generator(device=device).manual_seed(42)
+
+#         if generate_training_data :
+#             pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler)
+#             num_images = 8
+#             count = 0
+#             for single_concept in multi_concept :
+#                 for c, t in single_concept :
+#                     count += 1
+#                     print(f"Generating training data for concept {count} = {c}...")
+#                     c = c.replace('-', ' ')
+#                     output_folder = f"{output_dir}/{c}"
+#                     os.makedirs(output_folder, exist_ok=True)
+#                     if t == "object" :
+#                         prompt = f"a photo of the {c}"
+#                         print(f'Inferencing = {prompt}')
+#                         images = pipe(prompt, num_inference_steps=steps, guidance_scale=7.5, num_images_per_prompt=num_images).images
+#                         for i, im in enumerate(images) :
+#                             im.save(f"{output_folder}/{prompt.replace(' ', '-')}_{i}.jpg")
+#                     elif t == "style" :
+#                         prompt = f"a photo in the style of {c}"
+#                         print(f'Inferencing = {prompt}')
+#                         images = pipe(prompt, num_inference_steps=steps, guidance_scale=7.5, num_images_per_prompt=num_images).images
+#                         for i, im in enumerate(images) :
+#                             im.save(f"{output_folder}/{prompt.replace(' ', '-')}_{i}.jpg")
+#                     else :
+#                         raise ValueError("unknown concept type.")
+#                     del images
+#                     torch.cuda.empty_cache()
+#                     gc.collect()
+#         else: 
+#             pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler)
+#             num_images = 8
+#             output_folder = f"{output_dir}/generated_images"
+#             os.makedirs(output_folder, exist_ok=True)
+#             print(f"Inference using {pretrained_model_name_or_path}...")
+#             prompt = prompt
+#             images = pipe(prompt, num_inference_steps=steps, guidance_scale=7.5, num_images_per_prompt=num_images).images
+#             for i, im in enumerate(images) :
+#                 im.save(f"{output_folder}/o_{prompt.replace(' ', '-')}_{i}.jpg")  
+            
+#             torch.cuda.empty_cache()
+#             gc.collect()
+
+#         del pipe
+#         torch.cuda.empty_cache()
+#         gc.collect()
+

@@ -21,12 +21,9 @@ from vision_unlearning.unlearner.base import Unlearner, logger
 from vision_unlearning.evaluator import EvaluatorTextToImage
 from vision_unlearning.metrics import MetricImageTextSimilarity
 from vision_unlearning.utils.model_management import save_model_card
+from vision_unlearning.utils.prompt_augmentation import ConceptType, uce_prompt_augmentation
 
 
-class ConceptType(str, Enum):
-    """Enum representing the type of concept to unlearn."""
-    Object = "object"
-    Art = "art"
 
 
 class UCE(Unlearner):
@@ -276,33 +273,35 @@ class UCE(Unlearner):
             preserve_list = [c.strip() for c in self.preserve_concepts.split(';') if c.strip()]
 
         # ==== Prompt expansion ====
-        if self.expand_prompts:
-            edit_copy = copy.deepcopy(edit_list)
-            guide_copy = copy.deepcopy(guide_list)
+        # if self.expand_prompts:
+        #     edit_copy = copy.deepcopy(edit_list)
+        #     guide_copy = copy.deepcopy(guide_list)
 
-            for concept, guide_concept in zip(edit_copy, guide_copy):
-                if self.concept_type == ConceptType.Art:
-                    edit_list.extend([
-                        f"painting by {concept}", f"art by {concept}",
-                        f"artwork by {concept}", f"picture by {concept}",
-                        f"style of {concept}"
-                    ])
-                    guide_list.extend([
-                        f"painting by {guide_concept}", f"art by {guide_concept}",
-                        f"artwork by {guide_concept}", f"picture by {guide_concept}",
-                        f"style of {guide_concept}"
-                    ])
-                else:
-                    edit_list.extend([
-                        f"image of {concept}", f"photo of {concept}",
-                        f"portrait of {concept}", f"picture of {concept}",
-                        f"painting of {concept}", f"picture of {concept} doing something"
-                    ])
-                    guide_list.extend([
-                        f"image of {guide_concept}", f"photo of {guide_concept}",
-                        f"portrait of {guide_concept}", f"picture of {guide_concept}",
-                        f"painting of {guide_concept}", f"picture of {concept} doing something"
-                    ])
+        #     for concept, guide_concept in zip(edit_copy, guide_copy):
+        #         if self.concept_type == ConceptType.Art:
+        #             edit_list.extend([
+        #                 f"painting by {concept}", f"art by {concept}",
+        #                 f"artwork by {concept}", f"picture by {concept}",
+        #                 f"style of {concept}"
+        #             ])
+        #             guide_list.extend([
+        #                 f"painting by {guide_concept}", f"art by {guide_concept}",
+        #                 f"artwork by {guide_concept}", f"picture by {guide_concept}",
+        #                 f"style of {guide_concept}"
+        #             ])
+        #         else:
+        #             edit_list.extend([
+        #                 f"image of {concept}", f"photo of {concept}",
+        #                 f"portrait of {concept}", f"picture of {concept}",
+        #                 f"painting of {concept}", f"picture of {concept} doing something"
+        #             ])
+        #             guide_list.extend([
+        #                 f"image of {guide_concept}", f"photo of {guide_concept}",
+        #                 f"portrait of {guide_concept}", f"picture of {guide_concept}",
+        #                 f"painting of {guide_concept}", f"picture of {concept} doing something"
+        #             ])
+
+        edit_list, guide_list = uce_prompt_augmentation(self.expand_prompts,edit_list,guide_list,self.concept_type)
 
         t2 = time.time()
         logger.info(f"\nErasing: {edit_list}\nGuiding: {guide_list}\nPreserving: {preserve_list} with erase_scale: {self.erase_scale}, preserve_scale: {self.preserve_scale} and regularization lambda: {self.lamb}\n")  # noqa

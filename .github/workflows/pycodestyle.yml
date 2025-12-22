@@ -2,9 +2,9 @@ name: Pycodestyle Check
 
 on:
   push:
-    branches: ["dev"]
+    branches: ["dev","mace_integration"]
   pull_request:
-    branches: ["dev"]
+    branches: ["dev","mace_integration"]
 
 jobs:
   pycodestyle:
