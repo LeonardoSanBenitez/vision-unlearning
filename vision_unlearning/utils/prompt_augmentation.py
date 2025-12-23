@@ -13,7 +13,7 @@ class ConceptType(str, Enum):
     Art = "art"
 
 
-def uce_prompt_augmentation(expand_prompts: bool,edit_list: list[str],guide_list: list[str],concept_type: ConceptType):
+def uce_prompt_augmentation(expand_prompts: bool, edit_list: list[str], guide_list: list[str], concept_type: ConceptType):
     if expand_prompts:
         edit_copy = copy.deepcopy(edit_list)
         guide_copy = copy.deepcopy(guide_list)
@@ -83,7 +83,7 @@ def mace_prompt_augmentation(content, augment=True, sampled_indices=None, concep
                 ("An oil portrait of {}".format(content), content),
                 ("{} in a sketch painting".format(content), content),
             ]
-      
+ 
         elif concept_type == 'style':
             # art augmentation
             prompts = [
@@ -130,8 +130,9 @@ def mace_prompt_augmentation(content, augment=True, sampled_indices=None, concep
         sampled_prompts = [prompts[i] for i in sampled_indices if i < len(prompts)]
     else:
         sampled_prompts = prompts
-    
+ 
     return sampled_prompts
+
 
 def clean_prompt(class_prompt_collection):
     class_prompt_collection = [re.sub(
@@ -157,7 +158,7 @@ def text_augmentation(erased_concept, mapping_concept, concept_type, num_text_au
             {"role": "system", "content": "You can describe any image via text and provide captions for wide variety of images that is possible to generate."},
             {"role": "user", "content": f"Generate {num_text_augmentations} captions for images containing {erased_concept}. The caption should also contain the word '{erased_concept}'. Please do not use any emojis in the captions."},
         ]
-  
+
         while True:
             completion = client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -171,11 +172,11 @@ def text_augmentation(erased_concept, mapping_concept, concept_type, num_text_au
                 {"role": "user", "content": f"Generate {num_text_augmentations-len(class_prompt_collection)} more captions"})
             if len(class_prompt_collection) >= num_text_augmentations:
                 break
-  
+
         class_prompt_collection = clean_prompt(class_prompt_collection)[:num_text_augmentations]
         class_prompt_formated = []
         mapping_prompt_formated = []
-        
+    
         for prompt in class_prompt_collection:
             class_prompt_formated.append((prompt, erased_concept))
             mapping_prompt_formated.append((prompt.replace(erased_concept, mapping_concept), mapping_concept))

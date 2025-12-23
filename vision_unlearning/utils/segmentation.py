@@ -78,6 +78,7 @@ def load_model(model_config_path, model_checkpoint_path, device):
     _ = model.eval()
     return model
 
+
 def get_grounding_output(model, image, caption, box_threshold, text_threshold, with_logits=True, device="cpu"):
     caption = caption.lower()
     caption = caption.strip()
@@ -113,6 +114,7 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold, w
 
     return boxes_filt, pred_phrases
 
+
 def show_mask(mask, ax, random_color=False):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
@@ -122,17 +124,19 @@ def show_mask(mask, ax, random_color=False):
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)
 
+
 def show_box(box, ax, label):
     x0, y0 = box[0], box[1]
     w, h = box[2] - box[0], box[3] - box[1]
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0, 0, 0, 0), lw=2))
     ax.text(x0, y0, label)
 
+
 def save_mask_data(output_dir, mask_list, box_list, label_list):
     value = 0  # 0 for background
 
     mask_img = torch.zeros(mask_list.shape[-2:])
-    for idx, mask in enumerate(mask_list): 
+    for idx, mask in enumerate(mask_list):
         mask_img[mask.cpu().numpy()[0] is True] = value + idx + 1
     plt.figure(figsize=(10, 10))
     plt.imshow(mask_img.numpy())
@@ -162,14 +166,14 @@ def get_mask(input_image, text_prompt, model, predictor, device, output_dir=None
     # make dir
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
-  
+
     image = input_image
 
     # run grounding dino model
     boxes_filt, _ = get_grounding_output(
         model, image, text_prompt, box_threshold, text_threshold, device=device
     )
-  
+
     image_np = image.cpu().numpy()
 
     image_np = ((image_np / max(image_np.max().item(), abs(image_np.min().item())) + 1) * 255 * 0.5).astype(np.uint8)
@@ -208,7 +212,7 @@ def get_mask(input_image, text_prompt, model, predictor, device, output_dir=None
             final_mask = final_mask | masks[i]
     else:
         final_mask = masks
- 
+
     return final_mask
 
 
@@ -327,6 +331,7 @@ def segment(
         detection_result.mask = mask
 
     return detection_results
+
 
 def grounded_segmentation(
     image: Union[Image.Image, str],

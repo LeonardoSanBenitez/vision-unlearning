@@ -1,34 +1,3 @@
-# from __future__ import annotations
-# import os
-# import sys
-# import time
-# import copy
-# import logging
-# from pathlib import Path
-# from enum import Enum
-# from typing import Optional, List, Tuple, Dict, Any, cast
-# from PIL import Image
-
-
-# import torch  # noqa = F401
-# from torchvision import transforms
-# import torch.nn as nn
-# from pydantic import Field
-# from omegaconf import OmegaConf
-# from inference import inference
-# from safetensors.torch import save_file, load_file
-# from diffusers import DiffusionPipeline, AutoPipelineForText2Image
-# from huggingface_hub.repocard_data import EvalResult
-# from huggingface_hub import upload_folder
-# from segment_anything import sam_model_registry, sam_hq_model_registry, SamPredictor
-
-# from vision_unlearning.unlearner.base import Unlearner, logger
-# from vision_unlearning.evaluator import EvaluatorTextToImage
-# from vision_unlearning.metrics import MetricImageTextSimilarity
-# from vision_unlearning.mace_config import MACEConfig 
-# from vision_unlearning.utils.model_management import save_model_card
-# from vision_unlearning.utils.logger import get_logger
-
 import os
 import torch
 import gc
@@ -42,7 +11,7 @@ from torch.utils.data import Dataset
 import torch.nn.functional as F
 from torchvision.transforms.functional import to_pil_image
 import cv2
-from pydantic import Field
+from pydantic import Field, ConfigDict
 from argparse import Namespace
 from pathlib import Path
 import logging
@@ -59,20 +28,21 @@ from vision_unlearning.utils.segmentation import *
 from vision_unlearning.utils.prompt_augmentation import mace_prompt_augmentation, text_augmentation, clean_prompt
 
 
-from segment_anything import sam_model_registry, sam_hq_model_registry, SamPredictor
 from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler, AutoPipelineForText2Image, AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel
 from huggingface_hub.repocard_data import EvalResult
+from accelerate import get_logger as g_l
 from accelerate import Accelerator
-from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers.loaders import AttnProcsLayers
 from diffusers.optimization import get_scheduler
 from diffusers.utils.import_utils import is_xformers_available
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
+from segment_anything import sam_model_registry, sam_hq_model_registry, SamPredictor
 
 
 logger = get_logger("MACE")
+
 
 # cfr_lora_training
 def collate_fn(examples, with_prior_preservation=False):
@@ -92,7 +62,7 @@ def collate_fn(examples, with_prior_preservation=False):
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
     if masks[0] is not None: 
-        # object/celebrity erasure
+        # object/celebrity_erasure
         masks = torch.stack(masks)
     else:
         # artistic style erasure
@@ -109,6 +79,7 @@ def collate_fn(examples, with_prior_preservation=False):
         "concept_positions": concept_positions,
     }
     return batch
+
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
     text_encoder_config = PretrainedConfig.from_pretrained(
@@ -133,21 +104,23 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
     else:
         raise ValueError(f"{model_class} is not supported.")
 
+
 # cfr_utils.py
 def importance_sampling_fn(t, temperature=0.05):
     """Importance Sampling Function f(t)"""
     return 1 / (1 + np.exp(-temperature * (t - 200))) - 1 / (1 + np.exp(-temperature * (t - 400)))
+
 
 def prepare_k_v(text_encoder, projection_matrices, ca_layers, og_matrices, test_set,
                 tokenizer, with_to_k=True, all_words=False, prepare_k_v_for_lora=False):
 
     with torch.no_grad():
         all_contexts, all_valuess = [], []
-     
+ 
         for curr_item in test_set:
             gc.collect()
             torch.cuda.empty_cache()
-   
+
             # restart LDM parameters
             num_ca_clip_layers = len(ca_layers)
             for idx_, l in enumerate(ca_layers):
@@ -156,10 +129,10 @@ def prepare_k_v(text_encoder, projection_matrices, ca_layers, og_matrices, test_
                 if with_to_k:
                     l.to_k = copy.deepcopy(og_matrices[num_ca_clip_layers + idx_])
                     projection_matrices[num_ca_clip_layers + idx_] = l.to_k
-    
+
             old_embs, new_embs = [], []
             extended_old_indices, extended_new_indices = [], []
-    
+
             # indetify corresponding destinations for each token in old_emb
             # Bulk tokenization
             texts_old = [item[0] for item in curr_item["old"]]
@@ -173,7 +146,7 @@ def prepare_k_v(text_encoder, projection_matrices, ca_layers, og_matrices, test_
                 truncation=True,
                 return_tensors="pt"
             )
-    
+
             # Text embeddings
             text_embeddings = text_encoder(tokenized_inputs.input_ids.to(text_encoder.device))[0]
             old_embs.extend(text_embeddings[:len(texts_old)])
@@ -183,9 +156,9 @@ def prepare_k_v(text_encoder, projection_matrices, ca_layers, og_matrices, test_
             for old_text, new_text in zip(texts_old, texts_new):
                 tokens_a = tokenizer(old_text).input_ids
                 tokens_b = tokenizer(new_text).input_ids
-         
+ 
                 old_indices, new_indices = find_matching_indices(tokens_a, tokens_b)
-         
+ 
                 if old_indices[-1] >= new_indices[-1]:
                     extended_old_indices.append(old_indices + list(range(old_indices[-1] + 1, 77)))
                     extended_new_indices.append(new_indices + list(range(new_indices[-1] + 1, 77 - (old_indices[-1] - new_indices[-1]))))
@@ -203,7 +176,7 @@ def prepare_k_v(text_encoder, projection_matrices, ca_layers, og_matrices, test_
                         values.append(layer(new_emb[extended_new_indices[idx]]).detach())
                     contexts.append(context)
                     valuess.append(values)
-     
+
                 all_contexts.append(contexts)
                 all_valuess.append(valuess)
             else:
@@ -225,11 +198,12 @@ def prepare_k_v(text_encoder, projection_matrices, ca_layers, og_matrices, test_
                             values.append(layer(new_emb).detach())
                         contexts.append(context)
                         valuess.append(values)
-    
+
                 all_contexts.append(contexts)
                 all_valuess.append(valuess)
-    
+
         return all_contexts, all_valuess
+ 
 
 def closed_form_refinement(projection_matrices, all_contexts=None, all_valuess=None, lamb=0.5,
                            preserve_scale=1, cache_dict=None, cache_dict_path=None, cache_mode=False):
@@ -237,14 +211,14 @@ def closed_form_refinement(projection_matrices, all_contexts=None, all_valuess=N
     with torch.no_grad():
         if cache_dict_path is not None:
             cache_dict = torch.load(cache_dict_path, map_location=projection_matrices[0].weight.device)
-    
+
         for layer_num in tqdm(range(len(projection_matrices))):
             gc.collect()
             torch.cuda.empty_cache()
-     
+ 
             mat1 = lamb * projection_matrices[layer_num].weight
             mat2 = lamb * torch.eye(projection_matrices[layer_num].weight.shape[1], device=projection_matrices[layer_num].weight.device)
-  
+
             total_for_mat1 = torch.zeros_like(projection_matrices[layer_num].weight)
             total_for_mat2 = torch.zeros_like(mat2)
 
@@ -253,16 +227,16 @@ def closed_form_refinement(projection_matrices, all_contexts=None, all_valuess=N
                     # Convert contexts and values to tensors
                     contexts_tensor = torch.stack(contexts, dim=2)
                     values_tensor = torch.stack([vals[layer_num] for vals in valuess], dim=2)
-             
+         
                     # Aggregate sums for mat1, mat2 using matrix multiplication
                     for_mat1 = torch.bmm(values_tensor, contexts_tensor.permute(0, 2, 1)).sum(dim=0)
                     for_mat2 = torch.bmm(contexts_tensor, contexts_tensor.permute(0, 2, 1)).sum(dim=0)
-              
+         
                     total_for_mat1 += for_mat1
                     total_for_mat2 += for_mat2
 
                 del for_mat1, for_mat2
-         
+     
             if cache_mode:
                 # cache the results
                 if cache_dict[f'{layer_num}_for_mat1'] is None:
@@ -276,13 +250,14 @@ def closed_form_refinement(projection_matrices, all_contexts=None, all_valuess=N
                 if cache_dict_path is not None or cache_dict is not None:
                     total_for_mat1 += preserve_scale * cache_dict[f'{layer_num}_for_mat1']
                     total_for_mat2 += preserve_scale * cache_dict[f'{layer_num}_for_mat2']
-             
+     
                 total_for_mat1 += mat1
                 total_for_mat2 += mat2
-           
+   
                 projection_matrices[layer_num].weight.data = total_for_mat1 @ torch.inverse(total_for_mat2)
-         
+ 
             del total_for_mat1, total_for_mat2
+
 
 # dataset.py
 # TODO:- MACE should be using class UnlearnDatasetSplit
@@ -334,32 +309,32 @@ class MACEDataset(Dataset):
 
         for concept_idx, (data, mapping_concept) in enumerate(zip(multi_concept, mapping)):
             c, t = data
-    
+
             if input_data_path is not None:
                 p = Path(os.path.join(input_data_path, c.replace("-", " ")))
                 if not p.exists():
                     raise ValueError(f"Instance {p} images root doesn't exists.")
-           
+       
                 if t == "object":
                     p_mask = Path(os.path.join(input_data_path, c.replace("-", " ")).replace(f'{c.replace("-", " ")}', f'{c.replace("-", " ")} mask'))
                     if not p_mask.exists():
                         raise ValueError(f"Instance {p_mask} images root doesn't exists.")
             else:
-                raise ValueError(f"Input data path is not provided.")    
+                raise ValueError(f"Input data path is not provided.")
 
             image_paths = sorted(list(p.iterdir()))
             single_concept_images_path = []
             single_concept_images_path += image_paths
             self.all_concept_image_path.append(single_concept_images_path)
-     
+ 
             if t == "object":
                 mask_paths = sorted(list(p_mask.iterdir()))
                 single_concept_masks_path = []
                 single_concept_masks_path += mask_paths
                 self.all_concept_mask_path.append(single_concept_masks_path)
-             
+         
             erased_concept = c.replace("-", " ")
-    
+
             if use_gpt:
                 class_prompt_collection, mapping_prompt_collection = text_augmentation(erased_concept, mapping_concept, t, num_text_augmentations=self.aug_length)
                 self.instance_prompt.append(class_prompt_collection)
@@ -368,12 +343,12 @@ class MACEDataset(Dataset):
                 sampled_indices = random.sample(range(0, prompt_len), self.aug_length)
                 self.instance_prompt.append(mace_prompt_augmentation(erased_concept, augment=augment, sampled_indices=sampled_indices, concept_type=t))
                 self.target_prompt.append(mace_prompt_augmentation(mapping_concept, augment=augment, sampled_indices=sampled_indices, concept_type=t))
-       
+
             self.num_instance_images += len(single_concept_images_path)
-    
+
             entry = {"old": self.instance_prompt[concept_idx], "new": self.target_prompt[concept_idx]}
             self.dict_for_close_form.append(entry)
-    
+
         if with_prior_preservation:
             class_data_root = Path(preserve_info['dataset_retain_name'])
             if os.path.isdir(class_data_root):
@@ -384,10 +359,10 @@ class MACEDataset(Dataset):
                     class_images_path = f.read().splitlines()
                 with open(preserve_info["preserve_prompt"], "r") as f:
                     class_prompt = f.read().splitlines()
-        
+
             class_img_path = [(x, y) for (x, y) in zip(class_images_path, class_prompt)]
             self.class_images_path.extend(class_img_path[:num_class_images])
-             
+    
         self.image_transforms = transforms.Compose(
             [
                 # transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -396,24 +371,24 @@ class MACEDataset(Dataset):
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
         )
-    
+
         self._concept_num = len(self.instance_prompt)
         self.num_class_images = len(self.class_images_path)
         self._length = max(self.num_instance_images // self._concept_num, self.num_class_images)
-    
+
     def __len__(self):
         return self._length
 
     def __getitem__(self, index):
         example = {}
-    
+
         if not self.train_seperate:
             if self.batch_counter % self.batch_size == 0:
                 self.concept_number = random.randint(0, self._concept_num - 1)
             self.batch_counter += 1
-        
-        instance_image = Image.open(self.all_concept_image_path[self.concept_number][index % self._length])
     
+        instance_image = Image.open(self.all_concept_image_path[self.concept_number][index % self._length])
+
         if len(self.all_concept_mask_path) == 0:
             # artistic style erasure
             binary_tensor = None
@@ -423,10 +398,10 @@ class MACEDataset(Dataset):
             instance_mask = instance_mask.convert('L')
             trans = transforms.ToTensor()
             binary_tensor = trans(instance_mask)
-    
+
         prompt_number = random.randint(0, len(self.instance_prompt[self.concept_number]) - 1)
         instance_prompt, target_tokens = self.instance_prompt[self.concept_number][prompt_number]
-    
+
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
         example["instance_prompt"] = instance_prompt
@@ -463,7 +438,7 @@ class MACEDataset(Dataset):
                 concept_positions[i:i + len(concept_ids)] = [1] * len(concept_ids)
             if self.use_pooler and tok_id == pooler_token_id:
                 concept_positions[i] = 1
-        example["concept_positions"] = torch.tensor(concept_positions)[None]             
+        example["concept_positions"] = torch.tensor(concept_positions)[None]          
 
         if self.with_prior_preservation:
             class_image, class_prompt = self.class_images_path[index % self.num_class_images]
@@ -478,7 +453,7 @@ class MACEDataset(Dataset):
                 max_length=self.tokenizer.model_max_length,
                 return_tensors="pt",
             ).input_ids
-         
+ 
         return example
 
 
@@ -493,7 +468,9 @@ class MACEUnlearner(Unlearner):
         Accepted by Computer Vision and Pattern Recognition(CVPR) 2024.
     uses finetuning framework for task of mass concept erasure.
     '''
-    def __init__(self,multi_concept:List[List[Tuple[str,str]]], mapping_concept:List[str], device:str,userpooler:bool, train_batch_size:int, learning_rate:float,max_train_steps:int, train_preserve_scale:float, fuse_preserve_scale:float,augment:bool, lamb:float,rank:int, lora:bool, train_seperate:bool, importance_sampling:bool, max_memory:int, aug_length:int, prompt_len:int,all_words:bool, use_gpt:bool, prior_preservation_cache_path:str, domain_preservation_cache_path:str, preserve_weight:float, input_data_dir:str, output_dir:str, final_save_path:str, use_gsam_mask:bool, use_sam_hq:bool, grounded_config:Optional[str], grounded_checkpoint:Optional[str], sam_hq_checkpoint:Optional[str], sam_checkpoint:Optional[str], pretrained_model_name_or_path:str, preserve_prompt:List[str], forget_prompt:List[str], with_prior_preservation:bool, dataset_forget_name:str, dataset_retain_name:str, prior_loss_weight:float, with_uncond_loss:bool,negative_guidance:float, uncond_loss_weight:float, num_class_images:int, seed:int, resolution:int, revision:Optional[str], tokenizer_name:Optional[str], instance_prompt:Optional[str], concept_leyword:Optional[str], no_real_image:bool, center_crop:bool, train_text_encoder:bool, sample_batch_size:int, num_train_epochs:int, checkpointing_steps:int, resume_from_checkpoint:Optional[str], gradient_accumulation_steps:int, gradient_checkpointing:bool, scale_lr:bool, lr_Scheduler:str, lr_warmup_steps:int, lr_num_cycles:int, lr_power:float, use_8bit_adam:bool, dataloader_num_workers:int, adam_beta1:float, adam_beta2:float, adam_weight_decay:float, adam_epsilon:float, max_grad_norm:float, push_to_hub:bool, hub_token:Optional[str], hub_model_id:Optional[str], logging_dir:str, allow_tf32:bool,report_to:str, mixed_precision:Optional[str], prior_generation_precision:Optional[str], local_rank:int,enable_xformers_memory_efficient_attention:bool, set_grads_to_none:bool, save_entire_model:bool,generate_training_data:bool, compute_runtimes:bool):
+
+    model_config = ConfigDict(etra="allow")
+    def __init__(self,multi_concept: List[List[Tuple[str,str]]], mapping_concept: List[str], device: str,userpooler: bool, train_batch_size: int, learning_rate: float,max_train_steps: int, train_preserve_scale: float, fuse_preserve_scale: float,augment: bool, lamb: float,rank: int, lora: bool, train_seperate: bool, importance_sampling: bool, max_memory: int, aug_length: int, prompt_len: int,all_words: bool, use_gpt: bool, prior_preservation_cache_path: str, domain_preservation_cache_path: str, preserve_weight: float, input_data_dir: str, output_dir: str, final_save_path: str, use_gsam_mask: bool, use_sam_hq: bool, grounded_config: Optional[str], grounded_checkpoint: Optional[str], sam_hq_checkpoint: Optional[str], sam_checkpoint: Optional[str], pretrained_model_name_or_path: str, preserve_prompt: List[str], forget_prompt: List[str], with_prior_preservation: bool, dataset_forget_name: str, dataset_retain_name: str, prior_loss_weight: float, with_uncond_loss: bool,negative_guidance: float, uncond_loss_weight: float, num_class_images: int, seed: int, resolution: int, revision: Optional[str], tokenizer_name: Optional[str], instance_prompt: Optional[str], concept_keyword: Optional[str], no_real_image: bool, center_crop: bool, train_text_encoder: bool, sample_batch_size: int, num_train_epochs: int, checkpointing_steps: int, resume_from_checkpoint: Optional[str], gradient_accumulation_steps: int, gradient_checkpointing: bool, scale_lr: bool, lr_scheduler: str, lr_warmup_steps: int, lr_num_cycles: int, lr_power: float, use_8bit_adam: bool, dataloader_num_workers: int, adam_beta1: float, adam_beta2: float, adam_weight_decay: float, adam_epsilon: float, max_grad_norm: float, push_to_hub: bool, hub_token: Optional[str], hub_model_id: Optional[str], logging_dir: str, allow_tf32: bool,report_to: str, mixed_precision: Optional[str], prior_generation_precision: Optional[str], local_rank: int,enable_xformers_memory_efficient_attention: bool, set_grads_to_none: bool, save_entire_model: bool,generate_training_data: bool, compute_runtimes: bool):
         super().__init__()
         self.multi_concept = multi_concept
         self.mapping_concept = mapping_concept
@@ -566,7 +543,7 @@ class MACEUnlearner(Unlearner):
         self.revision = revision
         self.tokenizer_name = tokenizer_name
         self.instance_prompt = instance_prompt
-        self.concept_keyword = concept_leyword
+        self.concept_keyword = concept_keyword
         self.no_real_image = no_real_image
         self.center_crop = center_crop
         self.train_text_encoder = train_text_encoder
@@ -577,7 +554,7 @@ class MACEUnlearner(Unlearner):
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.gradient_checkpointing = gradient_checkpointing
         self.scale_lr = scale_lr
-        self.lr_scheduler = lr_Scheduler
+        self.lr_scheduler = lr_scheduler
         self.lr_warmup_steps = lr_warmup_steps
         self.lr_num_cycles = lr_num_cycles
         self.lr_power = lr_power
@@ -622,7 +599,7 @@ class MACEUnlearner(Unlearner):
             #     "steps" = 30,
             #     "output_dir" = self.input_data_dir,
             # })
-  
+
         # get and save masks for each image
         if self.use_gsam_mask :
             grounded_model = load_model(self.grounded_config, self.grounded_checkpoint, device = self.device)
@@ -668,7 +645,7 @@ class MACEUnlearner(Unlearner):
             #     "steps" = 30,
             #     "output_dir" = self.input_data_dir,
             # })
-   
+
         #get and save mask for each image
         if self.use_gsam_mask :
             detector_id = "IDEA-Research/grounding-dino-base"
@@ -713,6 +690,7 @@ class MACEUnlearner(Unlearner):
             cv2.imwrite(f"{os.path.join(mask_save_path, file).replace('.jpg', '_mask.jpg')}", GSAM_mask)
 
     def cfr_lora_training(self):
+        logger = g_l(__name__)
         logging_dir = Path(self.output_dir, self.logging_dir)
 
         accelerator = Accelerator(
@@ -781,7 +759,7 @@ class MACEUnlearner(Unlearner):
         unet.requires_grad_(False)
         if not self.train_text_encoder:
             text_encoder.requires_grad_(False)
-  
+
         if self.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 unet.enable_xformers_memory_efficient_attention()
@@ -811,7 +789,7 @@ class MACEUnlearner(Unlearner):
             )
 
         # projection_matrices, ca_layers, og_matrices = get_ca_layers(unet, with_to_k=True)
-   
+
         # Enable TF32 for faster training on Ampere GPUs,
         # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
         if self.allow_tf32:
@@ -830,7 +808,7 @@ class MACEUnlearner(Unlearner):
                 raise ImportError(
                     "To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`."
                 )
-    
+
             optimizer_class = bnb.optim.AdamW8bit
         else:
             optimizer_class = torch.optim.AdamW
@@ -842,7 +820,7 @@ class MACEUnlearner(Unlearner):
                 }
         else:
             self.preservation_info = None
- 
+
         train_dataset = MACEDataset(
             tokenizer=tokenizer,
             size=self.resolution,
@@ -868,47 +846,47 @@ class MACEUnlearner(Unlearner):
             collate_fn=lambda examples: collate_fn(examples, self.with_prior_preservation),
             num_workers=self.dataloader_num_workers,
         )
-  
+
         # Scheduler and math around the number of training steps.
         overrode_max_train_steps = False
         num_update_steps_per_epoch = math.ceil(len(train_dataloader) / self.gradient_accumulation_steps)
         if self.max_train_steps is None:
             self.max_train_steps = self.num_train_epochs * num_update_steps_per_epoch
             overrode_max_train_steps = True
-      
+
         # We need to recalculate our total training steps as the size of the training dataloader may have changed.
         num_update_steps_per_epoch = math.ceil(len(train_dataloader) / self.gradient_accumulation_steps)
         if overrode_max_train_steps:
             self.max_train_steps = self.num_train_epochs * num_update_steps_per_epoch
-    
+
         # Afterwards we recalculate our number of training epochs
         self.num_train_epochs = math.ceil(self.max_train_steps / num_update_steps_per_epoch)
-       
+
         # Move vae and text_encoder to device and cast to weight_dtype
         vae.to(accelerator.device, dtype=weight_dtype)
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
         # stage 1: closed-form refinement
         projection_matrices, ca_layers, og_matrices = get_ca_layers(unet, with_to_k=True)
- 
+
         # to save memory
         CFR_dict = {}
         max_concept_num = self.max_memory  # the maximum number of concept that can be processed at once
         if len(train_dataset.dict_for_close_form) > max_concept_num:
-      
+
             for layer_num in tqdm(range(len(projection_matrices))):
                 CFR_dict[f'{layer_num}_for_mat1'] = None
                 CFR_dict[f'{layer_num}_for_mat2'] = None
-           
+  
             for i in tqdm(range(0, len(train_dataset.dict_for_close_form), max_concept_num)):
                 contexts_sub, valuess_sub = prepare_k_v(text_encoder, projection_matrices, ca_layers, og_matrices, 
                                                         train_dataset.dict_for_close_form[i:i+5], tokenizer, all_words=self.all_words)
                 closed_form_refinement(projection_matrices, contexts_sub, valuess_sub, cache_dict=CFR_dict, cache_mode=True)
-                
+       
                 del contexts_sub, valuess_sub
                 gc.collect()
                 torch.cuda.empty_cache()
-                
+       
         else:
             for layer_num in tqdm(range(len(projection_matrices))):
                 CFR_dict[f'{layer_num}_for_mat1'] = .0
@@ -927,7 +905,7 @@ class MACEUnlearner(Unlearner):
             for layer_num in self(range(len(projection_matrices))):
                 prior_preservation_cache_dict[f'{layer_num}_for_mat1'] = .0
                 prior_preservation_cache_dict[f'{layer_num}_for_mat2'] = .0
-       
+
         # Load cached domain knowledge for preserving
         if self.domain_preservation_cache_path:
             domain_preservation_cache_dict = torch.load(self.domain_preservation_cache_path, map_location=projection_matrices[0].weight.device)
@@ -943,7 +921,7 @@ class MACEUnlearner(Unlearner):
             cache_dict[key] = self.train_preserve_scale * (prior_preservation_cache_dict[key] \
                             + self.preserve_weight * domain_preservation_cache_dict[key]) \
                             + CFR_dict[key]
- 
+
         # closed-form refinement
         projection_matrices, _, _ = get_ca_layers(unet, with_to_k=True)
  
@@ -952,14 +930,14 @@ class MACEUnlearner(Unlearner):
         else:
             closed_form_refinement(projection_matrices, contexts, valuess, lamb=self.lamb, 
                                 preserve_scale=self.train_preserve_scale, cache_dict=cache_dict)
-        
+
         del contexts, valuess, cache_dict
         gc.collect()
         torch.cuda.empty_cache()
-        
+
         # stage 2: multi-lora training
         for i in range(train_dataset._concept_num):  # the number of concept/lora
-    
+
             attn_controller = AttnController()
             if i != 0:
                 unet.set_default_attn_processor()
@@ -1003,7 +981,7 @@ class MACEUnlearner(Unlearner):
                 weight_decay=self.adam_weight_decay,
                 eps=self.adam_epsilon,
             )
-    
+
             lr_scheduler = get_scheduler(
                 self.lr_scheduler,
                 optimizer=optimizer,
@@ -1012,7 +990,7 @@ class MACEUnlearner(Unlearner):
                 num_cycles=self.lr_num_cycles,
                 power=self.lr_power,
             )
-    
+
             if self.train_text_encoder:
                 unet, text_encoder, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
                     unet, text_encoder, optimizer, train_dataloader, lr_scheduler
@@ -1356,7 +1334,7 @@ class MACEUnlearner(Unlearner):
             pipe.safety_checker=None
             pipe.requires_safety_checker=False
             torch.Generator(device=self.device).manual_seed(42)
-            pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler)
+            pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
             num_images = 8
             count = 0
             for single_concept in self.multi_concept:
@@ -1465,14 +1443,16 @@ class MACEUnlearner(Unlearner):
 
 def main():
     logger.info("Main function entered.")
-    mace = MACEUnlearner(multi_concept = [[("melania-trump","object")]],
-        user_pooler=True,
+    mace = MACEUnlearner(
+        multi_concept=[[("melania-trump", "object")]],
+        userpooler=True,
         train_batch_size=1,
         learning_rate=1.0e-04,
         max_train_steps=50,
         train_preserve_scale=1.0e-4,
         fuse_preserve_scale=10.e-4,
         mapping_concept=["a woman"],
+        device="cuda",
         augment=True,
         lamb=0.0,
         rank=1,
@@ -1483,9 +1463,7 @@ def main():
         aug_length=30,
         prompt_len=30,
         all_words=False,
-        generate_data=True,
         use_gpt=False,
-        test_erased_model=False,
         prior_preservation_cache_path="./cache/cache_coco.pt",
         domain_preservation_cache_path="./cache/cache_cele.pt",
         preserve_weight=8.0e+3,
@@ -1497,6 +1475,7 @@ def main():
         grounded_config="./Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
         grounded_checkpoint="./Grounded-Segment-Anything/groundingdino_swint_ogc.pth",
         sam_hq_checkpoint="./Grounded-Segment-Anything/sam_hq_vit_h.pth",
+        sam_checkpoint="./Grounded-Segment-Anything/sam_hq_vit_h.pth",
         pretrained_model_name_or_path="CompVis/stable-diffusion-v1-4",
         with_prior_preservation=False,
         preserve_prompt=["a person"],
@@ -1548,12 +1527,9 @@ def main():
         set_grads_to_none=False,
         save_entire_model=False,
         generate_training_data=True,
-        compute_runtimes=True)
+        compute_runtimes=True,
+    )
 
-    mace.data_preparation()
+
     mace.train()
     mace.evaluate()
-
-
-    
-

@@ -7,7 +7,7 @@ from diffusers.models.attention_processor import Attention
 from diffusers.models.lora import LoRALinearLayer
 
 
-def find_matching_indices(old, new): 
+def find_matching_indices(old, new):
     # Find the starting common sequence
     start_common = 0
     for i, j in zip(old, new):
@@ -55,27 +55,28 @@ def get_ca_layers(unet, with_to_k=True):
 
     return projection_matrices, ca_layers, og_matrices
 
-class AttnController: #Add one line above
+
+class AttnController:  # Add one line above
     def __init__(self) -> None:
         self.attn_probs: list[Any] = []
         self.logs: list[Any] = []
-     
+ 
     def __call__(self, attn_prob, m_name, preserve_prior, latent_num) -> Any:
         bs, _ = self.concept_positions.shape
-     
+ 
         if preserve_prior:
             attn_prob = attn_prob[:attn_prob.shape[0] // latent_num]
-      
+  
         if self.use_gsam_mask:
             d = int(attn_prob.shape[1] ** 0.5)
             resized_mask = F.interpolate(self.mask, size=(d, d), mode='nearest')
-      
+  
             # # save mask
             # img_array = (resized_mask > 0.5).to(torch.uint8) * 255
             # from PIL import Image
             # img = Image.fromarray(img_array[0][0].cpu().numpy())
             # img.save('./sam_outputs/bool_image.png')
-   
+
             resized_mask = (resized_mask > 0.5).view(-1)
             attn_prob = attn_prob[:, resized_mask, :]
             target_attns = attn_prob[:, :, self.concept_positions[0]]
@@ -90,10 +91,10 @@ class AttnController: #Add one line above
         self.concept_positions = concept_positions
         self.mask = mask
         self.use_gsam_mask = use_gsam_mask
-   
+
     def loss(self):
         return sum(torch.norm(item) for item in self.attn_probs)
-   
+
     def zero_attn_probs(self):
         self.attn_probs = []
         self.logs = []
@@ -154,7 +155,7 @@ class AttnProcessor:
 
         if key.shape[1] == 77 and self.attn_controller is not None:
             self.attn_controller(attention_probs, self.module_name, preserve_prior=True, latent_num=hidden_states.shape[0])
-   
+
         hidden_states = torch.bmm(attention_probs, value)
         hidden_states = attn.batch_to_head_dim(hidden_states)
 
@@ -221,7 +222,7 @@ class LoRAAttnProcessor(nn.Module):
         self.to_out_lora = LoRALinearLayer(out_hidden_size, out_hidden_size, out_rank, network_alpha)
 
     def __call__(self, attn: Attention, hidden_states, *args, **kwargs):
-   
+
         attn.to_q.lora_layer = self.to_q_lora.to(hidden_states.device)
         attn.to_k.lora_layer = self.to_k_lora.to(hidden_states.device)
         attn.to_v.lora_layer = self.to_v_lora.to(hidden_states.device)
