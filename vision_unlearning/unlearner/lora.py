@@ -189,6 +189,7 @@ class UnlearnerLora(Unlearner):
     gradient_weighting_method: GradientWeightingMethod = Field(..., description="The method to use for weighting the gradients.")
     compute_gradient_conflict: bool = Field(False, description="Whether to compute the gradient conflict, for evaluation purposes.")
     compute_runtimes: bool = Field(True, description="Whether to compute the runtimes of the training, for evaluation purposes.")
+    compute_memory: bool = Field(True, description="Whether to compute the meamory usage of the training, for evaluation purposes.")
     max_train_steps: Optional[int] = Field(None, description="Total number of training steps, overrides num_train_epochs if provided.")
     lr_warmup_steps: int = Field(500, description="Number of warmup steps in the learning rate scheduler.")
     adam_beta1: float = Field(0.9, description="Beta1 parameter for Adam optimizer.")
@@ -221,6 +222,8 @@ class UnlearnerLora(Unlearner):
     _optimizer: Any = None
     _lr_scheduler: Any = None
     _lora_layers: Any = None
+    
+    _peak_mem = 0.0
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         self._output_dir_checkpoints = self.output_dir
@@ -501,6 +504,9 @@ class UnlearnerLora(Unlearner):
             disable=not self._accelerator.is_local_main_process,  # Only show the progress bar once on each machine.
         )
 
+        torch.cuda.reset_peak_memory_stats()
+        self._peak_mem = 0.0
+
         for epoch in range(first_epoch, self.num_train_epochs):
             assert self._unet is not None
             self._unet.train()
@@ -685,6 +691,14 @@ class UnlearnerLora(Unlearner):
                     metric_type='runtime',
                     metric_name=f'Runtime eval seconds (~↓)',
                     metric_value=t4 - t3,
+                    **metric_common_attributes,  # type: ignore
+                ))
+            
+            if self.compute_memory:
+                eval_results.append(EvalResult(
+                    metric_type='memory',
+                    metric_name=f'Peak memory usage in training (~↓)',
+                    metric_value=self._peak_mem,
                     **metric_common_attributes,  # type: ignore
                 ))
 
