@@ -223,7 +223,7 @@ class UnlearnerLora(Unlearner):
     _lr_scheduler: Any = None
     _lora_layers: Any = None
     
-    _peak_mem = 0.0
+    _peak_mem: int = 0
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         self._output_dir_checkpoints = self.output_dir
@@ -505,7 +505,7 @@ class UnlearnerLora(Unlearner):
         )
 
         torch.cuda.reset_peak_memory_stats()
-        self._peak_mem = 0.0
+        self._peak_mem = 0
 
         for epoch in range(first_epoch, self.num_train_epochs):
             assert self._unet is not None
