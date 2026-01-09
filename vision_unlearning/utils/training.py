@@ -69,7 +69,7 @@ def preprocess_train(examples, tokenizer, caption_column, image_column, train_tr
     else:
         # get tokens from caption_overwrite_column
         examples["forget_ids"] = tokenize_captions(examples, tokenizer, overwrite_column)
-        
+
     return examples
 
 

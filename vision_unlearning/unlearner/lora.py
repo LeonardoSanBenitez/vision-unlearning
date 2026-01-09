@@ -222,7 +222,7 @@ class UnlearnerLora(Unlearner):
     _optimizer: Any = None
     _lr_scheduler: Any = None
     _lora_layers: Any = None
-    
+
     _peak_mem: int = 0
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
@@ -693,7 +693,7 @@ class UnlearnerLora(Unlearner):
                     metric_value=t4 - t3,
                     **metric_common_attributes,  # type: ignore
                 ))
-            
+
             if self.compute_memory:
                 eval_results.append(EvalResult(
                     metric_type='memory',
