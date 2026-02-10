@@ -18,6 +18,8 @@
 pip install vision-unlearning
 ```
 
+Compatible with python 3.10 to 3.12.
+
 ## What is Vision Unlearning?
 
 Vision Unlearning provides a standard interface for unlearning algorithms, datasets, metrics, and evaluation methodologies commonly used in Machine Unlearning for vision-related tasks, such as image classification and image generation.
@@ -44,9 +46,9 @@ For practitioners, Vision Unlearning provides:
 - A standardized interface to experiment with different algorithms.
 
 ## Tutorials
-* [Replace _George W. Bush_ by _Tony Blair_ using FADE](https://drive.google.com/file/d/1penpHELJkM2LtxZ_yuQ09nUPCyDmZzyM/view?usp=sharing)
-* [Forget cat using UCE (with hyperparam tunning)](https://drive.google.com/file/d/1OZtNkntOj-dVpo-T1kQdPMK7TMYX3ctf/view?usp=sharing)
-
+* [Replace _George W. Bush_ by _Tony Blair_ using FADE](https://colab.research.google.com/drive/1w_86jyZJfyY6YwOMUGbo9VoaJytqn3hz?usp=sharing)
+* [Forget cat using UCE (with hyperparam tunning)](https://colab.research.google.com/drive/1Ma5_zP9iErU7du7Ev7a61Do2bS-EcZCj?usp=sharing)
+* [Forget church using Munba](https://colab.research.google.com/drive/1eyjrNMcYi0PK37U0ZLcwydy153yiJUJ9?usp=sharing)
 The source code for these tutorials is in `tutorials/`, but their outputs were cleaned to avoid burdening the repo.
 The links above contain Google Drive stored executions with the full outputs.
 

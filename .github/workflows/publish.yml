@@ -1,0 +1,42 @@
+name: Publish Package to PyPI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # Publish with the newest supported version
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install Build Tools
+        run: |
+          pip install build twine
+
+      - name: Install Dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Build Distribution
+        run: poetry run python -m build
+
+      - name: Twine Check
+        run: poetry run twine check dist/*
+
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          poetry run twine upload --skip-existing dist/*
