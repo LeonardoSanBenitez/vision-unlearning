@@ -6,4 +6,4 @@ import torch
 
 class Metric(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    device: Optional[torch.device|str] = None
+    device: Optional[torch.device | str | int] = None

@@ -43,7 +43,7 @@ def generate_dataset(
             safety_checker=None,
         ).to(device)
     elif model_pipeline:
-        pipeline = model_pipeline.to(device)
+        pipeline = model_pipeline.to(device)  # type: ignore
     else:
         raise ValueError("Either model_base_name or model_pipeline must be provided")
 

@@ -2,13 +2,13 @@
 Implementation of FADE (in its three variants: non-sparse, sparse-per-module, sparse-per-weight).
 Please cite the following paper if you use this code:
 @misc{kelsch2026fadeselectiveforgettingsparse,
-      title={FADE: Selective Forgetting via Sparse LoRA and Self-Distillation}, 
+      title={FADE: Selective Forgetting via Sparse LoRA and Self-Distillation},
       author={Carolina R. Kelsch and Leonardo S. B. Pereira and Natnael Mola and Luis H. Arribas and Juan C. S. M. Avedillo},
       year={2026},
       eprint={2602.07058},
       archivePrefix={arXiv},
       primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2602.07058}, 
+      url={https://arxiv.org/abs/2602.07058},
 }
 '''
 import os
@@ -27,7 +27,8 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from torchvision import transforms
 from safetensors.torch import load_file
-from datasets import load_dataset
+from datasets import load_dataset, Image
+from datasets.arrow_dataset import DatasetMixin
 from diffusers import StableDiffusionPipeline, UNet2DConditionModel
 from diffusers.utils import convert_state_dict_to_diffusers
 from diffusers import StableDiffusionPipeline
@@ -50,14 +51,59 @@ class UnlearnerLoraDistillation(UnlearnerLora):
     '''
     SparsePEFT is not active in this trainer
     '''
-    overwritting_concept: str
+    overwritting_concept: Optional[str] = Field(default=None, description="The concept to which the forgotten concept will be mapped to. Can be specified either in `overwritting_concept` (single fixed concept) or `overwrite_column`+`json_metafile` (arbitrary set of concepts); The latter have priority.")
+    overwrite_column: str = "overwrite"
+    json_metafile: Optional[str] = Field(default=None, description="Path to a JSON file that contains a mapping from each training example to the concept that will overwrite the forgotten one. The overwrite concept can be specified either in `overwritting_concept` (single fixed concept) or `overwrite_column`+`json_metafile` (arbitrary set of concepts); The latter have priority. The datasets can be specified either in `dataset_forget_name`+`dataset_retain_name` (single-folder datasets) or `json_metafile` (arbitrary paths); The latter have priority.")
     is_lora_negated: bool = Field(default=False, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")  # noqa
 
+
+    # This class accept to be configured via a json, which takes precedence over the configurations of (1) the datasets and (2) the overwrite concept
+    # TODO: json configuration should be accepted by all unlearners
+    # This json looks like the following:
+    '''
+    {
+        "forget": [
+            {
+            "file_name": "images/Architectures-Warm_Smear-19.jpg",
+            "text": "An image of Architectures in Warm Smear style.",
+            "overwrite": "An image of Architectures in Photo style."
+            },
+            {
+            "file_name": "images/Architectures-Warm_Smear-8.jpg",
+            "text": "An image of Architectures in Warm Smear style.",
+            "overwrite": "An image of Architectures in Photo style."
+            },
+            {
+            "file_name": "images/Architectures-Warm_Smear-12.jpg",
+            "text": "An image of Architectures in Warm Smear style.",
+            "overwrite": "An image of Architectures in Photo style."
+            }
+        ],
+        "retain": [
+            {
+            "file_name": "images/Architectures-Abstractionism-6.jpg",
+            "text": "An image of Architectures in Abstractionism style.",
+            "overwrite": ""
+            },
+            {
+            "file_name": "images/Architectures-Abstractionism-4.jpg",
+            "text": "An image of Architectures in Abstractionism style.",
+            "overwrite": ""
+            },
+            {
+            "file_name": "images/Architectures-Abstractionism-2.jpg",
+            "text": "An image of Architectures in Abstractionism style.",
+            "overwrite": ""
+            }
+        ]
+    }
+    '''
     def _pre_checks(self) -> None:
         super()._pre_checks()
         if not isinstance(self.gradient_weighting_method, GradientWeightingMethodSimple):
-            logger.warning(f"Self distillation was never tested with more advanced gradient weighting methods")
-        
+            raise ValueError(f"FADE does not support more advanced gradient weighting methods. Please set `gradient_weighting_method` to `GradientWeightingMethodSimple`.")
+        if self.compute_gradient_conflict:
+            raise ValueError("FADE does not support calculating gradient conflict. Please set `compute_gradient_conflict` to False.")
 
     def _prepare_dataloaders(self) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
         '''
@@ -68,30 +114,74 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         download the dataset.
         Downloading and loading a dataset from the hub.
         '''
-        dataset_forget = load_dataset(
-            self.dataset_forget_name,
-            self.dataset_forget_config_name,
-            cache_dir=self.cache_dir,
-            data_dir=None,
-        )
-        dataset_retain = load_dataset(
-            self.dataset_retain_name,
-            self.dataset_retain_config_name,
-            cache_dir=self.cache_dir,
-            data_dir=None,
-        )
+        if (self.overwritting_concept is None) and (self.json_metafile is None or self.overwrite_column is None):
+            raise ValueError("You need to specify either `overwritting_concept` (single fixed concept) or `overwrite_column`+`json_metafile` (arbitrary set of concepts). The latter have priority.")
+        
+        # Load datasets
+        if (self.json_metafile is None and self.overwrite_column is None):
+            # Case 1: loading datasets using dataset names
+            dataset_forget = load_dataset(
+                self.dataset_forget_name,
+                self.dataset_forget_config_name,
+                cache_dir=self.cache_dir,
+                data_dir=None,
+            )
+            dataset_retain = load_dataset(
+                self.dataset_retain_name,
+                self.dataset_retain_config_name,
+                cache_dir=self.cache_dir,
+                data_dir=None,
+            )
+            assert "train" in dataset_forget, f"Expecting a 'train' split in the dataset for forgetting, but got {dataset_forget.keys()}"
+            assert "train" in dataset_retain, f"Expecting a 'train' split in the dataset for retaining, but got {dataset_retain.keys()}"
+            dataset_forget_field = "train"
+            dataset_retain_field = "train"
+        elif (self.json_metafile is not None and self.overwrite_column is not None):
+            # Case 2: loading datasets using a json metafile
+            dataset_forget_field = "forget"  # Specify the key containing your data
+            dataset_retain_field = "retain"  # Specify the key containing your data
+            dataset_forget = load_dataset(
+                "json",
+                data_files=self.json_metafile,
+                field=dataset_forget_field,
+                cache_dir=self.cache_dir,
+            )
+            dataset_retain = load_dataset(
+                "json",
+                data_files=self.json_metafile,
+                field=dataset_retain_field,
+                cache_dir=self.cache_dir,
+            )
+        else:
+            raise ValueError("Invalid configuration: when loading datasets via json, both `json_metafile` and `overwrite_column` need to be specified.")
 
+        assert type(dataset_forget) == type(dataset_retain), f"Expecting the same type for both datasets, but got {type(dataset_forget)} and {type(dataset_retain)}"
+        assert dataset_forget is DatasetMixin
         logger.info(f'Retain dataset: {dataset_retain}\nForget dataset: {dataset_forget}')
 
-        # Preprocessing the datasets.
-        # We need to tokenize inputs and targets.
-        column_names = dataset_forget["train"].column_names
-        if self.image_column not in column_names:
-            raise ValueError(f"image_column value '{self.image_column}' needs to be one of: {', '.join(column_names)}")
-        if self.caption_column not in column_names:
-            raise ValueError(f"caption_column' value '{self.caption_column}' needs to be one of: {', '.join(column_names)}")
-        logger.info(f"Dataset config - Image column: {self.image_column}, caption column: {self.caption_column}")
-        
+        column_names_forget = dataset_forget[dataset_forget_field].column_names
+        column_names_retain = dataset_retain[dataset_retain_field].column_names
+        assert type(column_names_forget) == type(column_names_retain) == list, f"Expecting column names to be a list, but got {type(column_names_forget)} and {type(column_names_retain)}'
+        if self.image_column not in column_names_forget:
+            raise ValueError(f"image_column value '{self.image_column}' needs to be one of: {', '.join(column_names_forget)}")
+        if self.caption_column not in column_names_forget:
+            raise ValueError(f"caption_column' value '{self.caption_column}' needs to be one of: {', '.join(column_names_forget)}")
+        if (self.json_metafile is not None and self.overwrite_column is not None) and (self.overwrite_column not in column_names_forget):
+            raise ValueError(f"overwrite_column value '{self.overwrite_column}' needs to be one of: {', '.join(column_names_forget)}")
+        logger.info(f"Forget Dataset config - Image column: {self.image_column}, caption column: {self.caption_column}, overwrite column: {self.overwrite_column if self.json_metafile is not None and self.overwrite_column is not None else 'N/A'}")
+
+        if self.image_column not in column_names_retain:
+            raise ValueError(f"image_column value '{self.image_column}' needs to be one of: {', '.join(column_names_retain)}")
+        if self.caption_column not in column_names_retain:
+            raise ValueError(f"caption_column' value '{self.caption_column}' needs to be one of: {', '.join(column_names_retain)}")
+        logger.info(f"Retain Dataset config - Image column: {self.image_column}, caption column: {self.caption_column}")
+
+
+        dataset_forget[dataset_forget_field] = dataset_forget[dataset_forget_field].cast_column(self.image_column, Image())
+        dataset_retain[dataset_retain_field] = dataset_retain[dataset_retain_field].cast_column(self.image_column, Image())
+
+
+
         # Transformations
         train_transforms = transforms.Compose(
             [
@@ -103,10 +193,12 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             ]
         )
 
-        # Preprocessors
-        #''' Ugly version (but works)
-        from vision_unlearning.utils.training import tokenize_captions, preprocess_train, unwrap_model, forget_tokens
-        def preprocess_train(examples):
+        # Preprocessing the datasets.
+        # We need to tokenize inputs and targets.
+        # ''' Ugly version (but works)
+        from vision_unlearning.utils.training import tokenize_captions, preprocess_train, unwrap_model, forget_tokens  # noqa  # type: ignore
+
+        def preprocess_train(examples):  # type: ignore
             images = [image.convert("RGB") for image in examples[self.image_column]]
             examples["pixel_values"] = [train_transforms(image) for image in images]
             examples["input_ids"] = tokenize_captions(examples, self._tokenizer, self.caption_column)
@@ -116,30 +208,36 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             images = [image.convert("RGB") for image in examples[self.image_column]]
             examples["pixel_values"] = [train_transforms(image) for image in images]
             examples["input_ids"] = tokenize_captions(examples, self._tokenizer, self.caption_column)
-            examples["forget_ids"] = forget_tokens(examples, self._tokenizer, self.caption_column, f'An image of {self.overwritting_concept}')  # TODO: hardcoded...?
+            if (self.json_metafile is None and self.overwrite_column is None):
+                # Case 1: use fixed overwriting concept for all examples
+                assert self.overwritting_concept is not None, "When not using json_metafile+overwrite_column, overwritting_concept cannot be None"
+                examples["forget_ids"] = forget_tokens(examples, self._tokenizer, self.caption_column, f'An image of {self.overwritting_concept}')  # TODO: hardcoded tenmplate
+            else:
+                # Case 2: loading datasets using a json metafile
+                examples["forget_ids"] = tokenize_captions(examples, self._tokenizer, self.overwrite_column)
             return examples
-        
+
         # Set the training transforms
+        assert self._accelerator is not None
         with self._accelerator.main_process_first():
             if self.max_train_samples is not None:
-                dataset_forget["train"] = dataset_forget["train"].shuffle(seed=self.seed).select(range(self.max_train_samples))
-            train_dataset_forget = dataset_forget["train"].with_transform(preprocess_forget)
-            train_dataset_retain = dataset_retain["train"].with_transform(preprocess_train)
-        #''' End of ugly version
+                dataset_forget[dataset_forget_field] = dataset_forget[dataset_forget_field].shuffle(seed=self.seed).select(range(self.max_train_samples))  # TODO: why only the dataset forget gets clipped
+            train_dataset_forget = dataset_forget[dataset_forget_field].with_transform(preprocess_forget)  # applies a callable lazily at read time
+            train_dataset_retain = dataset_retain[dataset_retain_field].with_transform(preprocess_train)
+
+        # ''' End of ugly version
 
         ''' Clean version (but does not work)
         from vision_unlearning.utils.training import preprocess_train
         with self._accelerator.main_process_first():
             if self.max_train_samples is not None:
-                dataset_forget["train"] = dataset_forget["train"].shuffle(seed=self.seed).select(range(self.max_train_samples))
-            train_dataset_forget = dataset_forget["train"].with_transform(lambda examples: preprocess_train(examples, self._tokenizer, self.caption_column, self.image_column, train_transforms, self.overwritting_concept))
-            train_dataset_retain = dataset_retain["train"].with_transform(lambda examples: preprocess_train(examples, self._tokenizer, self.caption_column, self.image_column, train_transforms))
-        ''' #end of clean version
-
-
+                dataset_forget[dataset_forget_field] = dataset_forget[dataset_forget_field].shuffle(seed=self.seed).select(range(self.max_train_samples))
+            train_dataset_forget = dataset_forget[dataset_forget_field].with_transform(lambda examples: preprocess_train(examples, self._tokenizer, self.caption_column, self.image_column, train_transforms, self.overwritting_concept))
+            train_dataset_retain = dataset_retain[dataset_retain_field].with_transform(lambda examples: preprocess_train(examples, self._tokenizer, self.caption_column, self.image_column, train_transforms))
+        '''  # end of clean version
 
         # DataLoaders creation
-        #''' Ugly version (but works)
+        # ''' Ugly version (but works)
         def collate_fn(examples):
             pixel_values = torch.stack([example["pixel_values"] for example in examples])
             pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
@@ -151,7 +249,7 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
             input_ids = torch.stack([example["input_ids"] for example in examples])
             forget_ids = torch.stack([example["forget_ids"] for example in examples])
-            return {"pixel_values": pixel_values, "input_ids": input_ids, "forget_ids":forget_ids}
+            return {"pixel_values": pixel_values, "input_ids": input_ids, "forget_ids": forget_ids}
 
         train_forget_dataloader = torch.utils.data.DataLoader(
             train_dataset_forget,
@@ -168,7 +266,7 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             batch_size=self.per_device_train_batch_size,
             num_workers=self.dataloader_num_workers,
         )
-        #''' End of ugly version
+        # ''' End of ugly version
 
         ''' Clean version (but does not work)
         from vision_unlearning.utils.training import collate_fn
@@ -188,13 +286,17 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             batch_size=self.per_device_train_batch_size,
             num_workers=self.dataloader_num_workers,
         )
-        ''' # End of clean version
+        '''  # End of clean version
 
         logger.info(f"Number of training examples = {len(train_dataset_forget)} + {len(train_dataset_retain)}")
         return train_forget_dataloader, train_retain_dataloader
 
-
     def _train_one_batch(self, batch_forget, batch_retain):
+        assert self._unet is not None
+        assert isinstance(self.gradient_weighting_method, GradientWeightingMethodSimple)
+        assert self._accelerator is not None
+        assert self._vae is not None
+
         # Convert images to latent space
         latents_forget = self._vae.encode(batch_forget["pixel_values"].to(dtype=self._weight_dtype)).latent_dist.sample()
         latents_forget = latents_forget * self._vae.config.scaling_factor
@@ -227,7 +329,6 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         noisy_latents_forget = self._noise_scheduler.add_noise(latents_forget, noise_forget, timesteps_forget)
         noisy_latents_retain = self._noise_scheduler.add_noise(latents_retain, noise_retain, timesteps_retain)
 
-        ########### REF BEGIN OF CHANGE
         # Get the text embedding for conditioning
         encoder_hidden_states_forget = self._text_encoder(batch_forget["input_ids"], return_dict=False)[0]
         encoder_hidden_states_retain = self._text_encoder(batch_retain["input_ids"], return_dict=False)[0]
@@ -248,37 +349,24 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         else:
             raise ValueError(f"Unknown prediction type {self._noise_scheduler.config.prediction_type}")
 
-        #########################################
         # Predict the noise residual
-        #########################################
         model_pred_forget_new = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, return_dict=False)[0]
         self._unet.disable_adapters()
         model_pred_forget_old = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_overwt, return_dict=False)[0]
         self._unet.enable_adapters()
-        
+
         model_pred_retain_new = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]
         self._unet.disable_adapters()
         model_pred_retain_old = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]
         self._unet.enable_adapters()
 
-        #########################################
         # Compute loss
         # Gather the losses across all processes for logging (if we use distributed training)
-        #########################################
         loss_forget = F.mse_loss(model_pred_forget_new.float(), model_pred_forget_old.float(), reduction="mean")  # This is a Tensor of shape [], aka is a float
         loss_retain = F.mse_loss(model_pred_retain_new.float(), model_pred_retain_old.float(), reduction="mean")
 
-        #########################################
         # Backpropagate
-        # TODO: can this be done in a Munba-like way?
-        # before, for munba I was scaling the gradients, not the losses.
-        # you scale losses `loss = 0.3*loss2 + loss1`, I was scaling gradients (basically `scaled_grad = 0.3*forget_weight + retain_weight`).
-        # I don't know if that makes a practical difference.
-        # In terms of code, scaling losses is much simpler.
-        # So now i'm scaling losses too
-        # TODO: If we keep this decision, then the parameter gradient_weighting_method has to be remove/changed, and also the option to calculate the gradient conflict
-        #########################################
-        loss = 0.3*loss_forget + loss_retain
+        loss = self.gradient_weighting_method.forget_weight*loss_forget + self.gradient_weighting_method.retain_weight*loss_retain  # This is actually weighting losses, not gradients... but in this case this works
         self._accelerator.backward(loss)
         if self._accelerator.sync_gradients:
             params_to_clip = self._lora_layers
@@ -287,23 +375,21 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         self._lr_scheduler.step()
         self._optimizer.zero_grad()
 
-        #########################################
-        # End of Backpropagate
-        #########################################
-
         return loss_forget, loss_retain
 
 ########################################
 # Sparse-per-module version
 ########################################
 class UnlearnerLoraDistillationSparsePerModule(UnlearnerLoraDistillation):
-    sparsity_inclusiveness: float = Field(default=0.5, metadata={"help": "Percentage of top modules that will be finetuned; Increasing it selects more parameters; Between 0 and 1."})
-
+    sparsity_inclusiveness: float = Field(default=0.5, description="Percentage of top modules that will be finetuned; Increasing it selects more parameters; Between 0 and 1.")
     parameter_attribution_method: ParameterAttributionMethod
     attribution_overwrite_if_exists: bool = False
     _attribution_path: Optional[str] = None
 
     def _get_lora_config(self) -> LoraConfig:
+        assert self._unet is not None
+        assert self._accelerator is not None
+        
         # Get saliency
         self._attribution_path = os.path.join(self.output_dir, 'attribution.pt')
         if not self.attribution_overwrite_if_exists and os.path.exists(self._attribution_path):
@@ -367,8 +453,8 @@ def check_lora_sparsity(adapter_path: str, config_file_name: str = "adapter_conf
 
     # Expect keys like: 'unet.down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q.lora_A.default'
     lora_A_keys = [k for k in weights if ".lora_A." in k]
-    total = 0
-    zero = 0
+    total: int = 0
+    zero: int = 0
 
     for A_key in lora_A_keys:
         B_key = A_key.replace("lora_A", "lora_B")
@@ -380,8 +466,8 @@ def check_lora_sparsity(adapter_path: str, config_file_name: str = "adapter_conf
         B = weights[B_key]  # [out, r]
         AB = B @ A  # [out, in]
 
-        total += AB.numel()
-        zero += (AB == 0).sum().item()
+        total += int(AB.numel())
+        zero += int((AB == 0).sum().item())
 
     sparsity = zero / total if total > 0 else 0.0
     return float(sparsity)
@@ -509,7 +595,7 @@ class ElasticLoRALinear(torch.nn.Linear):
         if orig.bias is not None:
             self._bias.data.copy_(orig.bias.data)
 
-    @torch.no_grad
+    @torch.no_grad()
     def active_sub_adapter(self):
         if self.is_group_head:
             self.shared_r.update_r()
@@ -517,7 +603,7 @@ class ElasticLoRALinear(torch.nn.Linear):
 
     @property
     def masked_weight(self):
-        active_r = self.active_sub_adapter()
+        active_r: int = self.active_sub_adapter()
         if self.is_lora_A:
             return self._weight[:active_r, :]
         return self._weight[:, :active_r]
@@ -651,15 +737,15 @@ def calculate_sparsity_lora(lora_path: str, filename: str, device: str = 'cuda',
 
 class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
     # Specific to this unlearner, general arguments
-    nls: bool = Field(default=False, metadata={"help": "Whether to apply Neural LoRA Search (NLS) or not."})
-    nls_target_modules: List[str] = Field(default=None, metadata={"help": "Which module will be added the elastic lora adapter."})
-    search_space: List[int] = Field(default=None, metadata={"help": "Low-rank search space of NLS training."})
-    share_rank_within_layer: bool = Field(default=True, metadata={"help": "Whether the adapter shares rank values within the layer."})
-    quantization_aware: bool = Field(default=False, metadata={"help": "Enable quantization-aware SparsePEFT."})
+    nls: bool = Field(default=False, description="Whether to apply Neural LoRA Search (NLS) or not.")
+    nls_target_modules: List[str] = Field(default=None, description="Which module will be added the elastic lora adapter.")
+    search_space: List[int] = Field(default=None, description="Low-rank search space of NLS training.")
+    share_rank_within_layer: bool = Field(default=True, description="Whether the adapter shares rank values within the layer.")
+    quantization_aware: bool = Field(default=False, description="Enable quantization-aware SparsePEFT.")
     
     parameter_attribution_method: ParameterAttributionMethod
     attribution_overwrite_if_exists: bool = False
-    sparsity_inclusiveness: float = Field(default=0.5, metadata={"help": "Percentage of top modules that will be finetuned; Increasing it selects more parameters; Between 0 and 1."})
+    sparsity_inclusiveness: float = Field(default=0.5, description="Percentage of top modules that will be finetuned; Increasing it selects more parameters; Between 0 and 1.")
 
     _output_dir_super: Optional[str] = None
     _output_dir_sub: Optional[str] = None
@@ -667,9 +753,9 @@ class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
     _mask_dict: Dict[str, torch.Tensor] = {}  # where the tensors are uint8 binary masks (0 or 1)
 
     # Specific to this unlearner, training arguments
-    non_quant_model_name_or_path: str = Field(default=None, metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"})
+    non_quant_model_name_or_path: str = Field(default=None, description="Path to pretrained model or model identifier from huggingface.co/models")
 
-    def model_post_init(self, __context: dict) -> None:
+    def model_post_init(self, __context: Optional[dict] = None) -> None:
         self._output_dir_super = os.path.join(self.output_dir, 'super')
         self._output_dir_sub = os.path.join(self.output_dir, 'sub')
         self._attribution_path = os.path.join(self.output_dir, 'attribution.pt')
@@ -733,8 +819,8 @@ class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
             r=self.lora_r,
             lora_alpha=self.lora_alpha,
             init_lora_weights="gaussian",
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],  # TODO hardcoded
-            sparsity_calculation_function=sparsity_calculation_function,
+            target_modules=self.target_modules,
+            sparsity_calculation_function=sparsity_calculation_function,  # type: ignore  # This parameter only exist in the SparsePEFT version of the code... this class currently doesn't check if the user is using the right lib...
         )
 
     def _hook_after_lora_init(self):
@@ -755,6 +841,7 @@ class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
             )
 
     def _get_accelerator(self):
+        assert self._output_dir_super is not None
         return Accelerator(
             gradient_accumulation_steps=self.gradient_accumulation_steps,
             mixed_precision=self.mixed_precision,
@@ -766,6 +853,8 @@ class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
         )
 
     def _hook_before_load_model(self):
+        assert self._attribution_path is not None
+
         # Get saliency
         if not self.attribution_overwrite_if_exists and os.path.exists(self._attribution_path):
             saliency = torch.load(self._attribution_path)

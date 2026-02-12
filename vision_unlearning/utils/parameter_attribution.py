@@ -17,7 +17,7 @@ logger = get_logger('utils')
 
 class ParameterAttributionMethod(BaseModel, ABC):
     @abstractmethod
-    def attribute(self, model_name_or_path: str, dataset_name: str, device: str) -> Dict[str, torch.Tensor]:
+    def attribute(self, model_name_or_path: str, dataset_name: str, device: str, image_column: str = 'image', caption_column: str = 'text', batch_size: int = 1) -> Dict[str, torch.Tensor]:
         pass
 
 

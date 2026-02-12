@@ -69,7 +69,8 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           git fetch origin
-          git checkout -B dev
+          git checkout dev
+          git reset --hard origin/dev
 
           mv coverage-badge.json coverage.json
           git add coverage.json

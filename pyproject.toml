@@ -121,6 +121,9 @@ builder = "html"
 filterwarnings = [
     "ignore::numba.core.errors.NumbaDeprecationWarning",
     "ignore:.*nopython=False.*",
+    "ignore:.*builtin type SwigPyPacked.*",
+    "ignore:.*builtin type SwigPyObject.*",
+    "ignore:.*builtin type swigvarlink.*"
 ]
 asyncio_default_fixture_loop_scope = "function"
 

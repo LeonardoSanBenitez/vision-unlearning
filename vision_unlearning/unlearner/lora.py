@@ -133,8 +133,8 @@ class UnlearnerLora(Unlearner):
     # Dataset related
     dataset_forget_name: str = Field(..., description="The name or path of the dataset to be forgotten.")
     dataset_retain_name: str = Field(..., description="The name or path of the dataset to be retained.")
-    dataset_forget_config_name: Optional[str] = Field(None, description="The config of the dataset for forgetting, leave as None if there's only one config.")
-    dataset_retain_config_name: Optional[str] = Field(None, description="The config of the dataset for retaining, leave as None if there's only one config.")
+    dataset_forget_config_name: Optional[str] = Field(None, description="The config of the dataset for forgetting, leave as None if there's only one config.")  # TODO: are we are fully consistent, or is sometimes just dataset_forget_name used to load the dataset?
+    dataset_retain_config_name: Optional[str] = Field(None, description="The config of the dataset for retaining, leave as None if there's only one config.")  # TODO: are we are fully consistent, or is sometimes just dataset_retain_name used to load the dataset?
 
     image_column: str = Field("image", description="The column of the dataset containing an image.")
     caption_column: str = Field("text", description="The column of the dataset containing a caption or a list of captions.")

@@ -3,7 +3,7 @@ from typing import Union, Optional, Any, Dict, List, Literal
 import tempfile
 import numpy as np
 from PIL import Image
-
+from PIL.Image import Image as PILImage
 import torch
 from transformers import (
     pipeline,
@@ -34,7 +34,7 @@ class MetricPaintingStyle(MetricImage):
     desired_style: str
     top_k: int = 5
     model_path: str
-    device: Union[int, str, torch.device] = 'cuda'
+    device: Optional[torch.device | str | int] = 'cuda'
     _pipeline: Optional[ImageClassificationPipeline] = None
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
@@ -110,7 +110,7 @@ print(metric_race.score(img))
 
 
 class MetricGender(MetricImage):
-    device: Union[int, str, torch.device] = 'cpu'
+    device: Optional[torch.device | str | int] = 'cpu'
     _model_name: str = "prithivMLmods/Realistic-Gender-Classification"
     _id2label = {0: 'female', 1: 'male'}
     _model: Any
@@ -158,6 +158,7 @@ print(result)
 
 class MetricQuality(MetricImage):
     def _load_image(self, img: Union[Image.Image, np.ndarray, str]) -> torch.Tensor:
+        img_obj: PILImage
         if isinstance(img, str):
             img_obj = Image.open(img)
 
@@ -231,8 +232,6 @@ class MetricQuality(MetricImage):
 
         assert len(results) == len(images)
         return results
-
-
 
 
 # This is how to use it

@@ -69,11 +69,11 @@ class MetricImageTextSimilarity(Metric):
         assert len(images) == len(texts), "images and texts must have same length"
         assert 'clip' in self.metrics, "score_batch is only implemented for 'clip'"
         assert self._clip_metric is not None
-    
+
         results: List[Dict[str, float]] = []
         for img, txt in zip(images, texts):
             results.append(self.score(img, txt))
-    
+
         # Ensure output length matches input length
         assert len(results) == len(images)
         return results

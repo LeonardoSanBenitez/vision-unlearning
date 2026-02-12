@@ -68,7 +68,7 @@ def preprocess_train(examples, tokenizer, caption_column, image_column, train_tr
         examples["forget_ids"] = tokenize_captions(examples, tokenizer, overwrite_column)
     elif concept_overwrite is not None:
         # get tokens from hardcoded example with class
-        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, f"An image of {concept_overwrite}")        
+        examples["forget_ids"] = forget_tokens(examples, tokenizer, caption_column, f"An image of {concept_overwrite}")
 
     return examples
 
