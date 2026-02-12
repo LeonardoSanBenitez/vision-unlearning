@@ -1,5 +1,5 @@
 import os
-from typing import Dict
+from typing import Any, Dict
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
 import torch
@@ -8,92 +8,81 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import CLIPTokenizer, CLIPTextModel
 from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
-from datasets import load_dataset, Image
+from datasets import Image
 from vision_unlearning.utils.logger import get_logger
 
 
 logger = get_logger('utils')
 
-
+# TODO: maybe instead of receiving model_name_or_path, receive the already loaded model somehow?
 class ParameterAttributionMethod(BaseModel, ABC):
     @abstractmethod
-    def attribute(self, model_name_or_path: str, dataset_name: str, device: str, image_column: str = 'image', caption_column: str = 'text', batch_size: int = 1) -> Dict[str, torch.Tensor]:
+    def attribute(
+        self,
+        noise_scheduler: Any,  # DDPMScheduler
+        text_encoder: Any,  # CLIPTextModel
+        vae: Any,  # AutoencoderKL
+        unet: Any,  # UNet2DConditionModel
+        dataloader: DataLoader,
+        device: str,
+        weight_dtype: torch.dtype,
+    ) -> Dict[str, torch.Tensor]:
         pass
 
 
 class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
-    def attribute(self, model_name_or_path: str, dataset_name: str, device: str, image_column: str = 'image', caption_column: str = 'text', batch_size: int = 1) -> Dict[str, torch.Tensor]:
+    def attribute(
+        self,
+        noise_scheduler: Any,  # DDPMScheduler
+        text_encoder: Any,  # CLIPTextModel
+        vae: Any,  # AutoencoderKL
+        unet: Any,  # UNet2DConditionModel
+        dataloader: DataLoader,
+        device: str,
+        weight_dtype: torch.dtype,
+    ) -> Dict[str, torch.Tensor]:
         '''
         @return saliency: keys like "down_blocks.1.attentions.1.transformer_blocks.0.attn1.to_v.weight", values are tensors of same shape as the parameter, containing the accumulated saliency values.
         Tensor are of type torch.float32.
+
+        Expected characteristics of the dataloader:
+        * Batch size and number of workers are set according to the training arguments.
+        * shuffled
+        * collate behavior: Batches are created by stacking the per-example tensors (pixel_values stacked into contiguous FloatTensor)
+        * Fields
+            * pixel_values: preprocessed images, ready to be fed to the vae (i.e. resized, cropped, normalized...). Shape=[batch size, 3, resolution, resolution]
+            * input_ids: tokenized captions, ready to be fed to the text encoder. Shape=[batch size, sequence length]
+        
+        Expected characteristics of the model (scheduler, text encoder, vae, unet):
+        * unet should have anabled gradients
+        * All loaded in the same device (the one specified in the arguments)
+        * All loaded in the same dtype (the one specified in the arguments)
+        * Loadede from the same base model / working together coherently
         '''
-        logger.debug("Loading scheduler and models...")
-        sched = DDPMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
-        tokenizer = CLIPTokenizer.from_pretrained(model_name_or_path, subfolder="tokenizer")
-        text_enc = CLIPTextModel.from_pretrained(model_name_or_path, subfolder="text_encoder").to(device)
-        vae = AutoencoderKL.from_pretrained(model_name_or_path, subfolder="vae").to(device)
-        unet = UNet2DConditionModel.from_pretrained(model_name_or_path, subfolder="unet").to(device)
-
-        unet.requires_grad_(True)
-        text_enc.eval()
-        vae.eval()
-        logger.debug("Models loaded")
-
-        ##################
-        # Prepare dataset
-        # TODO: this should already receive the dataloaders
-        logger.debug("Loading dataset and casting image column...")
-        ds = load_dataset(dataset_name, split="train")  # TODO: add support for other splits
-        ds = ds.cast_column(image_column, Image())
-
-        # define your image transforms pipeline
-        pipe = transforms.Compose([
-            transforms.Resize(512),
-            transforms.CenterCrop(512),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5] * 3, [0.5] * 3),
-        ])
-
-        # map to tensors
-        def preprocess(batch):
-            batch["pixel_values"] = [pipe(img) for img in batch[image_column]]
-            return batch
-
-        logger.debug("Applying transforms to dataset...")
-        ds = ds.map(preprocess, batched=True, remove_columns=[image_column])
-        ds.set_format(type="torch", columns=["pixel_values", caption_column])
-        logger.debug(f"Dataset ready: {len(ds)} examples.")
-
-        loader = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=1)
-        logger.debug("DataLoader created.")
-
-        ##################
-        # Accumulate saliency
         logger.debug("Initializing saliency storage...")
         saliency = {name: torch.zeros_like(param, device=device)
                     for name, param in unet.named_parameters()}
 
         logger.debug("Starting saliency loop over batches...")
-        for i, batch in enumerate(loader):
-            # Text → CLIP embeddings
-            toks = tokenizer(batch[caption_column], padding=True, return_tensors="pt").to(device)
-            txt_emb = text_enc(**toks).last_hidden_state
+        for i, batch in enumerate(dataloader):          
+            encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
 
-            # Image → latents
+            # Convert images to latent space
             with torch.no_grad():
-                latents = vae.encode(batch["pixel_values"].to(device)).latent_dist.sample()
+                latents = vae.encode(batch["pixel_values"].to(device=device, dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
+
 
             # Add noise
             noise = torch.randn_like(latents)
-            t = torch.randint(0, sched.config.num_train_timesteps, (latents.shape[0],), device=device)
-            noisy = sched.add_noise(latents, noise, t)
+            timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (latents.shape[0],), device=device)
+            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-            # UNet prediction & loss
-            pred = unet(noisy, t, encoder_hidden_states=txt_emb).sample
-            loss = F.mse_loss(pred, noise)
+            # Predict the noise residual
+            model_pred = unet(noisy_latents, timesteps, encoder_hidden_states, return_dict=False)[0]
 
             # Backward + accumulate
+            loss = F.mse_loss(model_pred, noise)
             unet.zero_grad()
             loss.backward()
             with torch.no_grad():
@@ -102,7 +91,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
                         saliency[name] += param.grad.abs()
 
             if (i + 1) % 100 == 0:
-                logger.debug(f"Processed {i+1}/{len(loader)} batches.")
+                logger.debug(f"Processed {i+1}/{len(dataloader)} batches.")
 
         logger.debug("Finished accumulating saliency.")
 

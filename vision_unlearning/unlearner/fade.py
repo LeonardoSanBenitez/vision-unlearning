@@ -113,10 +113,21 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         In distributed training, the load_dataset function guarantees that only one local process can concurrently
         download the dataset.
         Downloading and loading a dataset from the hub.
+
+        Characteristics of the returned dataloaders:
+        * Batch size and number of workers are set according to the training arguments.
+        * shuffled
+        * collate behavior: Batches are created by stacking the per-example tensors (pixel_values stacked into contiguous FloatTensor)
+        * Fields
+            * pixel_values: preprocessed images, ready to be fed to the vae (i.e. resized, cropped, normalized...). Shape=[batch size, 3, resolution, resolution]
+            * input_ids: tokenized captions, ready to be fed to the text encoder. Shape=[batch size, sequence length]
+            * forget_ids: tokenized overwrite captions, ready to be fed to the text encoder; Returned just be forget dataloader. Shape=[batch size, sequence length]
         '''
         if (self.overwritting_concept is None) and (self.json_metafile is None or self.overwrite_column is None):
             raise ValueError("You need to specify either `overwritting_concept` (single fixed concept) or `overwrite_column`+`json_metafile` (arbitrary set of concepts). The latter have priority.")
-        
+        assert self._tokenizer is not None
+        assert self._accelerator is not None
+
         # Load datasets
         if (self.json_metafile is None and self.overwrite_column is None):
             # Case 1: loading datasets using dataset names
@@ -180,8 +191,6 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         dataset_forget[dataset_forget_field] = dataset_forget[dataset_forget_field].cast_column(self.image_column, Image())
         dataset_retain[dataset_retain_field] = dataset_retain[dataset_retain_field].cast_column(self.image_column, Image())
 
-
-
         # Transformations
         train_transforms = transforms.Compose(
             [
@@ -218,7 +227,7 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             return examples
 
         # Set the training transforms
-        assert self._accelerator is not None
+        
         with self._accelerator.main_process_first():
             if self.max_train_samples is not None:
                 dataset_forget[dataset_forget_field] = dataset_forget[dataset_forget_field].shuffle(seed=self.seed).select(range(self.max_train_samples))  # TODO: why only the dataset forget gets clipped
@@ -387,8 +396,12 @@ class UnlearnerLoraDistillationSparsePerModule(UnlearnerLoraDistillation):
     _attribution_path: Optional[str] = None
 
     def _get_lora_config(self) -> LoraConfig:
+        assert self._noise_scheduler is not None
+        assert self._text_encoder is not None
+        assert self._vae is not None
         assert self._unet is not None
         assert self._accelerator is not None
+        assert self._train_forget_dataloader is not None
         
         # Get saliency
         self._attribution_path = os.path.join(self.output_dir, 'attribution.pt')
@@ -396,12 +409,16 @@ class UnlearnerLoraDistillationSparsePerModule(UnlearnerLoraDistillation):
             saliency = torch.load(self._attribution_path)
             logger.info(f"Loaded existing attribution from {self._attribution_path}")
         else:
+            self._unet.requires_grad_(True)
             saliency = self.parameter_attribution_method.attribute(
-                model_name_or_path=self.model_name_or_path,
-                dataset_name=self.dataset_forget_name,
+                noise_scheduler=self._noise_scheduler,
+                text_encoder=self._text_encoder,
+                vae=self._vae,
+                unet=self._unet,
+                dataloader=self._train_forget_dataloader,
                 device=self._accelerator.device,
-                batch_size=self.per_device_train_batch_size,
             )
+            self._unet.requires_grad_(False)
             assert len(saliency) > 0
             torch.save(saliency, self._attribution_path)
             logger.info(f"Saved new attribution to {self._attribution_path}")
@@ -765,6 +782,52 @@ class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
 
 
     def _get_lora_config(self) -> LoraConfig:
+        assert self._attribution_path is not None
+        assert self._noise_scheduler is not None
+        assert self._text_encoder is not None
+        assert self._vae is not None
+        assert self._unet is not None
+        assert self._accelerator is not None
+        assert self._train_forget_dataloader is not None
+
+        # Get saliency
+        if not self.attribution_overwrite_if_exists and os.path.exists(self._attribution_path):
+            saliency = torch.load(self._attribution_path)
+            logger.info(f"Loaded existing attribution from {self._attribution_path}")
+        else:
+            self._unet.requires_grad_(True)
+            saliency = self.parameter_attribution_method.attribute(
+                noise_scheduler=self._noise_scheduler,
+                text_encoder=self._text_encoder,
+                vae=self._vae,
+                unet=self._unet,
+                dataloader=self._train_forget_dataloader,
+                device=self._accelerator.device,
+            )
+            self._unet.requires_grad_(False)
+            assert len(saliency) > 0
+            assert all([m.dtype == torch.float32 for m in self._mask_dict.values()])
+            torch.save(saliency, self._attribution_path)
+            logger.info(f"Saved new attribution to {self._attribution_path}")
+
+        # Threshold saliency per parameter
+        # find the value that’s the cutoff for the top-q
+        # since we want the largest values, we take the (N-k+1)-th smallest
+        logger.debug("Threshold saliency to get _mask_dict")
+        all_vals = torch.cat([v.flatten() for v in saliency.values()])
+
+        k = int(len(all_vals) * self.sparsity_inclusiveness)
+        cutoff = torch.kthvalue(all_vals, len(all_vals) - k + 1).values.item()
+        logger.debug(f"Threshold for top {self.sparsity_inclusiveness*100:.0f}% saliency is {cutoff:.6f}")
+
+        assert len(self._mask_dict) == 0, 'Mask is not empty'
+        for name, tensor in saliency.items():
+            self._mask_dict[name] = (tensor >= cutoff).to(torch.uint8)
+
+        assert len(self._mask_dict) > 0, 'Mask is empty'
+        assert all([m.dtype == torch.uint8 for m in self._mask_dict.values()])
+
+        # Define the sparsity calculation function that will be passed to the SparsePEFT library.
         def sparsity_calculation_function(
             weight: torch.nn.parameter.Parameter,
             base_layer: nn.Module,
@@ -851,42 +914,6 @@ class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
                 logging_dir=Path(self._output_dir_super, self.logging_dir),
             ),
         )
-
-    def _hook_before_load_model(self):
-        assert self._attribution_path is not None
-
-        # Get saliency
-        if not self.attribution_overwrite_if_exists and os.path.exists(self._attribution_path):
-            saliency = torch.load(self._attribution_path)
-            logger.info(f"Loaded existing attribution from {self._attribution_path}")
-        else:
-            saliency = self.parameter_attribution_method.attribute(
-                model_name_or_path=self.model_name_or_path,
-                dataset_name=self.dataset_forget_name,
-                device=self._accelerator.device,
-                batch_size=self.per_device_train_batch_size,
-            )
-            assert len(saliency) > 0
-            assert all([m.dtype == torch.float32 for m in self._mask_dict.values()])
-            torch.save(saliency, self._attribution_path)
-            logger.info(f"Saved new attribution to {self._attribution_path}")
-
-        # Threshold saliency per parameter
-        # find the value that’s the cutoff for the top-q
-        # since we want the largest values, we take the (N-k+1)-th smallest
-        logger.debug("Threshold saliency to get _mask_dict")
-        all_vals = torch.cat([v.flatten() for v in saliency.values()])
-
-        k = int(len(all_vals) * self.sparsity_inclusiveness)
-        cutoff = torch.kthvalue(all_vals, len(all_vals) - k + 1).values.item()
-        logger.debug(f"Threshold for top {self.sparsity_inclusiveness*100:.0f}% saliency is {cutoff:.6f}")
-
-        assert len(self._mask_dict) == 0, 'Mask is not empty'
-        for name, tensor in saliency.items():
-            self._mask_dict[name] = (tensor >= cutoff).to(torch.uint8)
-
-        assert len(self._mask_dict) > 0, 'Mask is empty'
-        assert all([m.dtype == torch.uint8 for m in self._mask_dict.values()])
 
     def _save_lora_layers(self):
         '''

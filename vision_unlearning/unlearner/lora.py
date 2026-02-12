@@ -219,6 +219,9 @@ class UnlearnerLora(Unlearner):
     _vae: Any = None
     _unet: Optional[diffusers.models.unets.unet_2d_condition.UNet2DConditionModel] = None
 
+    _train_forget_dataloader: Optional[torch.utils.data.DataLoader] = None
+    _train_retain_dataloader: Optional[torch.utils.data.DataLoader] = None
+
     _optimizer: Any = None
     _lr_scheduler: Any = None
     _lora_layers: Any = None
@@ -336,11 +339,13 @@ class UnlearnerLora(Unlearner):
         self._vae.to(self._accelerator.device, dtype=self._weight_dtype)
         self._text_encoder.to(self._accelerator.device, dtype=self._weight_dtype)
 
+        t1 = time.time()
+        self._train_forget_dataloader, self._train_retain_dataloader = self._prepare_dataloaders()
+
         # Add adapter and make sure the trainable params are in float32.
         self._unet.add_adapter(self._get_lora_config())
 
         if self.mixed_precision == "fp16":
-            # only upcast trainable parameters (LoRA) into fp32
             cast_training_params(self._unet, dtype=torch.float32)
 
         if self.enable_xformers_memory_efficient_attention:
@@ -407,15 +412,12 @@ class UnlearnerLora(Unlearner):
         #     print(named_modules.keys())
         #     break
 
-        t1 = time.time()
-
-        train_forget_dataloader, train_retain_dataloader = self._prepare_dataloaders()
 
         # Scheduler and math around the number of training steps.
         # Check the PR https://github.com/huggingface/diffusers/pull/8312 for detailed explanation.
         num_warmup_steps_for_scheduler = self.lr_warmup_steps * self._accelerator.num_processes
         if self.max_train_steps is None:
-            len_train_dataloader_after_sharding = math.ceil(len(train_forget_dataloader) / self._accelerator.num_processes)
+            len_train_dataloader_after_sharding = math.ceil(len(self._train_forget_dataloader) / self._accelerator.num_processes)
             num_update_steps_per_epoch = math.ceil(len_train_dataloader_after_sharding / self.gradient_accumulation_steps)
             num_training_steps_for_scheduler = (
                 self.num_train_epochs * num_update_steps_per_epoch * self._accelerator.num_processes
@@ -431,18 +433,18 @@ class UnlearnerLora(Unlearner):
         )
 
         # Prepare everything with our `self._accelerator`.
-        self._unet, self._optimizer, train_forget_dataloader, self._lr_scheduler = self._accelerator.prepare(
+        self._unet, self._optimizer, self._train_forget_dataloader, self._lr_scheduler = self._accelerator.prepare(
             # self._unet, self._optimizer, train_forget_dataloader, train_retain_dataloader, self._lr_scheduler   # TODO: what has to be changed so this works? I guess BOHT datloaders hsould pass though accelerate; it works without but probably there is some perforamcne deradation  # noqa
-            self._unet, self._optimizer, train_forget_dataloader, self._lr_scheduler
+            self._unet, self._optimizer, self._train_forget_dataloader, self._lr_scheduler
         )
 
         # Recalculate our total training steps as the size of the training dataloader may have changed.
-        num_update_steps_per_epoch = math.ceil(len(train_forget_dataloader) / self.gradient_accumulation_steps)
+        num_update_steps_per_epoch = math.ceil(len(self._train_forget_dataloader) / self.gradient_accumulation_steps)
         if self.max_train_steps is None:
             self.max_train_steps = self.num_train_epochs * num_update_steps_per_epoch
             if num_training_steps_for_scheduler != self.max_train_steps * self._accelerator.num_processes:
                 logger.warning(
-                    f"The length of the 'train_dataloader' after 'self._accelerator.prepare' ({len(train_forget_dataloader)}) does not match "
+                    f"The length of the 'train_dataloader' after 'self._accelerator.prepare' ({len(self._train_forget_dataloader)}) does not match "
                     f"the expected length ({len_train_dataloader_after_sharding}) when the learning rate scheduler was created. "
                     f"This inconsistency may result in the learning rate scheduler not functioning properly."
                 )
@@ -510,8 +512,8 @@ class UnlearnerLora(Unlearner):
             self._unet.train()
             train_loss_forget = 0.0  # TODO: plot graph of losses after training
             train_loss_retain = 0.0
-            for step, batch_forget in enumerate(train_forget_dataloader):
-                batch_retain = next(iter(train_retain_dataloader))
+            for step, batch_forget in enumerate(self._train_forget_dataloader):
+                batch_retain = next(iter(self._train_retain_dataloader))
                 min_length = min(len(batch_forget["pixel_values"]), len(batch_retain["pixel_values"]))
                 batch_forget["pixel_values"] = batch_forget["pixel_values"][:min_length]
                 batch_retain["pixel_values"] = batch_retain["pixel_values"][:min_length]
