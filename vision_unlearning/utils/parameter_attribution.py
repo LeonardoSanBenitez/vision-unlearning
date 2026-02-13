@@ -14,6 +14,7 @@ from vision_unlearning.utils.logger import get_logger
 
 logger = get_logger('utils')
 
+
 # TODO: maybe instead of receiving model_name_or_path, receive the already loaded model somehow?
 class ParameterAttributionMethod(BaseModel, ABC):
     @abstractmethod
@@ -52,7 +53,7 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
         * Fields
             * pixel_values: preprocessed images, ready to be fed to the vae (i.e. resized, cropped, normalized...). Shape=[batch size, 3, resolution, resolution]
             * input_ids: tokenized captions, ready to be fed to the text encoder. Shape=[batch size, sequence length]
-        
+
         Expected characteristics of the model (scheduler, text encoder, vae, unet):
         * unet should have anabled gradients
         * All loaded in the same device (the one specified in the arguments)
@@ -64,14 +65,13 @@ class ParameterAttributionMethodSaliency(ParameterAttributionMethod):
                     for name, param in unet.named_parameters()}
 
         logger.debug("Starting saliency loop over batches...")
-        for i, batch in enumerate(dataloader):          
-            encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
+        for i, batch in enumerate(dataloader):
+            encoder_hidden_states = text_encoder(batch["input_ids"].to(device=device), return_dict=False)[0]
 
             # Convert images to latent space
             with torch.no_grad():
                 latents = vae.encode(batch["pixel_values"].to(device=device, dtype=weight_dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
-
 
             # Add noise
             noise = torch.randn_like(latents)
