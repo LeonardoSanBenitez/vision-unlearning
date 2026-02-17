@@ -15,6 +15,7 @@ from vision_unlearning.datasets.testbed import get_metadata_filtered, get_genera
 
 logger = get_logger('I_care')
 
+
 ##########################################
 # Metadata files
 ##########################################
@@ -37,7 +38,7 @@ def get_aggregated_results(
     assert os.path.exists(f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json'), "Caused interferences by this entity were not computed yet"
     with open(f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json', 'r') as f:
         aggregated_results = json.load(f)
-    assert type(aggregated_results) == dict
+    assert isinstance(aggregated_results, dict)
     assert len(aggregated_results) == max_identities
     return aggregated_results
 
@@ -60,7 +61,7 @@ def get_aggregated_results_inverse(
                 aggregated_results_temp = json.load(f)
             aggregated_results_inverse[metadata_filtered[idx_emitter]['name']] = aggregated_results_temp[target]
 
-    assert type(aggregated_results_inverse) == dict
+    assert isinstance(aggregated_results_inverse, dict)
     assert len(aggregated_results_inverse) <= max_identities
     return aggregated_results_inverse
 
@@ -78,7 +79,7 @@ def get_result_summary(
     assert os.path.exists(get_result_summary_path(task))
     with open(get_result_summary_path(task), "r", encoding="utf-8") as f:
         metadata_filtered = json.load(f)
-    assert type(metadata_filtered) == list
+    assert isinstance(metadata_filtered, list)
     assert len(metadata_filtered) == max_identities
     return metadata_filtered
 
@@ -104,15 +105,20 @@ def find_worst_interfered(aggregated_results: dict, metric: str, is_worst_bigges
         elif not is_worst_biggest and results[metric] < metric_worst:
             metric_worst = results[metric]
             name_worst = interfered_name
+    assert isinstance(name_worst, str)
+    assert isinstance(metric_worst, float)
     return name_worst, metric_worst
+
 
 def metric_of_worst_interfered(aggregated_results: dict, metric: str, is_worst_biggest: bool) -> float:
     name_worst, metric_worst = find_worst_interfered(aggregated_results, metric, is_worst_biggest)
     return metric_worst
 
+
 def is_worst_interfered_target(aggregated_results: dict, metric: str, is_worst_biggest: bool, target: str) -> bool:
     name_worst, _ = find_worst_interfered(aggregated_results, metric, is_worst_biggest)
     return name_worst == target
+
 
 def number_of_interfered_worse_than_target(aggregated_results: dict, metric: str, is_worst_biggest: bool, target: str) -> int:
     # Zero if the target itself is the worse
@@ -127,6 +133,7 @@ def number_of_interfered_worse_than_target(aggregated_results: dict, metric: str
             count += 1
     return count
 
+
 def number_of_interfered_worse_than_threshold(aggregated_results: dict, metric: str, is_worst_biggest: bool, threshold: float) -> int:
     count = 0
     for interfered_name, results in aggregated_results.items():
@@ -135,6 +142,7 @@ def number_of_interfered_worse_than_threshold(aggregated_results: dict, metric: 
         elif not is_worst_biggest and results[metric] < threshold:
             count += 1
     return count
+
 
 def average_metric(aggregated_results: dict, metric: str) -> float:
     total = 0.0
@@ -191,7 +199,7 @@ def display_interesting_interferences(
             ax.axis('off')
             img_path = os.path.join(
                 get_generated_dataset_folder(task, method, num_train_epochs, get_target_overwrite(task, method, target)[0]),
-                get_generated_dataset_file(state, seed, f"An image of {get_target_overwrite(task, method, name)[0]}")
+                get_generated_dataset_file(state, seed, f"An image of {get_target_overwrite(task, method, name)[0]}")  # type: ignore
             )
             ax.imshow(plt.imread(img_path))
 
@@ -221,7 +229,7 @@ def display_interesting_interferences(
     fig.text(col_center(fig, axes[0, 0], axes[0, 0]), 0.98, "Target", ha="center", va="bottom", fontsize=12, weight="bold")
     fig.text(col_center(fig, axes[0, 1], axes[0, 4]), 0.98, f"Worst interfered ({metric} {'↑' if is_worst_biggest else '↓'})", ha="center", va="bottom", fontsize=12, weight="bold")
     fig.text(col_center(fig, axes[0, 5], axes[0, 8]), 0.98, f"Least interfered ({metric} {'↓' if is_worst_biggest else '↑'})", ha="center", va="bottom", fontsize=12, weight="bold")
-    
+
     # Draw 2 vertical bars separating these 3 groups
     top_y = 1.0
     bottom_y = axes[1, 0].get_position().y0 - 0.005
@@ -272,19 +280,16 @@ def analyze_relationship_regression(
     pval: float = float(res.pvalue)
 
     significant: bool = pval < 0.05
-    direction_matches: bool = (
-        (slope > 0 and expected_positive) or
-        (slope < 0 and not expected_positive)
-    )
+    direction_matches: bool = (slope > 0 and expected_positive) or (slope < 0 and not expected_positive)
 
     if plot:
         # scatter
-        colors = plt.cm.tab20(np.arange(len(df)))
+        colors = plt.cm.tab20(np.arange(len(df)))  # type: ignore
         for i, (idx, row) in enumerate(df.iterrows()):
             plt.scatter(row[x], row[y], color=colors[i], label=idx)
 
         # regression line
-        xx = np.linspace(xv.min(), xv.max(), 200)
+        xx = np.linspace(xv.min(), xv.max(), 200)  # type: ignore
         yy = slope * xx + res.intercept
         plt.plot(xx, yy, linestyle="--")
 
@@ -339,9 +344,9 @@ def analyze_relationship_numerical(
     @param plot: whether to plot the results
     @param plot_only_significant: whether to plot only significant relationships; Only applies if plot=True
     @return: whether any significant relationship was found
-    
+
     ---
-    
+
     **Pearson test**
         Use when you want to measure a **linear** relationship.
 
@@ -474,7 +479,7 @@ def analyze_relationship_categorical(
     '''
     assert df[metric].dtype == np.float64, f"Metric column {metric} must be of type float64"
     assert df[attribute].dtype == object
-    method_name_pretty = metric.split('_')[1].upper()# + f" ({metric.split('_')[2]} epochs)"
+    method_name_pretty = metric.split('_')[1].upper()  # + f" ({metric.split('_')[2]} epochs)"
     metric_name_pretty = '_'.join(metric.split('_')[3:]).replace('_', ' ').title()
     attribute_name_pretty = attribute.replace('_', ' ').title()
     categories = df[attribute].unique()
@@ -503,7 +508,7 @@ def analyze_relationship_categorical(
         plt.xticks(rotation=45, ha='right')
         plt.xlabel(attribute_name_pretty)
         plt.ylabel(metric_name_pretty)
-        
+
         plt.title(f"Metric: {metric_name_pretty}\nAttribute: {attribute_name_pretty}\nMethod: {method_name_pretty}\nANOVA p-value: {anova_res.pvalue:.03}\nKruskal-Wallis p-value: {kruskal_res.pvalue:.03}")
         plt.show()
 
@@ -543,7 +548,7 @@ def analyze_correlation_between_pairwise_metrics(
             value1 = df1.loc[label_i, label_j]
             value2 = df2.loc[label_i, label_j]
             df_prepared = pd.concat([df_prepared, pd.DataFrame({'metric1': [value1], 'metric2': [value2]}, index=[f'{label_i}_to_{label_j}'])])
-    assert df_prepared.shape[0] == (df1.shape[0]*df1.shape[1] - (df1.shape[0] if exclude_diagonal else 0))
+    assert df_prepared.shape[0] == (df1.shape[0] * df1.shape[1] - (df1.shape[0] if exclude_diagonal else 0))
     df_prepared.dropna(inplace=True)
     assert pd.api.types.is_numeric_dtype(df_prepared['metric1']), f"{metric1_name} must be numeric"
     assert pd.api.types.is_numeric_dtype(df_prepared['metric2']), f"{metric2_name} must be numeric"
@@ -583,6 +588,7 @@ def analyze_correlation_between_pairwise_metrics(
 
     return pearson_significant or spearman_significant
 
+
 ##########################################
 # Others
 ##########################################
@@ -591,7 +597,7 @@ def check_eval_results(eval_results, name, threshold: float, operator: Literal['
     Check if the metric satisfy the EXPECTED threshold
     '''
     value = next(filter(lambda m: m.metric_name.startswith(name), eval_results)).metric_value
-    assert type(value) == float
+    assert isinstance(value, float)
     if operator == 'gt':
         if not value > threshold:
             logger.warning(f'Metric {name} suspiciously too low ({value}), maybe something went wrong with the training...')

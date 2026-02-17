@@ -141,7 +141,7 @@ def balanced_subsample_lib(
 
 ################################
 # Labeled Faces in the Wild (LFW) (famous people)
-# Intended for studying unconstrained face recognition problems (in which there is little control over parameters such as position, pose, lighting, background, camera quality); 
+# Intended for studying unconstrained face recognition problems (in which there is little control over parameters such as position, pose, lighting, background, camera quality);
 # Please cite the original paper:
 # @inproceedings{dataset_lfw,
 #   TITLE = {{Labeled Faces in the Wild: A Database forStudying Face Recognition in Unconstrained Environments}},
@@ -341,8 +341,8 @@ def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> 
 # ```
 # @INPROCEEDINGS{dataset_sun_attributes,
 #   author={Patterson, Genevieve and Hays, James},
-#   booktitle={2012 IEEE Conference on Computer Vision and Pattern Recognition}, 
-#   title={SUN attribute database: Discovering, annotating, and recognizing scene attributes}, 
+#   booktitle={2012 IEEE Conference on Computer Vision and Pattern Recognition},
+#   title={SUN attribute database: Discovering, annotating, and recognizing scene attributes},
 #   year={2012},
 #   volume={},
 #   number={},
@@ -406,7 +406,7 @@ def split_dataset_sun(downloaded_folder: str, dataset_forget_name: str, dataset_
 
 
 def download_dataset_sun():
-    pass # TODO
+    pass  # TODO
 
 
 ################################

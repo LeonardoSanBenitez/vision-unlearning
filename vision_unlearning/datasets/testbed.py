@@ -43,14 +43,14 @@ def get_target_overwrite(
     '''
     @return preprocessed target, target_overwrite
     '''
-    #TODO THIS SHOULD USE  get_target_preprocessed FOR THE TARGET!!!!
+    # TODO THIS SHOULD USE  get_target_preprocessed FOR THE TARGET!!!!
     if task == 'people':
         # target does NOT need to have an article,for example: picture of brad pitt
-        
-        #target_race = metadata_filtered[index]['race'].replace('indian_middleEastern_latinoHispanic', 'middle eastern') # enum: white, asian, black, indian_middleEastern_latinoHispanic
-        #target_gender = 'male' if metadata_filtered[index]['gender']=='M' else 'female'  # Enum[M, F]
-        #article = 'an' if (target_race[0].lower() in 'aeiou') else 'a'
-        #target_overwrite = f"{article} {target_race} {target_gender}"  # For munba this is only the retain concept for final evaluation, there is no overwriting
+
+        # target_race = metadata_filtered[index]['race'].replace('indian_middleEastern_latinoHispanic', 'middle eastern') # enum: white, asian, black, indian_middleEastern_latinoHispanic
+        # target_gender = 'male' if metadata_filtered[index]['gender']=='M' else 'female'  # Enum[M, F]
+        # article = 'an' if (target_race[0].lower() in 'aeiou') else 'a'
+        # target_overwrite = f"{article} {target_race} {target_gender}"  # For munba this is only the retain concept for final evaluation, there is no overwriting
         target_overwrite = 'a child'
     elif task == 'breeds':
         # target does needs to have an article,for example: picture of a poodle
@@ -66,15 +66,16 @@ def get_target_overwrite(
 
     else:
         raise NotImplementedError()
-    
+
     target = target.replace('_', ' ')
     target = re.sub(r'\s+', ' ', target).strip()
 
-    assert type(target_overwrite) == str
-    assert type(target) == str
+    assert isinstance(target_overwrite, str)
+    assert isinstance(target, str)
     assert len(target) >= 3
-    
+
     return target, target_overwrite
+
 
 ##########################################
 # Model and generated data
@@ -96,6 +97,7 @@ def get_generated_dataset_file(
 ) -> str:
     return f'{lora_state}_{seed:02}_{prompt}.png'
 
+
 def get_unlearned_model_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     method: Literal['munba', 'uce', 'distil'],
@@ -104,6 +106,7 @@ def get_unlearned_model_folder(
 ) -> str:
     # By convention, I'm passing here the NON preprocessed target
     return f"assets/models/{task}_{target}_{method}_{num_train_epochs:03d}"
+
 
 def exists_unlearned_model(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
@@ -117,10 +120,11 @@ def exists_unlearned_model(
     else:
         return os.path.exists(os.path.join(model_path, 'pytorch_lora_weights.safetensors'))
 
+
 def exists_unlearned_dataset(generated_dataset_output_path: str, generate_dataset_seeds: List[int], prompts: List[str]) -> bool:
     if not os.path.exists(generated_dataset_output_path):
         return False
-    if len(os.listdir(generated_dataset_output_path)) != len(generate_dataset_seeds)*len(['on', 'off'])*len(prompts) + 1:
+    if len(os.listdir(generated_dataset_output_path)) != len(generate_dataset_seeds) * len(['on', 'off']) * len(prompts) + 1:
         return False
     if not all(filename.endswith('.png') or filename.endswith('.jsonl') for filename in os.listdir(generated_dataset_output_path)):
         return False
@@ -135,7 +139,7 @@ def get_metadata_filtered(
 ) -> List[Dict[str, Any]]:
     with open(f"assets/metadata_{task}_2_enriched_filtered.json", "r", encoding="utf-8") as f:
         metadata_filtered = json.load(f)
-    assert type(metadata_filtered) == list
+    assert isinstance(metadata_filtered, list)
     return metadata_filtered
 
 
@@ -160,19 +164,18 @@ def calculate_similarity_clip(task: Literal['scenes', 'objects', 'breeds', 'peop
 
     # Calculate
     for entity_emitter, row_emitter in df_similarities_clip.iterrows():
-        #break
+        # break
         print(f'Analying similarities for entity_emitter={entity_emitter}')
         for entity_receiver in row_emitter.index:
-            if pd.isna(df_similarities_clip.loc[entity_emitter, entity_receiver]):
+            if pd.isna(df_similarities_clip.loc[entity_emitter, entity_receiver]):  # type: ignore
                 similarity: float = clip_text_metric.score(
-                    get_target_preprocessed(task, entity_emitter),
-                    get_target_preprocessed(task, entity_receiver),
+                    get_target_preprocessed(task, str(entity_emitter)),
+                    get_target_preprocessed(task, str(entity_receiver)),
                 )['clip_text']
                 df_similarities_clip.loc[entity_emitter, entity_receiver] = similarity
-    
+
         # Save at the end of each row
         df_similarities_clip.reset_index(names='emitter').to_json(f'assets/similarity_clip_{task}.json', orient='records')
-
 
     return df_similarities_clip
 
@@ -193,28 +196,28 @@ def plot_heatmap(df, figsize=None, cmap="viridis", title="Heatmap"):
     if df.shape[0] != df.shape[1]:
         raise ValueError("DataFrame must be square (same number of rows and columns).")
     if not np.all(df.index == df.columns):
-        #logger.warning("Index and columns differ; continuing but axis labels may mismatch.")
+        # logger.warning("Index and columns differ; continuing but axis labels may mismatch.")
         raise ValueError("Index and columns must be the same")
-    
+
     df2 = df.dropna()
     if figsize is None:
-        figsize = (int(0.2*df2.shape[1]), int(0.18*df2.shape[0]))
-    
+        figsize = (int(0.2 * df2.shape[1]), int(0.18 * df2.shape[0]))
+
     fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(df2.values, cmap=cmap, aspect='auto', interpolation='nearest')
-    
+
     # Colorbar
     cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.ax.tick_params(labelsize=6)
-        
+
     ax.set_xticks(np.arange(df2.shape[1]))
     ax.set_yticks(np.arange(df2.shape[0]))
     ax.set_xticklabels(df2.columns.to_list(), rotation=90, fontsize=5)
     ax.set_yticklabels(df2.index.to_list(), fontsize=5)
-    
+
     ax.set_xlabel("Columns", fontsize=8)
     ax.set_ylabel("Index", fontsize=8)
     ax.set_title(title, fontsize=10)
-    
+
     plt.tight_layout(pad=0.5)
     plt.show()
