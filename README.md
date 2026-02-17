@@ -7,7 +7,7 @@
 ![Pycodestyle](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pycodestyle.yml/badge.svg?branch=dev&job=pycodestyle)
 ![Pytest](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pytest.yml/badge.svg?branch=dev&job=pytest)
 ![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/LeonardoSanBenitez/vision-unlearning/dev/coverage.json)
-
+[![Publish Package to PyPI](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/publish.yml/badge.svg)](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/publish.yml)
 
 
 [Documentation](https://vision-unlearning.readthedocs.io/)
