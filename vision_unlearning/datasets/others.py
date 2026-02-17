@@ -6,6 +6,7 @@ In any case, they may help you get started
 import os
 import json
 import uuid
+import random
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,6 +20,7 @@ from PIL import Image
 
 import pandas as pd
 import numpy as np
+import scipy.io as sio
 from unidecode import unidecode
 from datasets import load_dataset
 
@@ -138,9 +140,23 @@ def balanced_subsample_lib(
 
 
 ################################
-# LFW (famous people)
+# Labeled Faces in the Wild (LFW) (famous people)
+# Intended for studying unconstrained face recognition problems (in which there is little control over parameters such as position, pose, lighting, background, camera quality); 
+# Please cite the original paper:
+# @inproceedings{dataset_lfw,
+#   TITLE = {{Labeled Faces in the Wild: A Database forStudying Face Recognition in Unconstrained Environments}},
+#   AUTHOR = {Huang, Gary B. and Mattar, Marwan and Berg, Tamara and Learned-Miller, Eric},
+#   URL = {https://inria.hal.science/inria-00321923},
+#   BOOKTITLE = {{Workshop on Faces in 'Real-Life' Images: Detection, Alignment, and Recognition}},
+#   ADDRESS = {Marseille, France},
+#   ORGANIZATION = {{Erik Learned-Miller and Andras Ferencz and Fr{\'e}d{\'e}ric Jurie}},
+#   YEAR = {2008},
+#   MONTH = Oct,
+#   PDF = {https://inria.hal.science/inria-00321923v1/file/Huang_long_eccv2008-lfw.pdf},
+#   HAL_ID = {inria-00321923},
+#   HAL_VERSION = {v1},
+# }
 ################################
-
 def count_classes_dataset_lfw():
     ds = load_dataset("bitmind/lfw", split="train")
     counts = Counter('_'.join(ex["filename"].split('_')[:-1]) for ex in ds)
@@ -190,7 +206,19 @@ def download_dataset_lfw(dataset_forget_name: str, dataset_retain_name: str, tar
 
 
 ################################
-# Taras breeds
+# AtharvaTaras Dog Breeds
+# 356 breeds recognized by the FCI (Fédération Cynologique Internationale) and containing 35 images for each breed.
+# Please cite the original paper:
+# ```
+# @misc{dataset_taras_dog_breeds,
+#   author       = {AtharvaTaras},
+#   title        = {{Dog‑Breeds‑Dataset}: A dataset of images for dog breeds recognized by the FCI},
+#   howpublished = {\url{https://github.com/AtharvaTaras/Dog-Breeds-Dataset}},
+#   year         = {2025},
+#   note         = {Accessed: 2025‑12‑11; licensed under CC‑BY‑4.0},
+#   url          = {https://github.com/AtharvaTaras/Dog-Breeds-Dataset}
+# }
+# ```
 ################################
 def count_classes_dataset_taras_breeds(dataset_base_path: str) -> List[Tuple[str, int]]:
     # Count nubmer of files per folder in the dataset base path
@@ -307,9 +335,100 @@ def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> 
 
 
 ################################
+# Scene UNderstanding (SUN) Attributes \cite{dataset_sun_attributes}
+# Intended for fine-grained scene categorization and containing more than 14,000 images from 717 classes.
+# Please cite the original paper:
+# ```
+# @INPROCEEDINGS{dataset_sun_attributes,
+#   author={Patterson, Genevieve and Hays, James},
+#   booktitle={2012 IEEE Conference on Computer Vision and Pattern Recognition}, 
+#   title={SUN attribute database: Discovering, annotating, and recognizing scene attributes}, 
+#   year={2012},
+#   volume={},
+#   number={},
+#   pages={2751-2758},
+#   keywords={Databases;Sun;Visualization;Training;Accuracy;Taxonomy;Humans},
+#   doi={10.1109/CVPR.2012.6247998},
+#   ISSN={1063-6919},
+#   month={June},
+# }
+# ```
+################################
+def split_dataset_sun(downloaded_folder: str, dataset_forget_name: str, dataset_retain_name: str, target: str, forget_max_img: int = 0, retain_max_img_per_class: int = 0, restrict_labels: Optional[List[str]] = None) -> Dict[str, int]:
+    '''
+    Given an already downloaded SUN dataset at `downloaded_folder` (one folder per class), split images into forget and retain sets.
+    @param forget_max_img: if >0, no more than this number of images will be saved for the forget set
+    @param retain_max_img_per_class: if >0, will stratify the retain set such that no more images of one class are saved
+    @param restrict_labels: if not none, save only those entities
+    @return how many classes of each entity were saved
+    '''
+    os.makedirs(dataset_forget_name, exist_ok=True)
+    os.makedirs(dataset_retain_name, exist_ok=True)
+
+    # Get image names
+    filenames: List[str] = [f[0][0] for f in sio.loadmat(os.path.join(downloaded_folder, "SUNAttributeDB/images.mat"))['images'].tolist()]
+    filenames = random.sample(filenames, k=len(filenames))
+    assert np.sum([not f.endswith(".jpg") for f in filenames]) == 0
+
+    # Save images
+    class_to_number: Dict[str, int] = defaultdict(int)
+    for sample in filenames:
+        label = '_'.join(sample.split('/')[1:-1])
+        assert len(label) > 1
+        src_path = os.path.join(downloaded_folder, 'images', sample)
+        assert os.path.exists(src_path), f"File {src_path} does not exist!"
+
+        if label == target:
+            # Enforce forget set limit if specified
+            if (forget_max_img > 0) and (class_to_number[label] >= forget_max_img):
+                continue
+            class_to_number[label] += 1
+
+            dst_path = os.path.join(dataset_forget_name, f"{label}_{uuid.uuid4().hex}.jpg")
+            os.symlink(os.path.abspath(src_path), dst_path)
+        else:
+            # Enforce per-class limit if specified
+            if (retain_max_img_per_class > 0) and (class_to_number[label] >= retain_max_img_per_class):
+                continue
+            if (restrict_labels is not None) and (label not in restrict_labels):
+                continue
+            class_to_number[label] += 1
+
+            dst_path = os.path.join(dataset_retain_name, f"{label}_{uuid.uuid4().hex}.jpg")
+            os.symlink(os.path.abspath(src_path), dst_path)
+        # print(f"Saving the {class_to_number[label]}th image of class {label}")
+
+    # Create metadata (class as the caption)
+    create_metadata_jsonl(Path(dataset_forget_name))
+    create_metadata_jsonl(Path(dataset_retain_name))
+
+    return class_to_number
+
+
+def download_dataset_sun():
+    pass # TODO
+
+
+################################
+# Imagenette
+# 13394 images across 10 classes of objects
+# Please cite the original paper:
+# ```
+# @misc{imagenette,
+#   author       = {Howard, Jeremy},
+#   title        = {Imagenette},
+#   year         = {2019},
+#   howpublished = {\url{https://github.com/fastai/imagenette}},
+#   note         = {Accessed: 2025-05-21}
+# }
+# ```
+################################
+# TODO
+
+
+################################
 # AKC (attribute only)
 ################################
-
 def normalize_string(s: str) -> str:
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c))
@@ -405,7 +524,6 @@ def download_dataset_akc(output_path: str) -> pd.DataFrame:
 ################################
 # Pantheon (attribute only)
 ################################
-
 def download_dataset_pantheon(
     url: str = "https://storage.googleapis.com/pantheon-public-data/person_2025_update.csv.bz2",
     bz2_path: str = "assets/datasets/person_2025_update.csv.bz2",
