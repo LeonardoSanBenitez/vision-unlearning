@@ -144,7 +144,7 @@ class UnlearnerLoraDistillation(UnlearnerLora):
                 cache_dir=self.cache_dir,
                 data_dir=None,
             )
-            
+
         else:
             # Case 2: loading datasets using a json metafile
             dataset_forget = load_dataset(
@@ -164,7 +164,7 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         # We will use this 'train' split for both forgetting and retaining datasets.
         assert "train" in dataset_forget, f"Expecting a 'train' split in the dataset for forgetting, but got {dataset_forget.keys()}"
         assert "train" in dataset_retain, f"Expecting a 'train' split in the dataset for retaining, but got {dataset_retain.keys()}"
-        
+
         dataset_forget_field = "train"
         dataset_retain_field = "train"
 
@@ -381,7 +381,7 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         torch.cuda.synchronize()
         batch_peak = torch.cuda.max_memory_allocated()
         self._peak_mem = max(self._peak_mem, batch_peak)
-        
+
         if self._accelerator.sync_gradients:
             params_to_clip = self._lora_layers
             self._accelerator.clip_grad_norm_(params_to_clip, self.max_grad_norm)
