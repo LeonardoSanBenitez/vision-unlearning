@@ -23,7 +23,7 @@ def get_logger(name: str, level=logging.INFO) -> logging.Logger:
 def setup_loggers(
     root_level: int = logging.WARNING,
     modules_debug: List[str] = [],
-    modules_info: List[str] = [],
+    modules_info: List[str] = ['vision_unlearning'],
     modules_warning: List[str] = [],
     modules_error: List[str] = [],
 ) -> None:
