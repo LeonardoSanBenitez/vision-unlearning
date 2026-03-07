@@ -183,7 +183,7 @@ def exists_unlearned_dataset(
 ) -> bool:
     if not os.path.exists(generated_dataset_output_path):
         return False
-    
+
     file_list = os.listdir(generated_dataset_output_path)
     file_list = [f for f in file_list if f != '.ipynb_checkpoints']
 
@@ -212,7 +212,7 @@ def get_similarity_clip_df(
     df_similarities_clip.set_index('emitter', inplace=True)
     return df_similarities_clip
 
-    
+
 def calculate_similarity_clip(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     labels: List[str],
