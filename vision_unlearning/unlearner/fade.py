@@ -144,26 +144,29 @@ class UnlearnerLoraDistillation(UnlearnerLora):
                 cache_dir=self.cache_dir,
                 data_dir=None,
             )
-            assert "train" in dataset_forget, f"Expecting a 'train' split in the dataset for forgetting, but got {dataset_forget.keys()}"
-            assert "train" in dataset_retain, f"Expecting a 'train' split in the dataset for retaining, but got {dataset_retain.keys()}"
-            dataset_forget_field = "train"
-            dataset_retain_field = "train"
+
         else:
             # Case 2: loading datasets using a json metafile
-            dataset_forget_field = "forget"  # Specify the key containing your data
-            dataset_retain_field = "retain"  # Specify the key containing your data
             dataset_forget = load_dataset(
                 "json",
                 data_files=self.json_metafile,
-                field=dataset_forget_field,
+                field="forget",
                 cache_dir=self.cache_dir,
             )
             dataset_retain = load_dataset(
                 "json",
                 data_files=self.json_metafile,
-                field=dataset_retain_field,
+                field="retain",
                 cache_dir=self.cache_dir,
             )
+
+        # load_dataset function creates a 'train' split by default, even if the original dataset doesn't have splits.
+        # We will use this 'train' split for both forgetting and retaining datasets.
+        assert "train" in dataset_forget, f"Expecting a 'train' split in the dataset for forgetting, but got {dataset_forget.keys()}"
+        assert "train" in dataset_retain, f"Expecting a 'train' split in the dataset for retaining, but got {dataset_retain.keys()}"
+
+        dataset_forget_field = "train"
+        dataset_retain_field = "train"
 
         assert type(dataset_forget) == type(dataset_retain), f"Expecting the same type for both datasets, but got {type(dataset_forget)} and {type(dataset_retain)}"  # noqa
         logger.info(f'Retain dataset: {dataset_retain}\nForget dataset: {dataset_forget}')
@@ -373,6 +376,12 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         # Backpropagate
         loss = self.gradient_weighting_method.forget_weight * loss_forget + self.gradient_weighting_method.retain_weight * loss_retain  # This is actually weighting losses, not gradients... but in this case this works
         self._accelerator.backward(loss)
+
+        # Peak memory measurement
+        torch.cuda.synchronize()
+        batch_peak = torch.cuda.max_memory_allocated()
+        self._peak_mem = max(self._peak_mem, batch_peak)
+
         if self._accelerator.sync_gradients:
             params_to_clip = self._lora_layers
             self._accelerator.clip_grad_norm_(params_to_clip, self.max_grad_norm)

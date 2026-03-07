@@ -78,16 +78,94 @@ def get_target_overwrite(
 
 
 ##########################################
-# Model and generated data
+# Metadata filtered
+##########################################
+def get_metadata_filtered_path(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    base_folder: str = 'assets',
+) -> str:
+    return os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json")
+
+
+def get_metadata_filtered(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    base_folder: str = 'assets'
+) -> List[Dict[str, Any]]:
+    with open(get_metadata_filtered_path(task, base_folder=base_folder), "r", encoding="utf-8") as f:
+        metadata_filtered = json.load(f)
+    assert isinstance(metadata_filtered, list)
+    return metadata_filtered
+
+
+def save_metadata_filtered(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    metadata_filtered: List[Dict[str, Any]],
+    base_folder: str = 'assets',
+):
+    assert isinstance(metadata_filtered, list)
+    assert all(isinstance(item, dict) for item in metadata_filtered)
+    assert len(metadata_filtered) > 0, "metadata_filtered should not be empty"
+    with open(get_metadata_filtered_path(task, base_folder=base_folder), "w", encoding="utf-8") as f:
+        json.dump(metadata_filtered, f, indent=4)
+
+
+def exists_metadata_filtered(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    base_folder: str = 'assets',
+) -> bool:
+    return os.path.exists(get_metadata_filtered_path(task, base_folder=base_folder))
+
+
+##########################################
+# Training dataset
+##########################################
+task_to_dataset_map: Dict[Literal['scenes', 'objects', 'breeds', 'people'], str] = {  # Do not include base_folder
+    'scenes': 'datasets/SUN_splits_filtered',
+    'breeds': 'datasets/taras_breeds_splits_filtered',
+    'people': 'datasets/lfw_splits_filtered',
+}
+
+
+##########################################
+# Unlearned model
+##########################################
+def get_unlearned_model_folder(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    method: Literal['munba', 'uce', 'distil'],
+    num_train_epochs: int,
+    target: str,
+    base_folder: str = 'assets',
+) -> str:
+    # By convention, I'm passing here the NON preprocessed target
+    return os.path.join(base_folder, 'models', f"{task}_{target}_{method}_{num_train_epochs:03d}")
+
+
+def exists_unlearned_model(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    method: Literal['munba', 'uce', 'distil'],
+    num_train_epochs: int,
+    target: str,
+    base_folder: str = 'assets',
+) -> bool:
+    model_path = get_unlearned_model_folder(task, method, num_train_epochs, target, base_folder=base_folder)
+    if method == 'uce':
+        return os.path.exists(os.path.join(model_path, 'uce_sd_weights.safetensors'))
+    else:
+        return os.path.exists(os.path.join(model_path, 'pytorch_lora_weights.safetensors'))
+
+
+##########################################
+# Generated data
 ##########################################
 def get_generated_dataset_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     target: str,
+    base_folder: str = 'assets',
 ) -> str:
-    # By convention, I'm passing here the preprocessed target... TODO CHANGE
-    return f'assets/datasets/generated_{task}_{target}_{method}_{num_train_epochs:03d}'
+    # By convention, I'm passing here the preprocessed target... TODO change?
+    return os.path.join(base_folder, "datasets", f"generated_{task}_{target}_{method}_{num_train_epochs:03d}")
 
 
 def get_generated_dataset_file(
@@ -98,66 +176,53 @@ def get_generated_dataset_file(
     return f'{lora_state}_{seed:02}_{prompt}.png'
 
 
-def get_unlearned_model_folder(
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
-    num_train_epochs: int,
-    target: str,
-) -> str:
-    # By convention, I'm passing here the NON preprocessed target
-    return f"assets/models/{task}_{target}_{method}_{num_train_epochs:03d}"
-
-
-def exists_unlearned_model(
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
-    num_train_epochs: int,
-    target: str,
+def exists_unlearned_dataset(
+    generated_dataset_output_path: str,
+    generate_dataset_seeds: List[int],
+    prompts: List[str],
 ) -> bool:
-    model_path = get_unlearned_model_folder(task, method, num_train_epochs, target)
-    if method == 'uce':
-        return os.path.exists(os.path.join(model_path, 'uce_sd_weights.safetensors'))
-    else:
-        return os.path.exists(os.path.join(model_path, 'pytorch_lora_weights.safetensors'))
-
-
-def exists_unlearned_dataset(generated_dataset_output_path: str, generate_dataset_seeds: List[int], prompts: List[str]) -> bool:
     if not os.path.exists(generated_dataset_output_path):
         return False
-    if len(os.listdir(generated_dataset_output_path)) != len(generate_dataset_seeds) * len(['on', 'off']) * len(prompts) + 1:
+    
+    file_list = os.listdir(generated_dataset_output_path)
+    file_list = [f for f in file_list if f != '.ipynb_checkpoints']
+
+    if len(file_list) != len(generate_dataset_seeds) * len(['on', 'off']) * len(prompts) + 1:
         return False
-    if not all(filename.endswith('.png') or filename.endswith('.jsonl') for filename in os.listdir(generated_dataset_output_path)):
+    if not all(filename.endswith('.png') or filename.endswith('.jsonl') for filename in file_list):
         return False
     return True
 
 
 ##########################################
-# Metadata files
-##########################################
-def get_metadata_filtered(
-    task: Literal['scenes', 'objects', 'breeds', 'people']
-) -> List[Dict[str, Any]]:
-    with open(f"assets/metadata_{task}_2_enriched_filtered.json", "r", encoding="utf-8") as f:
-        metadata_filtered = json.load(f)
-    assert isinstance(metadata_filtered, list)
-    return metadata_filtered
-
-
-##########################################
 # Similarity
 ##########################################
-def get_similarity_clip_df(task: Literal['scenes', 'objects', 'breeds', 'people']) -> pd.DataFrame:
-    df_similarities_clip = pd.read_json(f'assets/similarity_clip_{task}.json', orient='records')
+def get_similarity_clip_path(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    base_folder: str = 'assets',
+) -> str:
+    return os.path.join(base_folder, f"similarity_clip_{task}.json")  # TODO: this should be in the results folder
+
+
+def get_similarity_clip_df(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    base_folder: str = 'assets',
+) -> pd.DataFrame:
+    df_similarities_clip = pd.read_json(get_similarity_clip_path(task, base_folder=base_folder), orient='records')
     df_similarities_clip.set_index('emitter', inplace=True)
     return df_similarities_clip
 
-
-def calculate_similarity_clip(task: Literal['scenes', 'objects', 'breeds', 'people'], labels: List[str]):
+    
+def calculate_similarity_clip(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    labels: List[str],
+    base_folder: str = 'assets',
+):
     clip_text_metric = MetricTextTextSimilarity(metrics=['clip_text'])
 
     # Load existing
-    if os.path.exists(f'assets/similarity_clip_{task}.json'):
-        df_similarities_clip = get_similarity_clip_df(task)
+    if os.path.exists(get_similarity_clip_path(task, base_folder=base_folder)):
+        df_similarities_clip = get_similarity_clip_df(task, base_folder=base_folder)
         assert df_similarities_clip.index.to_list() == labels
     else:
         df_similarities_clip = pd.DataFrame(index=labels, columns=labels)
@@ -175,7 +240,7 @@ def calculate_similarity_clip(task: Literal['scenes', 'objects', 'breeds', 'peop
                 df_similarities_clip.loc[entity_emitter, entity_receiver] = similarity
 
         # Save at the end of each row
-        df_similarities_clip.reset_index(names='emitter').to_json(f'assets/similarity_clip_{task}.json', orient='records')
+        df_similarities_clip.reset_index(names='emitter').to_json(get_similarity_clip_path(task, base_folder=base_folder), orient='records')
 
     return df_similarities_clip
 

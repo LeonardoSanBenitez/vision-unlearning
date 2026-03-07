@@ -19,7 +19,7 @@ logger = get_logger('I_care')
 ##########################################
 # Metadata files
 ##########################################
-def get_aggregated_results_path(
+def get_interference_per_pair_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
     method: Literal['munba', 'uce', 'distil'],
@@ -28,7 +28,7 @@ def get_aggregated_results_path(
     return f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json'
 
 
-def get_aggregated_results(
+def get_interference_per_pair(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
     method: Literal['munba', 'uce', 'distil'],
@@ -37,13 +37,13 @@ def get_aggregated_results(
 ) -> Dict[str, Dict[str, float]]:
     assert os.path.exists(f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json'), "Caused interferences by this entity were not computed yet"
     with open(f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json', 'r') as f:
-        aggregated_results = json.load(f)
-    assert isinstance(aggregated_results, dict)
-    assert len(aggregated_results) == max_identities
-    return aggregated_results
+        interference_per_pair = json.load(f)
+    assert isinstance(interference_per_pair, dict)
+    assert len(interference_per_pair) == max_identities
+    return interference_per_pair
 
 
-def get_aggregated_results_inverse(
+def get_interference_per_pair_inverse(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
     method: Literal['munba', 'uce', 'distil'],
@@ -54,51 +54,51 @@ def get_aggregated_results_inverse(
     metadata_filtered = get_metadata_filtered(task)
     target = metadata_filtered[index]['name']
 
-    aggregated_results_inverse = {}
+    interference_per_pair_inverse = {}
     for idx_emitter in range(index_start, index_start + max_identities):
         if os.path.exists(f'assets/datasets/interferences_caused_by_{task}_{idx_emitter}_{method}_{num_train_epochs}.json'):  # Unlearning already performed
             with open(f'assets/datasets/interferences_caused_by_{task}_{idx_emitter}_{method}_{num_train_epochs}.json', 'r') as f:
-                aggregated_results_temp = json.load(f)
-            aggregated_results_inverse[metadata_filtered[idx_emitter]['name']] = aggregated_results_temp[target]
+                interference_per_pair_temp = json.load(f)
+            interference_per_pair_inverse[metadata_filtered[idx_emitter]['name']] = interference_per_pair_temp[target]
 
-    assert isinstance(aggregated_results_inverse, dict)
-    assert len(aggregated_results_inverse) <= max_identities
-    return aggregated_results_inverse
+    assert isinstance(interference_per_pair_inverse, dict)
+    assert len(interference_per_pair_inverse) <= max_identities
+    return interference_per_pair_inverse
 
 
-def get_result_summary_path(
+def get_interference_per_entity_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
 ) -> str:
-    return f"assets/result_summary_{task}.json"
+    return f"assets/interference_per_entity_{task}.json"
 
 
-def get_result_summary(
+def get_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     max_identities: int = 100,
 ) -> List[Dict[str, Any]]:
-    assert os.path.exists(get_result_summary_path(task))
-    with open(get_result_summary_path(task), "r", encoding="utf-8") as f:
+    assert os.path.exists(get_interference_per_entity_path(task))
+    with open(get_interference_per_entity_path(task), "r", encoding="utf-8") as f:
         metadata_filtered = json.load(f)
     assert isinstance(metadata_filtered, list)
     assert len(metadata_filtered) == max_identities
     return metadata_filtered
 
 
-def save_result_summary(
+def save_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     metadata_filtered: List[Dict[str, Any]],
 ) -> None:
-    with open(get_result_summary_path(task), "w", encoding="utf-8") as f:
+    with open(get_interference_per_entity_path(task), "w", encoding="utf-8") as f:
         json.dump(metadata_filtered, f, indent=4)
 
 
 ##########################################
 # Per-entity interference metrics
 ##########################################
-def find_worst_interfered(aggregated_results: dict, metric: str, is_worst_biggest: bool) -> Tuple[str, float]:
+def find_worst_interfered(interference_per_pair: dict, metric: str, is_worst_biggest: bool) -> Tuple[str, float]:
     metric_worst = -np.inf if is_worst_biggest else np.inf
     name_worst = None
-    for interfered_name, results in aggregated_results.items():
+    for interfered_name, results in interference_per_pair.items():
         if is_worst_biggest and results[metric] > metric_worst:
             metric_worst = results[metric]
             name_worst = interfered_name
@@ -110,21 +110,21 @@ def find_worst_interfered(aggregated_results: dict, metric: str, is_worst_bigges
     return name_worst, metric_worst
 
 
-def metric_of_worst_interfered(aggregated_results: dict, metric: str, is_worst_biggest: bool) -> float:
-    name_worst, metric_worst = find_worst_interfered(aggregated_results, metric, is_worst_biggest)
+def metric_of_worst_interfered(interference_per_pair: dict, metric: str, is_worst_biggest: bool) -> float:
+    name_worst, metric_worst = find_worst_interfered(interference_per_pair, metric, is_worst_biggest)
     return metric_worst
 
 
-def is_worst_interfered_target(aggregated_results: dict, metric: str, is_worst_biggest: bool, target: str) -> bool:
-    name_worst, _ = find_worst_interfered(aggregated_results, metric, is_worst_biggest)
+def is_worst_interfered_target(interference_per_pair: dict, metric: str, is_worst_biggest: bool, target: str) -> bool:
+    name_worst, _ = find_worst_interfered(interference_per_pair, metric, is_worst_biggest)
     return name_worst == target
 
 
-def number_of_interfered_worse_than_target(aggregated_results: dict, metric: str, is_worst_biggest: bool, target: str) -> int:
+def number_of_interfered_worse_than_target(interference_per_pair: dict, metric: str, is_worst_biggest: bool, target: str) -> int:
     # Zero if the target itself is the worse
-    target_metric = aggregated_results[target][metric]
+    target_metric = interference_per_pair[target][metric]
     count = 0
-    for interfered_name, results in aggregated_results.items():
+    for interfered_name, results in interference_per_pair.items():
         if interfered_name == target:
             continue
         if is_worst_biggest and results[metric] > target_metric:
@@ -134,9 +134,9 @@ def number_of_interfered_worse_than_target(aggregated_results: dict, metric: str
     return count
 
 
-def number_of_interfered_worse_than_threshold(aggregated_results: dict, metric: str, is_worst_biggest: bool, threshold: float) -> int:
+def number_of_interfered_worse_than_threshold(interference_per_pair: dict, metric: str, is_worst_biggest: bool, threshold: float) -> int:
     count = 0
-    for interfered_name, results in aggregated_results.items():
+    for interfered_name, results in interference_per_pair.items():
         if is_worst_biggest and results[metric] > threshold:
             count += 1
         elif not is_worst_biggest and results[metric] < threshold:
@@ -144,11 +144,11 @@ def number_of_interfered_worse_than_threshold(aggregated_results: dict, metric: 
     return count
 
 
-def average_metric(aggregated_results: dict, metric: str) -> float:
+def average_metric(interference_per_pair: dict, metric: str) -> float:
     total = 0.0
-    for interfered_name, results in aggregated_results.items():
+    for interfered_name, results in interference_per_pair.items():
         total += results[metric]
-    return total / len(aggregated_results)
+    return total / len(interference_per_pair)
 
 
 ##########################################
@@ -156,7 +156,7 @@ def average_metric(aggregated_results: dict, metric: str) -> float:
 ##########################################
 def display_interesting_interferences(
     metadata_filtered: List[Dict[str, Any]],
-    aggregated_results: Dict[str, Dict[str, float]],
+    interference_per_pair: Dict[str, Dict[str, float]],
     index: int,
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     method: Literal['munba', 'uce', 'distil'],
@@ -169,14 +169,14 @@ def display_interesting_interferences(
     '''
     Compared generated images for 9 identities: target, 4 worst (excluding target), 4 best
     @param metadata_filtered: should be appropriate for this task (this is not verified inside the function)
-    @param aggregated_results: should be appropriate for this task+index+method+num_train_epochs (this is not verified inside the function)
+    @param interference_per_pair: should be appropriate for this task+index+method+num_train_epochs (this is not verified inside the function)
     @param index: identities the target
 
     The combination of task+index+method+num_train_epochs identifies a unique unlearned model
     '''
     target = metadata_filtered[index]['name']
-    all_names = list(aggregated_results.keys())
-    metric_list = [(name, aggregated_results[name][metric]) for name in all_names]  # list of (name, metric)
+    all_names = list(interference_per_pair.keys())
+    metric_list = [(name, interference_per_pair[name][metric]) for name in all_names]  # list of (name, metric)
 
     if is_worst_biggest:
         metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1], reverse=True)  # worst first (largest)
@@ -204,7 +204,7 @@ def display_interesting_interferences(
             ax.imshow(plt.imread(img_path))
 
             if row == 0:
-                ax.set_title(get_target_overwrite(task, method, name)[0] + f'\n{aggregated_results[name][metric]:.2f}', rotation=0, fontsize=9, pad=2, loc='center')
+                ax.set_title(get_target_overwrite(task, method, name)[0] + f'\n{interference_per_pair[name][metric]:.2f}', rotation=0, fontsize=9, pad=2, loc='center')
 
     # vertical row labels (written upwards)
     # compute vertical center of a row using one axis
@@ -340,7 +340,7 @@ def analyze_relationship_numerical(
 ) -> bool:
     '''
     Analyzes the relationship between a numerical attribute and a numerical metric
-    @param df: result_summary; assumes df[attribute] and df[metric] are numerical
+    @param df: interference_per_entity; assumes df[attribute] and df[metric] are numerical
     @param plot: whether to plot the results
     @param plot_only_significant: whether to plot only significant relationships; Only applies if plot=True
     @return: whether any significant relationship was found
@@ -434,7 +434,7 @@ def analyze_relationship_categorical(
 ) -> bool:
     '''
     Analyzes the relationship between a categorical attribute and a numerical metric
-    @param df: result_summary; assumes df[attribute] is categorical and df[metric] is numerical
+    @param df: interference_per_entity; assumes df[attribute] is categorical and df[metric] is numerical
     @param plot: whether to plot the results
     @param plot_only_significant: whether to plot only significant relationships; Only applies if plot=True
     @param show_axhline: if provided, shows a horizontal line at this y-value; Only applies if plot=True
