@@ -258,32 +258,29 @@ We intend to open-source it in the following months. In the meantime, reach out 
 
 Across all tasks, the benchmark results are summarized in the following files:
 
-* **aggregated_results: Dict[str, Dict[str, float]]**
+* **interference_per_pair: Dict[str, Dict[str, float]]**
   * Store computed MetricInterferencePerEntityPair
   * Each key refers to one entity (including the target, aka forget set worsening), as it appears in the 'name' fields of metadata_filtered (non preprocessed)
-  * An entire aggregated_results refers to interferences caused by one EMITER to each RECEIVER (the keys of aggregated_results)
+  * An entire interference_per_pair refers to interferences caused by one EMITER to each RECEIVER (the keys of interference_per_pair)
   * Values are the metrics computed, averaged across all seeds
   * Is always complete (all values computed)
   * One file per unlearning session
-  * Computed by: `3_compute_caused_interferences.py`
+  * Computed by: `3_compute_caused_interferences.py` (benefit from GPU but can run on CPU)
   * Save path: `datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json`
-* **aggregated_results_inverse: Dict[str, Dict[str, float]]**
-  * An entire aggregated_results_inverse refers to interferences RECEIVED by one identiy by each EMITER (the keys of aggregated_results)
+* **interference_per_pair_inverse: Dict[str, Dict[str, float]]**
+  * An entire interference_per_pair_inverse refers to interferences RECEIVED by one identiy by each EMITER (the keys of interference_per_pair)
   * May be incomplete (if not all unlearning sessions were performed)
   * One file of this per entity
   * One file per unlearning session (but uses info from all unlearning sessions)
   * Save path: none, calculated on-the-fly
-* **interferences_summary**
-  * Store computed MetricInterferencePerEntity
-  * List[Dict[str, Any]]
-  * An entire interferences_summary refers to ONE ENTITY, summarized across 39 metrics
-  * One file for the entire task
-  * Computed by: `4. Summarize statistics`
-  * Save path: ?
-* **result_summary: List[Dict[str, Any]]**
-  * Includes all info from metadata_filtered, plus all MetricInterferencePerEntity
+
+* **interference_per_entity: List[Dict[str, Any]]**
+  * Store computed MetricInterferencePerEntity, together with all information from from metadata_filtered
+  * Each item/row corresponds to one entity
   * One file for the entire task, for all methods
-  * Save path: `result_summary_{task}.json`
+  * Columns are the information from from metadata_filtered, then each MetricInterferencePerEntity prefixed by `metric_{method}_{num_train_epochs}_` and sufixed by ` (↑)` or ` (↓)`
+  * Computed by: `4. Compute interference per entity.ipynb` (does not benefit from GPU)
+  * Save path: `interference_per_entity_{task}.json`
 
 # Citation
 
