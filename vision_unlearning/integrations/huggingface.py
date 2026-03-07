@@ -100,6 +100,26 @@ def huggingface_model_download(
             shutil.copy2(file_source_path, target_path)
 
 
+def huggingface_dataset_file_upload(
+    file_path: str,
+    dataset_repository: str,
+    dataset_path: str,
+    token: str,
+):
+    '''
+    Upload a single file to a specific dataset config in Hugging Face Hub.
+    @param dataset_path: full name of the file in the repository, including the config folder (e.g., "my_config/my_file.jsonl")
+    '''
+    assert os.path.exists(file_path)
+    api = HfApi()
+    api.upload_file(
+        path_or_fileobj=file_path,
+        path_in_repo=dataset_path,
+        repo_id=dataset_repository,
+        repo_type='dataset',
+        token=token,
+    )
+
 def huggingface_dataset_upload(
     folder_datasets: str,
     dataset_repository: str,
