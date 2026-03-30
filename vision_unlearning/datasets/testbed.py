@@ -116,6 +116,16 @@ def exists_metadata_filtered(
     return os.path.exists(get_metadata_filtered_path(task, base_folder=base_folder))
 
 
+def get_attribute_for_entity(
+    metadata_filtered: List[Dict[str, Any]],
+    entity_name: str, 
+    attribute: str,
+) -> Any:
+    for item in metadata_filtered:
+        if item['name'] == entity_name:
+            return item[attribute]
+    return None
+
 ##########################################
 # Training dataset
 ##########################################

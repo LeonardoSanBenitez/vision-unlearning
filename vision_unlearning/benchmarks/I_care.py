@@ -17,15 +17,16 @@ logger = get_logger('I_care')
 
 
 ##########################################
-# Metadata files
+# Metadata files - interference_per_pair
 ##########################################
 def get_interference_per_pair_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
+    base_folder: str = 'assets',
 ) -> str:
-    return f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json'
+    return os.path.join(base_folder, 'datasets', f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json')
 
 
 def get_interference_per_pair(
@@ -34,13 +35,38 @@ def get_interference_per_pair(
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     max_identities: int = 100,
+    base_folder: str = 'assets',
 ) -> Dict[str, Dict[str, float]]:
-    assert os.path.exists(f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json'), "Caused interferences by this entity were not computed yet"
-    with open(f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json', 'r') as f:
+    # TODO: maybe this function should first check locally if the file exists, and if not, check in huggingface if the file exists there, and just then return an error if neighter?
+    assert os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder)), "Caused interferences by this entity were not computed yet"
+    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder), 'r') as f:
         interference_per_pair = json.load(f)
     assert isinstance(interference_per_pair, dict)
     assert len(interference_per_pair) == max_identities
     return interference_per_pair
+
+
+def exists_interference_per_pair(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    index: int,
+    method: Literal['munba', 'uce', 'distil'],
+    num_train_epochs: int,
+    base_folder: str = 'assets',
+) -> bool:
+    return os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder))
+
+def save_interference_per_pair(
+    interference_per_pair: Dict[str, Dict[str, float]],
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    index: int,
+    method: Literal['munba', 'uce', 'distil'],
+    num_train_epochs: int,
+    base_folder: str = 'assets',
+) -> None:
+    assert isinstance(interference_per_pair, dict)
+    assert len(interference_per_pair) > 0, "interference_per_pair should not be empty"
+    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder), 'w') as f:
+            json.dump(interference_per_pair, f)
 
 
 def get_interference_per_pair_inverse(
@@ -66,6 +92,10 @@ def get_interference_per_pair_inverse(
     return interference_per_pair_inverse
 
 
+
+##########################################
+# Metadata files - interference_per_entity
+##########################################
 def get_interference_per_entity_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
 ) -> str:
@@ -90,6 +120,13 @@ def save_interference_per_entity(
 ) -> None:
     with open(get_interference_per_entity_path(task), "w", encoding="utf-8") as f:
         json.dump(metadata_filtered, f, indent=4)
+
+
+##########################################
+# Metadata files - embeddings
+##########################################
+# TODO
+
 
 
 ##########################################
@@ -431,6 +468,7 @@ def analyze_relationship_categorical(
     plot_only_significant: bool = False,
     show_axhline: Optional[float] = None,
     min_samples_per_category: int = 5,
+    extra_title: str = '',
 ) -> bool:
     '''
     Analyzes the relationship between a categorical attribute and a numerical metric
@@ -509,7 +547,7 @@ def analyze_relationship_categorical(
         plt.xlabel(attribute_name_pretty)
         plt.ylabel(metric_name_pretty)
 
-        plt.title(f"Metric: {metric_name_pretty}\nAttribute: {attribute_name_pretty}\nMethod: {method_name_pretty}\nANOVA p-value: {anova_res.pvalue:.03}\nKruskal-Wallis p-value: {kruskal_res.pvalue:.03}")
+        plt.title(f"Metric: {metric_name_pretty}\nAttribute: {attribute_name_pretty}\nMethod: {method_name_pretty}\n{extra_title}ANOVA p-value: {anova_res.pvalue:.03}\nKruskal-Wallis p-value: {kruskal_res.pvalue:.03}")
         plt.show()
 
     return anova_significant or kruskal_significant
