@@ -104,6 +104,7 @@ sphinx = "~7.4"
 sphinx-rtd-theme = "~2.0"
 myst-parser = "~4.0"   # To support Markdown (README.md)
 sphinx-autoapi = "~3.6"  # To generate docs from docstrings
+sphinx-design = "~0.6"  # For grid cards and other design elements
 autodoc_pydantic = "*"
 
 [build-system]
