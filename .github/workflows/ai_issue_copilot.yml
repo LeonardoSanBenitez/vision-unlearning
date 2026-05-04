@@ -6,6 +6,11 @@ on:
 
 jobs:
   summary:
+    # Allowed users list is defined in:
+    # Settings → secrets and variables → Actions → variables → ALLOWED_USERS
+    # Format: JSON array, e.g. ["user1","user2"]
+    if: contains(fromJson(vars.ALLOWED_USERS), github.actor)
+
     runs-on: ubuntu-latest
     permissions:
       issues: write
