@@ -11,7 +11,7 @@ reporting a security issue.
 If you believe you have found a security vulnerability in **vision-unlearning**,
 please do not open a public issue.
 
-Report security concerns privately by contacting the maintainers via the email `lsbenitezpereira@gmail.com`, informing:
+Report security concerns privately by contacting the maintainers via the email `lsbenitezpereira AT gmail DOT com`, informing:
 
 - A clear description of the issue
 - Steps to reproduce it
