@@ -194,6 +194,44 @@ def huggingface_dataset_download(
         shutil.rmtree(repo_path)
 
 
+def huggingface_dataset_file_download(
+    folder_datasets: str,
+    dataset_repository: str,
+    file_path: str,
+    token: str,
+    folder_cache: str = '/tmp/huggingface_cache',
+) -> None:
+    '''
+    Download a single file from a dataset in Hugging Face Hub.
+    
+    Args:
+        folder_datasets: Local directory where datasets are stored.
+        dataset_repository: Hugging Face dataset repository ID
+        file_path: Full path of the file within the repository (e.g., "config/data.jsonl")
+        token: Hugging Face authentication token
+        folder_cache: Cache directory for downloads
+    
+    The file will be saved at os.path.join(folder_datasets, file_path)
+    '''
+    os.makedirs(folder_datasets, exist_ok=True)
+    os.makedirs(folder_cache, exist_ok=True)
+    
+    # Download to cache
+    repo_path = snapshot_download(
+        repo_id=dataset_repository,
+        repo_type="dataset",
+        token=token,
+        allow_patterns=file_path,
+        cache_dir=folder_cache,
+    )
+    
+    # Copy from cache to final folder
+    source_path = os.path.join(repo_path, file_path)
+    target_path = os.path.join(folder_datasets, file_path)
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    shutil.copy2(source_path, target_path)
+
+
 def huggingface_get_model_metrics(model_id: str) -> Dict[str, float | int | bool]:
     '''
     Supposes that the credentials are properly configured

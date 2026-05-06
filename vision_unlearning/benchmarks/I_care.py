@@ -189,6 +189,19 @@ def average_metric(interference_per_pair: dict, metric: str) -> float:
 
 
 ##########################################
+# Result Templates
+# This section is being refactored to OO
+# TODO: there is a lot of code repetion, in this section we are refactorign a lot of things that were done in a ugly way originally.
+# That's ok, this will be the new version of the code that we will later commit to vision-unlearning.
+# First we modify here, then I will refactor the old code too
+##########################################
+
+# To ease dependencies, the content of this section is currently in the file `vision_unlearning/benchmarks/vision_unlearning_benchmarks_I_care_TEMP.py`
+# That should be for now a standalone file, that does not need vision_unlearnign to be installed
+# After refactorings are done, it should be moved here
+# Im doing this because i dont want to mess up the code running on the cluster, specially it that involved claude code...
+
+##########################################
 # Visuals
 ##########################################
 def display_interesting_interferences(

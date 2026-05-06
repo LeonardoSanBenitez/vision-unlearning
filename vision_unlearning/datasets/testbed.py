@@ -56,7 +56,7 @@ def get_target_overwrite(
         # target does needs to have an article,for example: picture of a poodle
         target_overwrite = 'a cat'
         article = 'an' if (target[0].lower() in 'aeiou') else 'a'
-        target = re.sub(r'\bdog\b', '', target, flags=re.IGNORECASE)
+        #target = re.sub(r'\bdog\b', '', target, flags=re.IGNORECASE)
         target = f"{article} {target}"
     elif task == 'scenes':
         # target does needs to have an article,for example: picture of a phone_booth
@@ -207,14 +207,14 @@ def exists_unlearned_dataset(
 ##########################################
 # Similarity
 ##########################################
-def get_similarity_clip_path(
+def get_similarity_clip_path(  # deprecated, use ResultTemplateSimilarityMatrix._get_path
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
 ) -> str:
     return os.path.join(base_folder, f"similarity_clip_{task}.json")  # TODO: this should be in the results folder
 
 
-def get_similarity_clip_df(
+def get_similarity_clip_df(  # deprecated, use ResultTemplateSimilarityMatrix._get_similarity_df
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
 ) -> pd.DataFrame:
@@ -223,7 +223,7 @@ def get_similarity_clip_df(
     return df_similarities_clip
 
 
-def calculate_similarity_clip(
+def calculate_similarity_clip(  # deprecated, use ResultTemplateSimilarityMatrix._calculate
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     labels: List[str],
     base_folder: str = 'assets',
@@ -255,7 +255,7 @@ def calculate_similarity_clip(
     return df_similarities_clip
 
 
-def plot_heatmap(df, figsize=None, cmap="viridis", title="Heatmap"):
+def plot_heatmap(df, figsize=None, cmap="viridis", title="Heatmap"):  # deprecated, use ResultTemplateSimilarityMatrix._plot_heatmap
     """
     Plot a heatmap for a square DataFrame with all labels visible.
 
