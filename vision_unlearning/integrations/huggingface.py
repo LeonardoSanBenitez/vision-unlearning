@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import requests
 from PIL import Image, ImageFile
 from io import BytesIO
-from huggingface_hub import hf_api, HfApi, snapshot_download
+from huggingface_hub import hf_api, HfApi, hf_hub_url, snapshot_download
 from vision_unlearning.utils.logger import get_logger
 
 
@@ -98,6 +98,27 @@ def huggingface_model_download(
             target_path = os.path.join(folder_model, rel_path)
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             shutil.copy2(file_source_path, target_path)
+
+
+def huggingface_dataset_file_exists(
+    dataset_repository: str,
+    dataset_path: str,
+    token: Optional[str],
+) -> bool:
+    '''
+    Return True if a file exists in a HF dataset repository (uses a HEAD request).
+    @param dataset_path: full path of the file in the repository (e.g., "datasets/my_file.json")
+    '''
+    url = hf_hub_url(
+        repo_id=dataset_repository,
+        filename=dataset_path,
+        repo_type='dataset',
+    )
+    headers: Dict[str, str] = {}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    response = requests.head(url, headers=headers, allow_redirects=True)
+    return response.status_code in (200, 302, 303, 307)
 
 
 def huggingface_dataset_file_upload(
