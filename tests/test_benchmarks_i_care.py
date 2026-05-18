@@ -5,7 +5,7 @@ These tests cover:
     GUI_TO_BACKEND, and ResultTemplateSimilarityMatrix._compute_from_scratch dino branch)
   - Item 2: me_dino — Embedding specificity ratio as a new type_me, and
     choose_metric_column_interference_per_entity matching the new column name
-  - Item 3: ResultTemplateMethodSpecificity — registry, compute, plot
+  - Item 3: ResultTemplateMethodComparisonByMetricEntity — registry, compute, plot
 
 The code under test lives in forgety/libs/vision_unlearning_benchmarks_I_care_TEMP.py
 (currently there for convenience; will move to vision-unlearning once stable).
@@ -243,19 +243,19 @@ class TestSpecificityRatioFormula:
 
 
 # ---------------------------------------------------------------------------
-# Item 3 — ResultTemplateMethodSpecificity
+# Item 3 — ResultTemplateMethodComparisonByMetricEntity
 # ---------------------------------------------------------------------------
 
 class TestMethodSpecificityRegistry:
     def test_in_rt_name_to_class(self) -> None:
-        assert "MethodSpecificity" in vb.rt_name_to_class
+        assert "MethodComparisonByMetricEntity" in vb.rt_name_to_class
 
     def test_class_is_correct(self) -> None:
-        assert vb.rt_name_to_class["MethodSpecificity"] is vb.ResultTemplateMethodSpecificity
+        assert vb.rt_name_to_class["MethodComparisonByMetricEntity"] is vb.ResultTemplateMethodComparisonByMetricEntity
 
     def test_params_in_registry(self) -> None:
         expected = ["model", "task", "interference_entity", "unlearning_algorithm_list"]
-        assert vb.rt_name_to_params["MethodSpecificity"] == expected
+        assert vb.rt_name_to_params["MethodComparisonByMetricEntity"] == expected
 
     def test_registry_consistent(self) -> None:
         assert set(vb.rt_name_to_class) == set(vb.rt_name_to_params)
@@ -289,7 +289,7 @@ class TestMethodSpecificityCompute:
             vb.InterferencePerEntity, "compute", lambda self: fake_data
         )
 
-        rt = vb.ResultTemplateMethodSpecificity(
+        rt = vb.ResultTemplateMethodComparisonByMetricEntity(
             task="people",
             interference_entity="Embedding specificity ratio",
             unlearning_algorithm_list=["distil", "uce"],
@@ -300,7 +300,7 @@ class TestMethodSpecificityCompute:
 
         assert "result" in data
         assert "metadata" in data
-        assert data["metadata"]["RT"] == "ResultTemplateMethodSpecificity"
+        assert data["metadata"]["RT"] == "ResultTemplateMethodComparisonByMetricEntity"
         assert data["metadata"]["interference_entity"] == "Embedding specificity ratio"
 
     def test_summary_keys_per_algo(
@@ -317,7 +317,7 @@ class TestMethodSpecificityCompute:
             vb.InterferencePerEntity, "compute", lambda self: fake_data
         )
 
-        rt = vb.ResultTemplateMethodSpecificity(
+        rt = vb.ResultTemplateMethodComparisonByMetricEntity(
             task="people",
             interference_entity="Embedding specificity ratio",
             unlearning_algorithm_list=["distil", "uce"],
@@ -352,7 +352,7 @@ class TestMethodSpecificityCompute:
             vb.InterferencePerEntity, "compute", lambda self: fake_data
         )
 
-        rt = vb.ResultTemplateMethodSpecificity(
+        rt = vb.ResultTemplateMethodComparisonByMetricEntity(
             task="people",
             interference_entity="Embedding specificity ratio",
             unlearning_algorithm_list=["distil", "uce"],
@@ -381,7 +381,7 @@ class TestMethodSpecificityCompute:
             vb.InterferencePerEntity, "compute", lambda self: fake_data
         )
 
-        rt = vb.ResultTemplateMethodSpecificity(
+        rt = vb.ResultTemplateMethodComparisonByMetricEntity(
             task="people",
             interference_entity="Embedding specificity ratio",
             unlearning_algorithm_list=["distil", "uce"],
@@ -407,7 +407,7 @@ class TestMethodSpecificityPlot:
 
         data = {
             "metadata": {
-                "RT": "ResultTemplateMethodSpecificity",
+                "RT": "ResultTemplateMethodComparisonByMetricEntity",
                 "model": "sd1.4",
                 "task": "people",
                 "interference_entity": "Embedding specificity ratio",
@@ -419,7 +419,7 @@ class TestMethodSpecificityPlot:
                 "uce": {"values": [1.2, 1.3, 1.1], "mean": 1.2, "median": 1.2, "std": 0.1, "n": 3},
             },
         }
-        result = vb.ResultTemplateMethodSpecificity.plot(data, return_fig=True)
+        result = vb.ResultTemplateMethodComparisonByMetricEntity.plot(data, return_fig=True)
         assert result is not None
         fig, ax = result
         assert isinstance(fig, Figure)
