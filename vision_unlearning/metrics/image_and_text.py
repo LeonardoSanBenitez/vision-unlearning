@@ -4,7 +4,7 @@ from functools import partial
 import numpy as np
 import torch
 from PIL import Image
-from torchmetrics.multimodal.clip_score import CLIPScore
+from torchmetrics.multimodal.clip_score import CLIPScore, _clip_score_update
 
 from vision_unlearning.metrics.base import Metric
 
@@ -77,3 +77,42 @@ class MetricImageTextSimilarity(Metric):
         # Ensure output length matches input length
         assert len(results) == len(images)
         return results
+
+    def score_batch_same_text(
+        self,
+        images: List[Union[Image.Image, np.ndarray, str]],
+        text: str,
+    ) -> List[Dict[str, float]]:
+        """Batch CLIP scoring when all images share the same text prompt.
+
+        This is meaningfully faster than calling score() N times because the
+        CLIP text encoder runs once for the shared text.  Images are processed
+        individually through the CLIP image processor (as in the serial path)
+        but the text encoder forward pass is done only once.
+
+        Uses _clip_score_update from torchmetrics which returns per-pair scores
+        as a 1-D tensor; the result is equivalent to calling score() N times.
+
+        Args:
+            images: List of N images (PIL Image, np.ndarray, or file path).
+            text:   Single text caption applied to all images.
+
+        Returns:
+            List of N dicts {'clip': float}, one per image in input order.
+        """
+        assert 'clip' in self.metrics, "score_batch_same_text is only available when 'clip' in metrics"
+        assert self._clip_metric is not None
+        assert len(images) > 0, "images list must be non-empty"
+
+        tensors: List[torch.Tensor] = [self._load_image(img) for img in images]
+        texts_repeated: List[str] = [text] * len(images)
+
+        with torch.inference_mode():
+            per_pair_scores, _ = _clip_score_update(
+                tensors,
+                texts_repeated,
+                self._clip_metric.model,
+                self._clip_metric.processor,
+            )
+
+        return [{"clip": float(s.item())} for s in per_pair_scores]
