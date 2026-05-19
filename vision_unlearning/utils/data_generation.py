@@ -92,31 +92,48 @@ def generate_dataset(
         # --- seeded generation mode ---
         # lora_state is guaranteed non-None by the check above.
         ls: Literal['on', 'off'] = lora_state  # type: ignore[assignment]
-        for seed in seeds:
-            # Seed all global RNG sources for full determinism.
-            random.seed(seed)
-            np.random.seed(seed)
-            torch.manual_seed(seed)
+
+        # Enable deterministic CUDA ops for pixel-identical reproducibility.
+        # CUBLAS_WORKSPACE_CONFIG must be set before the first CUBLAS call; setting
+        # it here (before the first pipeline call in the loop) is sufficient when
+        # the pipeline is freshly loaded.  On AMD ROCm this is the key flag that
+        # eliminates non-deterministic GEMM/attention kernel selection.
+        if torch.cuda.is_available():
+            os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+            torch.use_deterministic_algorithms(True)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
+        try:
+            for seed in seeds:
+                # Seed all global RNG sources for full determinism.
+                random.seed(seed)
+                np.random.seed(seed)
+                torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(seed)
+
+                generator = torch.Generator(device=device).manual_seed(seed)
+
+                for start in range(0, len(prompts), batch_size):
+                    batch_prompts = prompts[start:start + batch_size]
+                    batch_outputs = pipeline(  # type: ignore
+                        batch_prompts,
+                        generator=generator,
+                    ).images
+
+                    for i, image in enumerate(batch_outputs):
+                        idx = start + i
+                        prompt_text = prompts[idx]
+                        # Filename matches get_generated_dataset_file() convention:
+                        # {lora_state}_{seed:02d}_{prompt}.png
+                        image_name = f"{ls}_{seed:02d}_{prompt_text}.png"
+                        image.save(os.path.join(output_path, image_name), "PNG")
+                        metadata.append({"file_name": image_name, "text": prompt_text})
+        finally:
+            # Restore deterministic algorithms setting to avoid affecting other code.
             if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
-
-            generator = torch.Generator(device=device).manual_seed(seed)
-
-            for start in range(0, len(prompts), batch_size):
-                batch_prompts = prompts[start:start + batch_size]
-                batch_outputs = pipeline(  # type: ignore
-                    batch_prompts,
-                    generator=generator,
-                ).images
-
-                for i, image in enumerate(batch_outputs):
-                    idx = start + i
-                    prompt_text = prompts[idx]
-                    # Filename matches get_generated_dataset_file() convention:
-                    # {lora_state}_{seed:02d}_{prompt}.png
-                    image_name = f"{ls}_{seed:02d}_{prompt_text}.png"
-                    image.save(os.path.join(output_path, image_name), "PNG")
-                    metadata.append({"file_name": image_name, "text": prompt_text})
+                torch.use_deterministic_algorithms(False)
 
     else:
         # --- legacy mode: no seeding, caller supplies filenames ---
