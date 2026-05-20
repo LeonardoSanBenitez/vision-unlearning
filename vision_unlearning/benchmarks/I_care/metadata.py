@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 from typing import Literal, Tuple, List, Dict, Optional, Any
 import json
 import os
 import numpy as np
 import pandas as pd
 from scipy.stats import f_oneway, kruskal, linregress, pearsonr, spearmanr
-from typing import List, Dict, Any, Literal
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pydantic import BaseModel
 
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite

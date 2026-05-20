@@ -2,6 +2,10 @@
 # TODO: all this metadata should be calculated from the files in huggingface
 # Or at least some clean json declaring these values...
 
+from __future__ import annotations
+
+from typing import Any, Dict, List, Literal, Optional, Tuple
+
 # Petty formatted values
 domain_unlearning_algorithm = ["FADE", "Munba", "UCE"]
 domain_task = ["Breeds", "Scenes", "People"]
