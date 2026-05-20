@@ -7,8 +7,8 @@ Coverage:
 - Legacy mode (no seeds): filenames, metadata structure, no-seeding path.
 - Seeded mode: determinism guarantee (same seed → same generator calls);
   different seeds → different images; auto-generated filenames match convention.
-- Parameter validation: seeds + filenames mutually exclusive; seeds without
-  lora_state raises.
+- Seeded mode with caller-supplied filenames: seeds and filenames may coexist.
+- Parameter validation: seeds + filenames length mismatch raises; no model raises.
 """
 from __future__ import annotations
 
@@ -103,9 +103,9 @@ from vision_unlearning.utils import data_generation  # noqa: E402
 def _run_seeded_generation(
     seeds: List[int],
     prompts: List[str],
-    lora_state: str,
     pipeline_stub: MagicMock,
     output_path: str,
+    filenames: Optional[List[str]] = None,
     batch_size: int = 10,
 ) -> List[Dict[str, str]]:
     """Convenience wrapper for the seeded path."""
@@ -122,7 +122,7 @@ def _run_seeded_generation(
             prompts=prompts,
             output_path=output_path,
             seeds=seeds,
-            lora_state=lora_state,  # type: ignore[arg-type]
+            filenames=filenames,
             batch_size=batch_size,
         )
 
@@ -134,32 +134,19 @@ def _run_seeded_generation(
 class TestParameterValidation(unittest.TestCase):
     """Validate that bad parameter combinations raise early."""
 
-    def test_seeds_and_filenames_mutually_exclusive(self) -> None:
+    def test_seeds_and_filenames_wrong_count_raises(self) -> None:
+        """seeds + filenames is allowed, but count must be len(seeds)*len(prompts)."""
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError) as ctx:
                 data_generation.generate_dataset(
                     model_base_name="dummy",
                     lora_name=None,
-                    prompts=["prompt A"],
+                    prompts=["prompt A", "prompt B"],
                     output_path=tmp,
-                    filenames=["file.png"],
+                    filenames=["only_one.png"],  # wrong: need 1 seed * 2 prompts = 2
                     seeds=[42],
-                    lora_state="off",
                 )
-            self.assertIn("mutually exclusive", str(ctx.exception))
-
-    def test_seeds_without_lora_state_raises(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(ValueError) as ctx:
-                data_generation.generate_dataset(
-                    model_base_name="dummy",
-                    lora_name=None,
-                    prompts=["prompt A"],
-                    output_path=tmp,
-                    seeds=[42],
-                    lora_state=None,
-                )
-            self.assertIn("lora_state", str(ctx.exception))
+            self.assertIn("seed-major order", str(ctx.exception))
 
     def test_no_model_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -188,13 +175,12 @@ def _make_torch_stub() -> MagicMock:
 
 
 class TestSeededGenerationFilenames(unittest.TestCase):
-    """Seeded mode produces correctly-named files matching testbed convention."""
+    """Seeded mode produces correctly-named files."""
 
-    def test_filenames_match_convention(self) -> None:
-        """Files must be named {lora_state}_{seed:02d}_{prompt}.png."""
+    def test_auto_filenames_no_prefix(self) -> None:
+        """When seeds provided and filenames=None, files are named {seed}_{prompt}.png."""
         prompts = ["An image of Alice", "An image of Bob"]
         seeds = [42, 43]
-        lora_state = "off"
 
         pipeline_stub = _make_pipeline_stub()
         _apit = MagicMock()
@@ -209,24 +195,26 @@ class TestSeededGenerationFilenames(unittest.TestCase):
                         prompts=prompts,
                         output_path=tmp,
                         seeds=seeds,
-                        lora_state=lora_state,  # type: ignore[arg-type]
                         batch_size=10,
                     )
 
-        # Check metadata records
         file_names_in_meta = [r["file_name"] for r in meta]
         expected = [
-            f"{lora_state}_{s:02d}_{p}.png"
+            f"{s}_{p}.png"
             for s in seeds
             for p in prompts
         ]
         self.assertEqual(sorted(file_names_in_meta), sorted(expected))
 
-    def test_metadata_text_matches_prompt(self) -> None:
-        """Each metadata record's 'text' field must equal the original prompt."""
-        prompts = ["An image of Colin Powell", "An image of George W. Bush"]
-        seeds = [7]
-        lora_state = "on"
+    def test_caller_supplied_filenames_used_verbatim(self) -> None:
+        """When seeds and filenames are both provided, filenames are used as-is."""
+        prompts = ["An image of Alice", "An image of Bob"]
+        seeds = [42, 43]
+        filenames = [
+            f'off_{seed}_{prompt}.png'
+            for seed in seeds
+            for prompt in prompts
+        ]
 
         pipeline_stub = _make_pipeline_stub()
         _apit = MagicMock()
@@ -241,7 +229,31 @@ class TestSeededGenerationFilenames(unittest.TestCase):
                         prompts=prompts,
                         output_path=tmp,
                         seeds=seeds,
-                        lora_state=lora_state,  # type: ignore[arg-type]
+                        filenames=filenames,
+                        batch_size=10,
+                    )
+
+        file_names_in_meta = [r["file_name"] for r in meta]
+        self.assertEqual(sorted(file_names_in_meta), sorted(filenames))
+
+    def test_metadata_text_matches_prompt(self) -> None:
+        """Each metadata record's 'text' field must equal the original prompt."""
+        prompts = ["An image of Colin Powell", "An image of George W. Bush"]
+        seeds = [7]
+
+        pipeline_stub = _make_pipeline_stub()
+        _apit = MagicMock()
+        _apit.from_pretrained = MagicMock(return_value=pipeline_stub)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "AutoPipelineForText2Image", _apit):
+                with patch.object(data_generation, "torch", _make_torch_stub()):
+                    meta = data_generation.generate_dataset(
+                        model_base_name="stub-model",
+                        lora_name=None,
+                        prompts=prompts,
+                        output_path=tmp,
+                        seeds=seeds,
                     )
 
         texts_in_meta = {r["text"] for r in meta}
@@ -263,7 +275,6 @@ class TestSeededDeterminism(unittest.TestCase):
         self,
         seeds: List[int],
         prompts: List[str],
-        lora_state: str = "off",
     ) -> List[int]:
         """
         Run generate_dataset in seeded mode and capture the manual_seed values
@@ -308,7 +319,6 @@ class TestSeededDeterminism(unittest.TestCase):
                         prompts=prompts,
                         output_path=tmp,
                         seeds=seeds,
-                        lora_state=lora_state,  # type: ignore[arg-type]
                     )
         return captured_seeds
 
@@ -372,7 +382,6 @@ class TestSeededDeterminism(unittest.TestCase):
                         prompts=prompts,
                         output_path=tmp,
                         seeds=seeds,
-                        lora_state="off",  # type: ignore[arg-type]
                     )
 
         # One pipeline call per seed (since batch_size >= len(prompts))
@@ -480,7 +489,6 @@ class TestGlobalRNGSeeding(unittest.TestCase):
                         prompts=prompts,
                         output_path=tmp,
                         seeds=seeds,
-                        lora_state="off",  # type: ignore[arg-type]
                     )
 
         self.assertEqual(torch_manual_seed_calls, seeds)

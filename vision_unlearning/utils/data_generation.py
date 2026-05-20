@@ -1,6 +1,6 @@
 import os
 import random
-from typing import List, Dict, Optional, Union, Literal
+from typing import List, Dict, Optional, Union
 import numpy as np
 import torch
 from diffusers import AutoPipelineForText2Image
@@ -19,20 +19,19 @@ def generate_dataset(
     lora_requires_inversion: bool = False,
     model_pipeline: Optional[AutoPipelineForText2Image] = None,
     seeds: Optional[List[int]] = None,
-    lora_state: Optional[Literal['on', 'off']] = None,
 ) -> List[Dict[str, str]]:
     '''
     Generate images for the given prompts and save them to output_path.
 
     When seeds is provided (recommended for reproducibility):
-      - lora_state must also be provided (used in the auto-generated filename prefix).
-      - filenames must be None (mutually exclusive with seeds).
       - For each seed, the function sets torch/numpy/random global state and passes a
         seeded torch.Generator to the pipeline call.  This guarantees that running with
         the same model weights and the same seed produces pixel-identical images.
-      - Filenames are auto-generated as ``{lora_state}_{seed:02d}_{prompt}.png`` for
-        each (seed, prompt) pair — matching the convention in
-        vision_unlearning.datasets.testbed.get_generated_dataset_file().
+      - filenames may optionally be provided.  When provided, the caller must supply
+        exactly ``len(seeds) * len(prompts)`` filenames in seed-major order:
+        ``[seed0_prompt0, seed0_prompt1, ..., seed1_prompt0, seed1_prompt1, ...]``.
+      - When seeds is provided but filenames is None: filenames are auto-generated as
+        ``{seed}_{prompt}.png`` (no prefix) for each (seed, prompt) pair.
       - metadata.jsonl is written once after all seeds are processed.
 
     When seeds is None (legacy mode):
@@ -44,21 +43,26 @@ def generate_dataset(
     @param lora_name: LoRA adapter path.  If set, model_base_name is also required.
     @param prompts: Text prompts to generate images for.
     @param output_path: Directory where images and metadata.jsonl are saved.
-    @param filenames: Explicit filenames (legacy mode, mutually exclusive with seeds).
+    @param filenames: Explicit filenames (optional).
+        - Legacy mode (seeds=None): one filename per prompt.
+        - Seeded mode (seeds provided): len(seeds) * len(prompts) filenames in seed-major
+          order.  If None, filenames are auto-generated as ``{seed}_{prompt}.png``.
     @param batch_size: Number of prompts per pipeline call.
     @param device: Torch device.
     @param lora_requires_inversion: Passed to unlearn_lora if lora_name is set.
     @param model_pipeline: Pre-loaded pipeline (skips loading if provided).
     @param seeds: List of integer seeds.  When provided the generation loop is seeded.
-    @param lora_state: 'on' or 'off' — required when seeds is provided, used in filenames.
     '''
     # --- parameter validation ---
     if seeds is not None and filenames is not None:
-        raise ValueError("seeds and filenames are mutually exclusive; "
-                         "when using seeds, filenames are auto-generated.")
-    if seeds is not None and lora_state is None:
-        raise ValueError("lora_state ('on' or 'off') is required when seeds is provided "
-                         "so that filenames can be auto-generated.")
+        expected_count = len(seeds) * len(prompts)
+        if len(filenames) != expected_count:
+            raise ValueError(
+                f"When seeds and filenames are both provided, filenames must have "
+                f"len(seeds) * len(prompts) = {expected_count} entries in seed-major order "
+                f"(seed0_prompt0, seed0_prompt1, ..., seed1_prompt0, ...); "
+                f"got {len(filenames)}."
+            )
 
     if not os.path.exists(output_path):
         os.makedirs(output_path, exist_ok=True)
@@ -90,8 +94,6 @@ def generate_dataset(
 
     if seeds is not None:
         # --- seeded generation mode ---
-        # lora_state is guaranteed non-None by the check above.
-        ls: Literal['on', 'off'] = lora_state  # type: ignore[assignment]
 
         # Enable deterministic CUDA ops for pixel-identical reproducibility.
         # CUBLAS_WORKSPACE_CONFIG must be set before the first CUBLAS call; setting
@@ -105,7 +107,7 @@ def generate_dataset(
             torch.backends.cudnn.benchmark = False
 
         try:
-            for seed in seeds:
+            for seed_idx, seed in enumerate(seeds):
                 # Seed all global RNG sources for full determinism.
                 random.seed(seed)
                 np.random.seed(seed)
@@ -125,9 +127,11 @@ def generate_dataset(
                     for i, image in enumerate(batch_outputs):
                         idx = start + i
                         prompt_text = prompts[idx]
-                        # Filename matches get_generated_dataset_file() convention:
-                        # {lora_state}_{seed:02d}_{prompt}.png
-                        image_name = f"{ls}_{seed:02d}_{prompt_text}.png"
+                        # Filename: caller-supplied (seed-major order) or auto-generated.
+                        if filenames is not None:
+                            image_name = filenames[seed_idx * len(prompts) + idx]
+                        else:
+                            image_name = f"{seed}_{prompt_text}.png"
                         image.save(os.path.join(output_path, image_name), "PNG")
                         metadata.append({"file_name": image_name, "text": prompt_text})
         finally:
