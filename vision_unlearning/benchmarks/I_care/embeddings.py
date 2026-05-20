@@ -168,3 +168,93 @@ def embed_forgetting_session(
                 }
             )
     return records
+
+
+def embed_forgetting_session_batched(
+    dataset_folder: str,
+    seeds: List[int],
+    prompts: List[str],
+    metadata_filtered: List[Dict[str, Any]],
+    lora_state: Literal["on", "off"],
+    task: str,
+    model: "Any",
+    transform: "Any",
+    device: str,
+    batch_size: int = 32,
+) -> List[Dict[str, Any]]:
+    """Embed all images for one forgetting session using batched GPU inference.
+
+    More efficient than embed_forgetting_session() for large image sets.
+    Collects all (path, metadata) pairs first, then processes in batches via
+    a simple loop, amortising Python overhead and maximising GPU utilisation.
+
+    Args:
+        dataset_folder: Local directory containing the generated images.
+        seeds: List of generation seeds used.
+        prompts: Full prompt strings.
+        metadata_filtered: Metadata list: metadata_filtered[i]['name'] → prompts[i].
+        lora_state: 'on' for unlearned model, 'off' for baseline.
+        task: Task name, passed to get_target_preprocessed().
+        model: DINOv2 model (from load_dino_model()), on device, in eval mode.
+        transform: torchvision transform pipeline (from load_dino_model()).
+        device: Torch device string ('cuda' or 'cpu').
+        batch_size: Number of images per GPU forward pass (default 32).
+                    TODO: tune based on VRAM; 32 images × 224×224 ≈ 220MB VRAM.
+
+    Returns:
+        Same structure as embed_forgetting_session().
+    """
+    import torch
+    from PIL import Image
+
+    from vision_unlearning.datasets.testbed import (
+        get_target_preprocessed,
+        get_generated_dataset_file,
+    )
+
+    # Collect all (image_path, metadata) tuples
+    items: List[Dict[str, Any]] = []
+    for seed in seeds:
+        for i, prompt in enumerate(prompts):
+            prompted_entity = get_target_preprocessed(task, metadata_filtered[i]["name"])
+            filename = get_generated_dataset_file(lora_state, seed, prompt)
+            image_path = os.path.join(dataset_folder, filename)
+            if not os.path.exists(image_path):
+                logger.warning("Image not found, skipping: %s", image_path)
+                continue
+            items.append(
+                {
+                    "image_path": image_path,
+                    "prompted_entity": prompted_entity,
+                    "seed": seed,
+                    "prompt": prompt,
+                }
+            )
+
+    if not items:
+        return []
+
+    # Batch inference
+    records: List[Dict[str, Any]] = []
+    for batch_start in range(0, len(items), batch_size):
+        batch_items = items[batch_start: batch_start + batch_size]
+        tensors: List["Any"] = []
+        for item in batch_items:
+            img = Image.open(item["image_path"]).convert("RGB")
+            tensors.append(transform(img))
+
+        batch_tensor = torch.stack(tensors).to(device)  # type: ignore[attr-defined]
+        with torch.no_grad():  # type: ignore[attr-defined]
+            feats = model(batch_tensor)  # shape: (B, embedding_dim)
+
+        for j, item in enumerate(batch_items):
+            records.append(
+                {
+                    "prompted_entity": item["prompted_entity"],
+                    "seed": item["seed"],
+                    "prompt": item["prompt"],
+                    "embedding": feats[j].tolist(),
+                }
+            )
+
+    return records

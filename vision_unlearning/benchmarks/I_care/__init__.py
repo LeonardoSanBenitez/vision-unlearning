@@ -76,6 +76,7 @@ from vision_unlearning.benchmarks.I_care.embeddings import (
     load_dino_model,
     embed_image_with_dino,
     embed_forgetting_session,
+    embed_forgetting_session_batched,
 )
 
 from vision_unlearning.benchmarks.I_care.result_templates import (
@@ -158,6 +159,7 @@ __all__ = [
     "load_dino_model",
     "embed_image_with_dino",
     "embed_forgetting_session",
+    "embed_forgetting_session_batched",
     # result_templates
     "ResultTemplate",
     "ResultTemplateMetricMetricAlignment",
