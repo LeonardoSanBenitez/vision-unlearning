@@ -185,6 +185,42 @@ class TestPathHelpers:
     def test_generated_dataset_file(self) -> None:
         assert vb.get_generated_dataset_file("on", 4, "a cat") == "on_04_a cat.png"
 
+    def test_interference_per_pair_inverse_respects_base_folder(
+        self, tmp_path: "Any", monkeypatch: "Any"
+    ) -> None:
+        """get_interference_per_pair_inverse must use base_folder, not hardcode 'assets'."""
+        import json as _json
+        import vision_unlearning.benchmarks.I_care.metadata as _meta_mod
+
+        # Stub metadata so we don't need real files on disk
+        fake_meta = [{"name": "alice"}, {"name": "bob"}, {"name": "carol"}]
+        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: fake_meta)
+        monkeypatch.setattr(_meta_mod, "get_metadata_filtered", lambda task, **k: fake_meta)
+
+        # Write a fake interference file for emitter index 0 under tmp_path/datasets/
+        datasets_dir = tmp_path / "datasets"
+        datasets_dir.mkdir()
+        emitter_file = (
+            datasets_dir / "interferences_caused_by_people_0_distil_400.json"
+        )
+        # bob (index=1) is our target; alice (index=0) is the emitter
+        fake_data: Dict[str, float] = {"bob": 0.42, "carol": 0.11}
+        emitter_file.write_text(_json.dumps(fake_data))
+
+        result = vb.get_interference_per_pair_inverse(
+            task="people",
+            index=1,      # target = bob
+            method="distil",
+            num_train_epochs=400,
+            index_start=0,
+            max_identities=1,  # only check emitter index 0 (= alice)
+            base_folder=str(tmp_path),
+        )
+        # alice (emitter 0) should appear in result
+        assert "alice" in result, f"Expected 'alice' in result, got {result}"
+        # Value should be bob's interference from alice's emitter file
+        assert result["alice"] == pytest.approx(0.42)
+
 
 class TestGetTargetOverwrite:
     def test_people(self) -> None:
