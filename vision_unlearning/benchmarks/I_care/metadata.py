@@ -88,14 +88,16 @@ def get_interference_per_pair_inverse(
     num_train_epochs: int,
     index_start: int = 0,
     max_identities: int = 100,
+    base_folder: str = 'assets',
 ) -> Dict[str, Dict[str, float]]:
     metadata_filtered = get_metadata_filtered(task)
     target = metadata_filtered[index]['name']
 
     interference_per_pair_inverse = {}
     for idx_emitter in range(index_start, index_start + max_identities):
-        if os.path.exists(f'assets/datasets/interferences_caused_by_{task}_{idx_emitter}_{method}_{num_train_epochs}.json'):  # Unlearning already performed
-            with open(f'assets/datasets/interferences_caused_by_{task}_{idx_emitter}_{method}_{num_train_epochs}.json', 'r') as f:
+        path = get_interference_per_pair_path(task, idx_emitter, method, num_train_epochs, base_folder)
+        if os.path.exists(path):  # Unlearning already performed
+            with open(path, 'r') as f:
                 interference_per_pair_temp = json.load(f)
             interference_per_pair_inverse[metadata_filtered[idx_emitter]['name']] = interference_per_pair_temp[target]
 

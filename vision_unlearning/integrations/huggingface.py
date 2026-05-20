@@ -126,7 +126,7 @@ def huggingface_dataset_exists(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=30)
 
     if response.status_code == 404:
         return False
@@ -161,7 +161,7 @@ def huggingface_dataset_file_exists(
     headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    response = requests.head(url, headers=headers)
+    response = requests.head(url, headers=headers, timeout=30)
     return response.status_code in (200, 302, 303, 307)
 
 
@@ -323,7 +323,7 @@ def huggingface_get_model_images(model_id, prefix: str = '') -> List[ImageFile.I
         for sibling in model_info.siblings:
             if sibling.rfilename.endswith(('.png', '.jpg', '.jpeg', '.gif')) and sibling.rfilename.startswith(prefix):
                 logger.info(f"Image: {sibling.rfilename}")
-                response = requests.get(f"https://huggingface.co/{model_id}/resolve/main/{sibling.rfilename}")
+                response = requests.get(f"https://huggingface.co/{model_id}/resolve/main/{sibling.rfilename}", timeout=60)
                 images.append(Image.open(BytesIO(response.content)))
     else:
         logger.info(f"No files found in the repository {model_id}")
