@@ -179,7 +179,7 @@ class TestDistilSmoke:
 
         output_dir = str(tmp_path / "distil_output")
 
-        unlearner = UnlearnerLoraDistillation(
+        unlearner = UnlearnerLoraDistillation(  # type: ignore[call-arg]
             model_name_or_path=_SD_MODEL,
             # Use the same tiny dir for both forget and retain
             dataset_forget_name=tiny_dataset_dir,
@@ -224,7 +224,7 @@ class TestDistilSmoke:
 
         output_dir = str(tmp_path / "distil_checkpoint")
 
-        unlearner = UnlearnerLoraDistillation(
+        unlearner = UnlearnerLoraDistillation(  # type: ignore[call-arg]
             model_name_or_path=_SD_MODEL,
             dataset_forget_name=tiny_dataset_dir,
             dataset_retain_name=tiny_dataset_dir,
