@@ -37,6 +37,7 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     GUI_TO_BACKEND,
     unlearning_algorithm_to_epochs,
     convert_params_from_gui_to_backend,
+    s_to_direction,
 )
 
 from vision_unlearning.benchmarks.I_care.metadata import (
@@ -128,6 +129,7 @@ __all__ = [
     "GUI_TO_BACKEND",
     "unlearning_algorithm_to_epochs",
     "convert_params_from_gui_to_backend",
+    "s_to_direction",
     # metadata
     "get_interference_per_pair_path",
     "get_interference_per_pair",
