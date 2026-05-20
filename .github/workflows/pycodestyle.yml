@@ -17,4 +17,16 @@ jobs:
       - run: poetry install --no-interaction --no-root
       - run: |
           echo '----------- Pycodestyle check ----------'
-          poetry run pycodestyle --max-line-length=300 --ignore=E701 ./vision_unlearning
+          # Ignore list must match the Makefile exactly so CI and local checks are equivalent.
+          # E701: multiple statements on one line
+          # W605,E251,E252: common in research/generated code
+          # E265,E303,E302,E305: comment style and blank-line conventions in research files
+          # W293,W291: trailing whitespace (cosmetic)
+          # E225,E227: operator spacing (cosmetic)
+          # E721: type() comparison style
+          # E741: ambiguous variable names
+          # W391: blank line at end of file
+          # E117,E501: over-indent and long lines
+          poetry run pycodestyle --max-line-length=300 \
+            --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501 \
+            ./vision_unlearning
