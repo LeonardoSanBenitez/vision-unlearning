@@ -1,10 +1,12 @@
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 import requests
 from PIL import Image, ImageFile
 from io import BytesIO
-from huggingface_hub import hf_api, HfApi, hf_hub_url, snapshot_download
+from huggingface_hub import hf_api, HfApi, hf_hub_url, snapshot_download, hf_hub_download
+from huggingface_hub.utils import RepositoryNotFoundError, RevisionNotFoundError
 from vision_unlearning.utils.logger import get_logger
 
 
@@ -100,24 +102,66 @@ def huggingface_model_download(
             shutil.copy2(file_source_path, target_path)
 
 
+def huggingface_dataset_exists(
+    dataset_repository: str,
+    dataset_config: str,
+    token: Optional[str],
+) -> bool:
+    """
+    Checks whether a folder exists in a Hugging Face dataset repository.
+
+    Example:
+        dataset_repository="username/my_dataset"
+        dataset_config="configs/en"
+
+    Works without listing the whole repository.
+    """
+
+    url = (
+        f"https://huggingface.co/api/datasets/"
+        f"{dataset_repository}/tree/main/{dataset_config.replace(os.sep, '/')}"
+    )
+
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 404:
+        return False
+
+    response.raise_for_status()
+
+    # Existing folders return a JSON array of entries.
+    return isinstance(response.json(), list)
+
 def huggingface_dataset_file_exists(
     dataset_repository: str,
     dataset_path: str,
     token: Optional[str],
 ) -> bool:
-    '''
-    Return True if a file exists in a HF dataset repository (uses a HEAD request).
-    @param dataset_path: full path of the file in the repository (e.g., "datasets/my_file.json")
-    '''
+    """
+    Checks if a specific file exists in a Hugging Face dataset repository.
+
+    :param dataset_repository: e.g. "username/dataset_name"
+    :param dataset_path: full path in repo (e.g. "config/file.jsonl")
+    :param token: HF token (can be None for public repos)
+    :return: True if file exists, False otherwise
+    Efficiently checks if a file exists in a Hugging Face dataset repo without listing the entire repository.
+    Could be done more efficiently if we use a new version of the lib, see https://chatgpt.com/share/69edd525-d008-832d-8a0c-ec4560a4fe3b
+
+    """
     url = hf_hub_url(
         repo_id=dataset_repository,
         filename=dataset_path,
-        repo_type='dataset',
+        repo_type="dataset",
     )
-    headers: Dict[str, str] = {}
+    #print('url:', url, flush=True)
+    headers = {}
     if token:
-        headers['Authorization'] = f'Bearer {token}'
-    response = requests.head(url, headers=headers, allow_redirects=True)
+        headers["Authorization"] = f"Bearer {token}"
+    response = requests.head(url, headers=headers)
     return response.status_code in (200, 302, 303, 307)
 
 
@@ -215,6 +259,7 @@ def huggingface_dataset_download(
         shutil.rmtree(repo_path)
 
 
+
 def huggingface_dataset_file_download(
     folder_datasets: str,
     dataset_repository: str,
@@ -238,19 +283,18 @@ def huggingface_dataset_file_download(
     os.makedirs(folder_cache, exist_ok=True)
     
     # Download to cache
-    repo_path = snapshot_download(
+    cached_path = hf_hub_download(
         repo_id=dataset_repository,
+        filename=file_path,
         repo_type="dataset",
         token=token,
-        allow_patterns=file_path,
         cache_dir=folder_cache,
     )
-    
+
     # Copy from cache to final folder
-    source_path = os.path.join(repo_path, file_path)
     target_path = os.path.join(folder_datasets, file_path)
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    shutil.copy2(source_path, target_path)
+    shutil.copy2(cached_path, target_path)
 
 
 def huggingface_get_model_metrics(model_id: str) -> Dict[str, float | int | bool]:
@@ -284,3 +328,134 @@ def huggingface_get_model_images(model_id, prefix: str = '') -> List[ImageFile.I
     else:
         logger.info(f"No files found in the repository {model_id}")
     return images
+
+
+def _huggingface_download_one_file(
+    entry: dict,  # type: ignore[type-arg]
+    folder_dataset: str,
+    dataset_repository: str,
+    headers: dict,  # type: ignore[type-arg]
+) -> bool:
+    """Download a single file from HF via HTTP.  Returns True on success."""
+    entry_path = entry.get("path", "")
+    filename = os.path.basename(entry_path)
+    local_path = os.path.join(folder_dataset, filename)
+    if os.path.exists(local_path):
+        return True  # already present — treated as success
+
+    dl_url = (
+        f"https://huggingface.co/datasets/{dataset_repository}"
+        f"/resolve/main/{entry_path}"
+    )
+    for attempt in range(3):
+        try:
+            resp = requests.get(
+                dl_url,
+                headers=headers,
+                allow_redirects=True,
+                timeout=60,
+            )
+            resp.raise_for_status()
+            with open(local_path, "wb") as fh:
+                fh.write(resp.content)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Attempt %d/3 failed for %s: %s", attempt + 1, filename, exc
+            )
+    return False
+
+
+def huggingface_dataset_download_parallel(
+    folder_datasets: str,
+    dataset_repository: str,
+    dataset_config: str,
+    token: str,
+    clean: bool = False,
+    folder_cache: str = "C:/tmp/huggingface_cache",
+    hf_prefix: str = "datasets",
+    max_workers: int = 12,
+) -> None:
+    """Download a dataset config folder from HF using parallel HTTP requests.
+
+    Faster alternative to huggingface_dataset_download() for large folders.
+    Uses ThreadPoolExecutor(max_workers) for concurrent file downloads; reduces
+    per-entity download time from ~6 minutes (sequential snapshot_download) to
+    ~35 s at max_workers=12 (measured on HF for 801 PNG files, 2026-05-20).
+
+    Args:
+        folder_datasets: Local parent directory (e.g. "assets/datasets").
+        dataset_repository: HF dataset repo ID.
+        dataset_config: Folder name within folder_datasets AND within hf_prefix
+                        on HF (e.g. "generated_people_George W Bush_uce_000").
+        token: HF auth token.
+        clean: If True, delete local folder before downloading.
+        folder_cache: Unused — kept for signature compatibility with huggingface_dataset_download().
+        hf_prefix: Prefix path within the HF repo (default "datasets").
+        max_workers: Thread pool size for concurrent HTTP downloads.
+                     Benchmark (2026-05-20, 801 files): 1=349s, 4=91s, 8=48s, 12=35s.
+                     12 is the recommended default; do not exceed 16 (HF rate limits).
+    """
+    folder_dataset = os.path.join(folder_datasets, dataset_config)
+    if clean and os.path.exists(folder_dataset):
+        shutil.rmtree(folder_dataset)
+    if os.path.exists(folder_dataset) and len(os.listdir(folder_dataset)) > 0:
+        logger.info('Dataset already exists locally, skipping download: %s', folder_dataset)
+        return
+    os.makedirs(folder_dataset, exist_ok=True)
+
+    hf_path = f"{hf_prefix}/{dataset_config}" if hf_prefix else dataset_config
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # List files via HF tree API
+    tree_url = (
+        f"https://huggingface.co/api/datasets/{dataset_repository}"
+        f"/tree/main/{hf_path}"
+    )
+    logger.info("Fetching file list: %s", tree_url)
+    r = requests.get(tree_url, headers=headers, timeout=30)
+    r.raise_for_status()
+    entries = r.json()
+    logger.info("Files in HF folder: %d", len(entries))
+
+    file_entries: List[dict] = [  # type: ignore[type-arg]
+        e
+        for e in entries
+        if e.get("type", "file") != "directory" and os.path.basename(e.get("path", ""))
+    ]
+
+    # Parallel download
+    failed = 0
+    done = 0
+    total = len(file_entries)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_huggingface_download_one_file, entry, folder_dataset, dataset_repository, headers): entry
+            for entry in file_entries
+        }
+        for future in as_completed(futures):
+            success = future.result()
+            if success:
+                done += 1
+            else:
+                failed += 1
+            completed = done + failed
+            if completed % 100 == 0 or completed == total:
+                logger.info("Download progress: %d/%d (failed: %d)", completed, total, failed)
+
+    logger.info(
+        "Download complete: %d downloaded, %d failed -> %s",
+        done, failed, folder_dataset,
+    )
+    fail_rate = failed / max(total, 1)
+    if fail_rate > 0.01:
+        raise RuntimeError(
+            f"huggingface_dataset_download_parallel: {failed}/{total} files failed "
+            f"({fail_rate:.1%}) for {dataset_config}"
+        )
+    if failed > 0:
+        logger.warning(
+            "Tolerating %d failed file(s) for %s (below 1%% threshold)",
+            failed, dataset_config,
+        )

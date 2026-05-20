@@ -7,9 +7,6 @@ These tests cover:
     choose_metric_column_interference_per_entity matching the new column name
   - Item 3: ResultTemplateMethodComparisonByMetricEntity — registry, compute, plot
 
-The code under test lives in forgety/libs/vision_unlearning_benchmarks_I_care_TEMP.py
-(currently there for convenience; will move to vision-unlearning once stable).
-
 All tests are CPU-only and require no GPU, no network, and no real data files.
 """
 from __future__ import annotations
@@ -28,18 +25,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
-# Add forgety/libs to path so we can import the TEMP module.
-# When this code moves to vision-unlearning, this path manipulation goes away.
-# Support both local (relative to this file) and Docker (/src/libs) layouts.
-_FORGETY_LIBS_CANDIDATES = [
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'forgety', 'libs')),
-    '/src/libs',  # Docker: forgety libs mounted at /src/libs
-]
-for _candidate in _FORGETY_LIBS_CANDIDATES:
-    if os.path.isdir(_candidate) and _candidate not in sys.path:
-        sys.path.insert(0, _candidate)
-
-import vision_unlearning_benchmarks_I_care_TEMP as vb  # noqa: E402
+import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
