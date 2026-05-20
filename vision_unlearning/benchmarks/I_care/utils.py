@@ -25,17 +25,18 @@ def _encode_image_file(img_path: str, max_dim: int = 1024) -> str:
     Downsample / reduce resolution to limit size before encoding
     '''
     assert os.path.exists(img_path), f"Image file not found at {img_path}"
-    with Image.open(img_path) as im:
+    img: Image.Image = Image.open(img_path)
+    with img:
         # Convert to RGB to ensure compatibility with JPEG
-        if im.mode != 'RGB':
-            im = im.convert('RGB')
-        if max(im.size) > max_dim:
-            scale = max_dim / max(im.size)
-            new_size = (int(im.size[0] * scale), int(im.size[1] * scale))
-            im = im.resize(new_size, Image.LANCZOS)
-            #print(f"Resized image from {im.size} to {new_size} to limit size before encoding.")
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        if max(img.size) > max_dim:
+            scale = max_dim / max(img.size)
+            new_size = (int(img.size[0] * scale), int(img.size[1] * scale))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+            #print(f"Resized image from {img.size} to {new_size} to limit size before encoding.")
         buf = io.BytesIO()
-        im.save(buf, format='PNG', quality=85, optimize=True)
+        img.save(buf, format='PNG', quality=85, optimize=True)
         image_bytes = buf.getvalue()
     return base64.b64encode(image_bytes).decode('ascii')
 

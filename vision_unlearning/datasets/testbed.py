@@ -278,7 +278,7 @@ def calculate_similarity_clip(  # deprecated, use ResultTemplateSimilarityMatrix
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     labels: List[str],
     base_folder: str = 'assets',
-) -> None:
+) -> pd.DataFrame:
     # Lazy import: torchmetrics/torch only needed when this function is called.
     from vision_unlearning.metrics.text_and_text import MetricTextTextSimilarity  # noqa: PLC0415
     clip_text_metric = MetricTextTextSimilarity(metrics=['clip_text'])

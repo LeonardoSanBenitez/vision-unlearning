@@ -152,7 +152,7 @@ def embed_forgetting_session(
     records: List[Dict[str, Any]] = []
     for seed in seeds:
         for i, prompt in enumerate(prompts):
-            prompted_entity = get_target_preprocessed(task, metadata_filtered[i]["name"])
+            prompted_entity = get_target_preprocessed(task, metadata_filtered[i]["name"])  # type: ignore[arg-type]
             filename = get_generated_dataset_file(lora_state, seed, prompt)
             image_path = os.path.join(dataset_folder, filename)
             if not os.path.exists(image_path):
@@ -216,7 +216,7 @@ def embed_forgetting_session_batched(
     items: List[Dict[str, Any]] = []
     for seed in seeds:
         for i, prompt in enumerate(prompts):
-            prompted_entity = get_target_preprocessed(task, metadata_filtered[i]["name"])
+            prompted_entity = get_target_preprocessed(task, metadata_filtered[i]["name"])  # type: ignore[arg-type]
             filename = get_generated_dataset_file(lora_state, seed, prompt)
             image_path = os.path.join(dataset_folder, filename)
             if not os.path.exists(image_path):

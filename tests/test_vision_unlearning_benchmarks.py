@@ -47,12 +47,36 @@ class TestImportSmoke:
     def test_module_imports(self) -> None:
         assert vb is not None
 
+    @pytest.mark.skipif(
+        __import__("importlib.util", fromlist=["find_spec"]).find_spec("torch") is not None,
+        reason=(
+            "torch is installed in this environment — the I_care package is "
+            "allowed to transitively import torch via vision_unlearning.datasets "
+            "when torch is present. This test only makes sense in torch-free "
+            "environments (e.g. the forgety web container)."
+        ),
+    )
     def test_no_gpu_or_heavy_load_at_import(self) -> None:
-        # The module must not pull torch / a model at import time. It only
-        # needs pandas/numpy/sklearn/shap/matplotlib.
-        import sys
-
-        assert "torch" not in sys.modules
+        # The module must not pull torch / a model at import time in
+        # torch-free environments. It only needs pandas/numpy/sklearn/shap/matplotlib.
+        #
+        # Run in a subprocess to guarantee a clean sys.modules state.
+        import subprocess
+        result = subprocess.run(
+            [
+                sys.executable, "-c",
+                "import vision_unlearning.benchmarks.I_care; "
+                "import vision_unlearning.benchmarks.I_care.result_templates; "
+                "import sys; assert 'torch' not in sys.modules, "
+                "'torch was imported at I_care module load time'"
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"I_care module loaded torch at import time.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
     def test_rt_registry_consistent(self) -> None:
         # Every class in the name->class map must also be in the params map.

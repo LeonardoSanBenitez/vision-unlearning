@@ -82,6 +82,14 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     save_interference_per_pair,
     exists_interference_per_pair,
 )
+from vision_unlearning.benchmarks.I_care.utils import (
+    explanation_to_dict,
+    dict_to_explanation,
+    _encode_image_file,
+    _decode_image,
+    InvalidAttributeTypeError,
+    InsufficientSamplesError,
+)
 
 logger = get_logger('I_care')
 
@@ -114,25 +122,27 @@ class ResultTemplate(BaseModel):
         raise NotImplementedError()
 
     def compute(self) -> dict:
+        hf_token: Optional[str] = os.getenv('HF_TOKEN')
+        data: Any
         if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data: dict  = json.load(f)
+                data = json.load(f)
         elif not self.recompute_if_exists and huggingface_dataset_file_exists(  # Remote
             self.remote_repository_name,
             self._get_data_path_remote(),
-            token=os.getenv('HF_TOKEN'),
+            token=hf_token,
         ):
             #print('going the remote option', flush=True)
             huggingface_dataset_file_download(
                 folder_datasets=self.base_folder,
                 dataset_repository=self.remote_repository_name,
                 file_path=self._get_data_path_remote(),
-                token=os.getenv('HF_TOKEN'),
+                token=hf_token or "",
             )
             assert os.path.exists(self._get_data_path_local())
             #print('downloaded', flush=True)
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data: dict  = json.load(f)
+                data = json.load(f)
         else:  # Compute from scratch
             data = self._compute_from_scratch()
             if self.save_outputs:
@@ -219,8 +229,8 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
 
         if return_fig:
             return fig, ax
-        else:
-            plt.show()
+        plt.show()
+        return None
 
 
     def _compute_from_scratch(self, exclude_diagonal: bool = True) -> dict:
@@ -236,7 +246,6 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
         df2 = pd.DataFrame(ResultTemplateSimilarityMatrix(
             model = self.model,
             task = self.task,
-            unlearning_algorithm = self.unlearning_algorithm,
             similarity_metric = self.similarity_metric
         ).compute()['result'])
         df2.set_index('emitter', inplace=True)
@@ -444,7 +453,6 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
             df_s = pd.DataFrame(ResultTemplateSimilarityMatrix(
                 model = self.model,
                 task = self.task,
-                unlearning_algorithm = self.unlearning_algorithm,
                 similarity_metric = similarity_metric
             ).compute()['result'])
             df_s.set_index('emitter', inplace=True)
@@ -465,7 +473,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
         # One col for the target (the metric-interference-per-pair, entry ij of df_mp), then one col per feature (each similarity + engineered features)
         # index are the labelsi_to_labelj
         labels = df_mp.index.to_list()
-        columns = [self.interference_pair] + self.similarity_metric_list
+        columns: List[str] = [self.interference_pair] + list(self.similarity_metric_list)
         for attribute in task_to_attributes_of_interest[self.task]:
             if self.include_attribute_diff_similarity:
                 columns.append(f'is_{attribute}_same')
@@ -478,9 +486,9 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 if exclude_diagonal and (label_emitter == label_receiver):
                     continue
                 
-                row_dict = {self.interference_pair: df_mp.loc[label_emitter, label_receiver]}
+                row_dict: Dict[str, Any] = {self.interference_pair: df_mp.loc[label_emitter, label_receiver]}
                 for idx, similarity_metric in enumerate(self.similarity_metric_list):
-                    row_dict[similarity_metric] = df_s_list[idx].loc[label_emitter, label_receiver]
+                    row_dict[str(similarity_metric)] = df_s_list[idx].loc[label_emitter, label_receiver]
                 
                 # Feature engineering
                 # This logic is very similar to jacc_metric_score
@@ -705,8 +713,8 @@ class ResultTemplateSignificantRelationshipNumerical(ResultTemplate):
 
         if return_fig:
             return fig, ax
-        else:
-            plt.show()
+        plt.show()
+        return None
 
 
     def _compute_from_scratch(self) -> dict:
@@ -863,8 +871,8 @@ class ResultTemplateSignificantRelationshipCategorical(ResultTemplate):
 
         if return_fig:
             return fig, ax
-        else:
-            plt.show()
+        plt.show()
+        return None
 
     def _compute_from_scratch(self) -> dict:
         interference_per_entity_path: str = get_interference_per_entity_path(self.task)
@@ -950,7 +958,7 @@ class ResultTemplateCountSignificantRelationship(ResultTemplate):
 
 
     def _serialize_parameters(self) -> str:
-        unlearning_algorithms_str = ','.join([ua.__name__ for ua in self.unlearning_algorithm_list])
+        unlearning_algorithms_str = ','.join([str(ua) for ua in self.unlearning_algorithm_list])
         interference_entities_str = ','.join(self.interference_entity_list)
         attributes_str = ','.join(self.attribute_list)
         return f"{self.model}_{self.task}_{unlearning_algorithms_str}_{interference_entities_str}_{attributes_str}"
@@ -965,15 +973,15 @@ class ResultTemplateCountSignificantRelationship(ResultTemplate):
             for interference_entity in self.interference_entity_list:
                 for attribute in self.attribute_list:
                     try:
-                        data = ResultTemplateSignificantRelationshipCategorical(model=model, task=task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
+                        data = ResultTemplateSignificantRelationshipCategorical(model=self.model, task=self.task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
                     except InvalidAttributeTypeError:
-                        data = ResultTemplateSignificantRelationshipNumerical(model=model, task=task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
+                        data = ResultTemplateSignificantRelationshipNumerical(model=self.model, task=self.task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
                     except InsufficientSamplesError:
                         continue
                     except Exception as e:
-                        logger.warning(f'Combination {model}, {task}, {unlearning_algorithm}, {interference_entity}, {attribute} failled with {e}')
-                        assert 1==0#continue
-                    results.append([model, task, unlearning_algorithm, interference_entity, attribute, data['result']['significant']])
+                        logger.warning(f'Combination {self.model}, {self.task}, {unlearning_algorithm}, {interference_entity}, {attribute} failled with {e}')
+                        assert 1 == 0  # continue
+                    results.append([self.model, self.task, unlearning_algorithm, interference_entity, attribute, data['result']['significant']])
         df = pd.DataFrame(results, columns=['model', 'task', 'unlearning_algorithm', 'interference_entity', 'attribute', 'significant'])
         #TODO
         print(df[df['task']=='people'].groupby('attribute').sum()['significant'].sort_values(ascending=False))
@@ -1181,15 +1189,17 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplate):
         #    plt.savefig(save_path)
         if return_fig:
             return fig, ax
-        else:
-            plt.show()
+        plt.show()
+        return None
 
 
     def _compute_from_scratch(self):
         self._resolve_entity()
-        num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]        
-        is_worst_biggest=mp_to_direction[self.interference_pair]!='↑'
-
+        # _resolve_entity() guarantees both entity and entity_index are set
+        assert self.entity is not None
+        assert self.entity_index is not None
+        num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+        is_worst_biggest = mp_to_direction[self.interference_pair] != '↑'
 
         interference_per_pair = get_interference_per_pair(self.task, self.entity_index, self.unlearning_algorithm, num_train_epochs)
         all_names = list(interference_per_pair.keys())
@@ -1206,11 +1216,11 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplate):
         assert len(worst) == 4, f"Expected 4 worst interfered, got {len(worst)}"
         assert len(best) == 4, f"Expected 4 best interfered, got {len(best)}"
 
-        displayed_entities = [self.entity, *worst, *best]
+        displayed_entities: List[str] = [self.entity, *worst, *best]
         interference_values = {name: interference_per_pair[name][self.interference_pair] for name in displayed_entities}
 
-        # Embed imagesin the json itself
-        images = {'off': {}, 'on': {}}
+        # Embed images in the json itself
+        images: Dict[str, Dict[str, str]] = {'off': {}, 'on': {}}
         for state in ['off', 'on']:
             for name in displayed_entities:
                 img_path = os.path.join(
@@ -1255,7 +1265,7 @@ class ResultTemplateMatrix(ResultTemplate):
         raise NotImplementedError()
 
     @classmethod
-    def plot(cls, data: dict, figsize: Optional[Tuple[int, int]] = None, cmap: str ="viridis", title: str = "", xlabel: str = "Receiver entity", ylabel: str = "Emitter entity", return_fig: bool =False) -> Optional[Tuple[Figure, plt.Axes]]:
+    def plot(cls, data: dict, figsize: Optional[Tuple[float, float]] = None, cmap: str ="viridis", title: str = "", xlabel: str = "Receiver entity", ylabel: str = "Emitter entity", return_fig: bool =False) -> Optional[Tuple[Figure, plt.Axes]]:
         df = pd.DataFrame(data['result'])
         df.set_index('emitter', inplace=True)
 
@@ -1309,8 +1319,8 @@ class ResultTemplateMatrix(ResultTemplate):
         plt.tight_layout(pad=0.8)
         if return_fig:
             return fig, ax
-        else:
-            plt.show()
+        plt.show()
+        return None
 
 
 
@@ -1489,7 +1499,7 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
                 print(f'Analying similarities for entity_emitter={entity_emitter}')
                 for entity_receiver in row_emitter.index:
                     if pd.isna(df_similarities.loc[entity_emitter, entity_receiver]):  # type: ignore
-                        similarity: float = jacc_metric_score(entity_emitter, entity_receiver, metadata_filtered)
+                        similarity: float = jacc_metric_score(str(entity_emitter), str(entity_receiver), metadata_filtered)
                         df_similarities.loc[entity_emitter, entity_receiver] = similarity
 
                 # Save partial at the end of each row
@@ -1584,6 +1594,7 @@ class ResultTemplateMethodComparisonByMetricEntity(ResultTemplate):
         if return_fig:
             return fig, ax
         plt.show()
+        return None
 
     def _compute_from_scratch(self) -> dict:
         interference_per_entity: List[Dict] = InterferencePerEntity(

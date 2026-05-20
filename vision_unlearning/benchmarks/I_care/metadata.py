@@ -157,27 +157,34 @@ class InterferencePerEntity(BaseModel):
     def _get_data_path_local(self) -> str:
         return os.path.join(self.base_folder, self._get_data_path_remote())
 
+    def _compute_from_scratch(self) -> List[Dict[str, Any]]:
+        raise NotImplementedError(
+            "InterferencePerEntity._compute_from_scratch is not yet implemented. "
+            "Provide a pre-computed file or fetch from HuggingFace."
+        )
 
     def compute(self) -> List[Dict[str, Any]]:
+        hf_token: Optional[str] = os.getenv('HF_TOKEN')
+        data: Any
         if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data: List[Dict[str, Any]] = json.load(f)
+                data = json.load(f)
         elif not self.recompute_if_exists and huggingface_dataset_file_exists(  # Remote
             self.remote_repository_name,
             self._get_data_path_remote(),
-            token=os.getenv('HF_TOKEN'),
+            token=hf_token,
         ):
             #print('going the remote option', flush=True)
             huggingface_dataset_file_download(
                 folder_datasets=self.base_folder,
                 dataset_repository=self.remote_repository_name,
                 file_path=self._get_data_path_remote(),
-                token=os.getenv('HF_TOKEN'),
+                token=hf_token or "",
             )
             assert os.path.exists(self._get_data_path_local())
             #print('downloaded', flush=True)
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data: List[Dict[str, Any]] = json.load(f)
+                data = json.load(f)
         else:  # Compute from scratch
             data = self._compute_from_scratch()
             if self.save_outputs:
