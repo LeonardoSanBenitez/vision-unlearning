@@ -425,3 +425,128 @@ class TestMethodSpecificityPlot:
         assert result is not None
         fig, ax = result
         assert isinstance(fig, Figure)
+
+
+# ---------------------------------------------------------------------------
+# ResultTemplateInterferenceVisualSummary — off-image path selection
+# ---------------------------------------------------------------------------
+
+class TestInterferenceVisualSummaryOffImagePath:
+    """Verify that _compute_from_scratch uses get_off_image_path for 'off' images
+    and get_generated_dataset_folder for 'on' images."""
+
+    def test_off_images_use_get_off_image_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """get_off_image_path must be called for the 'off' state."""
+        import vision_unlearning.benchmarks.I_care.result_templates as _rt
+
+        # Track calls to off-image path function vs entity-folder function
+        off_image_calls: List[str] = []
+        entity_folder_calls: List[str] = []
+
+        # Fake entities — two people suffice: the target and one other
+        fake_metadata = [
+            {"name": "Person A", "type": "politician"},
+            {"name": "Person B", "type": "politician"},
+            {"name": "Person C", "type": "politician"},
+            {"name": "Person D", "type": "politician"},
+            {"name": "Person E", "type": "politician"},
+            {"name": "Person F", "type": "politician"},
+            {"name": "Person G", "type": "politician"},
+            {"name": "Person H", "type": "politician"},
+            {"name": "Person I", "type": "politician"},
+        ]
+
+        fake_interference: Dict[str, Dict[str, float]] = {
+            m["name"]: {"ssim": float(i)} for i, m in enumerate(fake_metadata)
+        }
+
+        def fake_get_off_image_path(
+            task: str, target: str, method: str, num_train_epochs: int,
+            seed: int, prompt: str, base_folder: str = "assets",
+        ) -> str:
+            off_image_calls.append(prompt)
+            return os.path.join(tmp_path, "baseline", f"off_{seed}_{target}.png")
+
+        def fake_get_generated_dataset_folder(
+            task: str, method: str, num_train_epochs: int, target: str,
+            base_folder: str = "assets",
+        ) -> str:
+            entity_folder_calls.append(target)
+            return str(tmp_path / "entity")
+
+        def fake_encode_image_file(path: str, max_dim: int = 128) -> str:
+            return "base64fake"
+
+        def fake_get_interference_per_pair(
+            task: str, entity_index: int, method: str, num_train_epochs: int,
+        ) -> Dict[str, Dict[str, float]]:
+            return {m["name"]: {"ssim": float(i)} for i, m in enumerate(fake_metadata)}
+
+        monkeypatch.setattr(_rt, "get_metadata_filtered", lambda *a, **kw: fake_metadata)
+        monkeypatch.setattr(_rt, "get_target_overwrite", lambda task, method, name: (name, name))
+        monkeypatch.setattr(_rt, "get_off_image_path", fake_get_off_image_path)
+        monkeypatch.setattr(_rt, "get_generated_dataset_folder", fake_get_generated_dataset_folder)
+        monkeypatch.setattr(_rt, "_encode_image_file", fake_encode_image_file)
+        monkeypatch.setattr(_rt, "get_interference_per_pair",
+                            lambda *a, **kw: fake_get_interference_per_pair(*a, **kw))
+        monkeypatch.setattr(_rt, "unlearning_algorithm_to_epochs", {"people": {"distil": 400}})
+        monkeypatch.setattr(_rt, "mp_to_direction", {"ssim": "↑"})
+        monkeypatch.setattr(_rt, "get_generated_dataset_file",
+                            lambda state, seed, prompt: f"{state}_{seed}.png")
+
+        rt = _rt.ResultTemplateInterferenceVisualSummary(
+            unlearning_algorithm="distil",
+            interference_pair="ssim",
+            entity="Person A",
+        )
+        result = rt._compute_from_scratch()
+
+        # off-image path must have been resolved via get_off_image_path
+        assert len(off_image_calls) > 0, "get_off_image_path was never called for 'off' images"
+        # 'on' images must use the entity folder (get_generated_dataset_folder)
+        assert len(entity_folder_calls) > 0, "get_generated_dataset_folder was never called for 'on' images"
+        # Both image states must appear in the result
+        assert "off" in result["result"]["images"]
+        assert "on" in result["result"]["images"]
+
+    def test_on_images_use_entity_folder(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """get_generated_dataset_folder is called at least once for 'on' images."""
+        import vision_unlearning.benchmarks.I_care.result_templates as _rt
+
+        entity_folder_calls: List[str] = []
+
+        fake_metadata = [
+            {"name": f"Person {chr(65+i)}", "type": "politician"} for i in range(9)
+        ]
+
+        def fake_get_off_image_path(*args: Any, **kwargs: Any) -> str:
+            return str(tmp_path / "off.png")
+
+        def fake_get_generated_dataset_folder(*args: Any, **kwargs: Any) -> str:
+            entity_folder_calls.append("called")
+            return str(tmp_path / "entity")
+
+        monkeypatch.setattr(_rt, "get_metadata_filtered", lambda *a, **kw: fake_metadata)
+        monkeypatch.setattr(_rt, "get_target_overwrite", lambda task, method, name: (name, name))
+        monkeypatch.setattr(_rt, "get_off_image_path", fake_get_off_image_path)
+        monkeypatch.setattr(_rt, "get_generated_dataset_folder", fake_get_generated_dataset_folder)
+        monkeypatch.setattr(_rt, "_encode_image_file", lambda *a, **kw: "base64fake")
+        monkeypatch.setattr(_rt, "get_interference_per_pair",
+                            lambda *a, **kw: {m["name"]: {"ssim": float(i)} for i, m in enumerate(fake_metadata)})
+        monkeypatch.setattr(_rt, "unlearning_algorithm_to_epochs", {"people": {"distil": 400}})
+        monkeypatch.setattr(_rt, "mp_to_direction", {"ssim": "↑"})
+        monkeypatch.setattr(_rt, "get_generated_dataset_file",
+                            lambda state, seed, prompt: f"{state}_{seed}.png")
+
+        rt = _rt.ResultTemplateInterferenceVisualSummary(
+            unlearning_algorithm="distil",
+            interference_pair="ssim",
+            entity="Person A",
+        )
+        rt._compute_from_scratch()
+
+        assert len(entity_folder_calls) > 0, "get_generated_dataset_folder was never called for 'on' images"

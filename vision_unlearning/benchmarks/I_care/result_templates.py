@@ -53,6 +53,7 @@ from vision_unlearning.datasets.testbed import (
     get_target_overwrite,
     get_generated_dataset_folder,
     get_generated_dataset_file,
+    get_off_image_path,
 )
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.benchmarks.I_care.configuration import (
@@ -1219,16 +1220,36 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplate):
         displayed_entities: List[str] = [self.entity, *worst, *best]
         interference_values = {name: interference_per_pair[name][self.interference_pair] for name in displayed_entities}
 
-        # Embed images in the json itself
+        # Embed images in the json itself.
+        # For 'off' images: prefer the method-agnostic baseline folder if it exists,
+        # falling back to the legacy entity folder (which contains mixed on/off).
+        # For 'on' images: always read from the method-specific entity folder.
         images: Dict[str, Dict[str, str]] = {'off': {}, 'on': {}}
         for state in ['off', 'on']:
             for name in displayed_entities:
-                img_path = os.path.join(
-                    get_generated_dataset_folder(self.task, self.unlearning_algorithm, num_train_epochs, get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0]),
-                    get_generated_dataset_file(state, self.seed, f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}")  # type: ignore
-                )
+                prompt = f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}"
+                if state == 'off':
+                    # Use get_off_image_path: prefers baseline folder, falls back to entity folder.
+                    img_path = get_off_image_path(
+                        self.task,
+                        get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0],
+                        self.unlearning_algorithm,
+                        num_train_epochs,
+                        self.seed,
+                        prompt,
+                    )
+                else:
+                    entity_folder = get_generated_dataset_folder(
+                        self.task,
+                        self.unlearning_algorithm,
+                        num_train_epochs,
+                        get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0],
+                    )
+                    img_path = os.path.join(
+                        entity_folder,
+                        get_generated_dataset_file(state, self.seed, prompt),  # type: ignore
+                    )
                 images[state][name] = _encode_image_file(img_path, max_dim=self.images_max_dim)
-                #print(f"Encoded image for {name} in state {state}, interference value: {interference_values[name]:.2f}, {self.images_max_dim}")
 
         data = {
             'metadata': {
