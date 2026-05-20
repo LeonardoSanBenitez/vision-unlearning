@@ -53,6 +53,13 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     choose_metric_column_interference_per_entity,
 )
 
+from vision_unlearning.datasets.testbed import (
+    get_metadata_filtered,
+    get_metadata_filtered_path,
+    get_target_overwrite,
+    get_generated_dataset_file,
+)
+
 from vision_unlearning.benchmarks.I_care.metrics import (
     find_worst_interfered,
     metric_of_worst_interfered,
@@ -78,6 +85,14 @@ from vision_unlearning.benchmarks.I_care.embeddings import (
     embed_image_with_dino,
     embed_forgetting_session,
     embed_forgetting_session_batched,
+)
+
+from vision_unlearning.integrations.huggingface import (
+    huggingface_dataset_file_exists,
+    huggingface_dataset_file_download,
+    huggingface_dataset_upload,
+    huggingface_dataset_file_upload,
+    huggingface_dataset_download,
 )
 
 from vision_unlearning.benchmarks.I_care.result_templates import (
@@ -188,4 +203,15 @@ __all__ = [
     "analyze_relationship_categorical",
     "analyze_correlation_between_pairwise_metrics",
     "check_eval_results",
+    # testbed helpers (re-exported for convenience)
+    "get_metadata_filtered",
+    "get_metadata_filtered_path",
+    "get_target_overwrite",
+    "get_generated_dataset_file",
+    # huggingface integrations (re-exported for convenience and monkeypatching)
+    "huggingface_dataset_file_exists",
+    "huggingface_dataset_file_download",
+    "huggingface_dataset_upload",
+    "huggingface_dataset_file_upload",
+    "huggingface_dataset_download",
 ]

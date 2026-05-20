@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal, Tuple, List, Dict, Optional, Any
 import json
 import os
+import re
 import numpy as np
 import pandas as pd
 from scipy.stats import f_oneway, kruskal, linregress, pearsonr, spearmanr
@@ -13,6 +14,15 @@ from pydantic import BaseModel
 
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite
+from vision_unlearning.integrations.huggingface import (
+    huggingface_dataset_file_exists,
+    huggingface_dataset_file_download,
+)
+from vision_unlearning.benchmarks.I_care.configuration import (
+    type_task,
+    type_unlearning_algorithm,
+    type_me,
+)
 
 
 logger = get_logger('I_care')
@@ -100,16 +110,18 @@ def get_interference_per_pair_inverse(
 ##########################################
 def get_interference_per_entity_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
+    base_folder: str = 'assets',
 ) -> str:
-    return f"assets/interference_per_entity_{task}.json"
+    return os.path.join(base_folder, f"interference_per_entity_{task}.json")
 
 
 def get_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     max_identities: int = 100,
+    base_folder: str = 'assets',
 ) -> List[Dict[str, Any]]:
-    assert os.path.exists(get_interference_per_entity_path(task))
-    with open(get_interference_per_entity_path(task), "r", encoding="utf-8") as f:
+    assert os.path.exists(get_interference_per_entity_path(task, base_folder=base_folder))
+    with open(get_interference_per_entity_path(task, base_folder=base_folder), "r", encoding="utf-8") as f:
         metadata_filtered = json.load(f)
     assert isinstance(metadata_filtered, list)
     assert len(metadata_filtered) == max_identities
@@ -119,8 +131,9 @@ def get_interference_per_entity(
 def save_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     metadata_filtered: List[Dict[str, Any]],
+    base_folder: str = 'assets',
 ) -> None:
-    with open(get_interference_per_entity_path(task), "w", encoding="utf-8") as f:
+    with open(get_interference_per_entity_path(task, base_folder=base_folder), "w", encoding="utf-8") as f:
         json.dump(metadata_filtered, f, indent=4)
 
 

@@ -37,6 +37,54 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
+try:
+    import shap
+except ImportError:
+    shap = None  # type: ignore[assignment]
+
+from vision_unlearning.integrations.huggingface import (
+    huggingface_dataset_file_exists,
+    huggingface_dataset_file_download,
+    huggingface_dataset_upload,
+    huggingface_dataset_file_upload,
+)
+from vision_unlearning.datasets.testbed import (
+    get_metadata_filtered,
+    get_target_overwrite,
+    get_generated_dataset_folder,
+    get_generated_dataset_file,
+)
+from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.benchmarks.I_care.configuration import (
+    type_model,
+    type_task,
+    type_unlearning_algorithm,
+    type_me,
+    type_mp,
+    type_s,
+    type_l,
+    type_regression_algorithm,
+    domain_attribute,
+    unlearning_algorithm_to_epochs,
+    s_to_direction,
+    GUI_TO_BACKEND,
+    mp_to_direction,
+    task_to_attributes_of_interest,
+)
+from vision_unlearning.benchmarks.I_care.metadata import (
+    choose_metric_column_interference_per_entity,
+    InterferencePerEntity,
+    get_interference_per_pair,
+    get_interference_per_pair_path,
+    get_interference_per_entity_path,
+    get_interference_per_entity,
+    save_interference_per_entity,
+    save_interference_per_pair,
+    exists_interference_per_pair,
+)
+
+logger = get_logger('I_care')
+
 
 class ResultTemplate(BaseModel):
     recompute_if_exists: bool = False
@@ -371,8 +419,9 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
         ax.grid(True, alpha=0.3)
 
 
-        shap.plots.bar(explanations)
-        shap.plots.beeswarm(explanations)
+        if shap is not None:
+            shap.plots.bar(explanations)
+            shap.plots.beeswarm(explanations)
 
         if return_fig:
             return fig, ax
@@ -521,6 +570,11 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
         # whether the model explains variance better than a null/intercept-only model
 
         # Shap
+        if shap is None:
+            raise ImportError(
+                "shap is required for ResultTemplateMetricSimilarityAlignmentMulti._compute_from_scratch. "
+                "Install it with: pip install vision-unlearning[testbed]"
+            )
         X_sample = X.sample(n=min(1000, len(X)), random_state=self.random_state)
         X_sample_preprocessed = model_pipeline.named_steps['preprocessor'].transform(X_sample)
         X_sample_preprocessed_df = pd.DataFrame(X_sample_preprocessed, columns=[feature.split('__')[1] for feature in feature_names])

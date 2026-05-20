@@ -37,6 +37,7 @@ import pytest  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +180,7 @@ class TestGetTargetOverwrite:
 
 class TestShapSerializationRoundtrip:
     def test_roundtrip_preserves_arrays(self) -> None:
-        import shap
+        shap = pytest.importorskip("shap", reason="shap not installed; install vision-unlearning[testbed]")
 
         original = shap.Explanation(
             values=np.array([[1.0, 2.0], [3.0, 4.0]]),
@@ -316,7 +317,7 @@ class TestPlotFromFakeData:
         # RT stores it, and confirm the plot renders. This exercises the
         # Multi RT's plot (including dict_to_explanation) WITHOUT asserting
         # anything about the deferred methodological review items.
-        import shap
+        shap = pytest.importorskip("shap", reason="shap not installed; install vision-unlearning[testbed]")
 
         expl = shap.Explanation(
             values=np.array([[0.1, -0.2], [0.3, 0.05]]),
@@ -361,6 +362,8 @@ def no_remote(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force every HF existence check to False so compute() never hits the
     network and always takes the compute-from-scratch branch."""
     monkeypatch.setattr(vb, "huggingface_dataset_file_exists", lambda *a, **k: False)
+    # Also patch at the call site in result_templates (where the function is locally bound)
+    monkeypatch.setattr(_rt_mod, "huggingface_dataset_file_exists", lambda *a, **k: False)
 
 
 class TestComputeFromScratchMocked:
@@ -370,13 +373,18 @@ class TestComputeFromScratchMocked:
         labels = ["a", "b", "c"]
         meta = _fake_metadata(labels)
         monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
 
         def fake_pair(task: str, index: int, method: str, epochs: int, **k: Any) -> Dict[str, Any]:
             return {lab: {"rmse": float(index + j)} for j, lab in enumerate(labels)}
 
         monkeypatch.setattr(vb, "get_interference_per_pair", fake_pair)
+        monkeypatch.setattr(_rt_mod, "get_interference_per_pair", fake_pair)
         monkeypatch.setattr(
             vb, "get_interference_per_pair_path", lambda *a, **k: "exists"
+        )
+        monkeypatch.setattr(
+            _rt_mod, "get_interference_per_pair_path", lambda *a, **k: "exists"
         )
         monkeypatch.setattr(os.path, "exists", lambda p: p == "exists")
 
@@ -398,6 +406,7 @@ class TestComputeFromScratchMocked:
         labels = ["a", "b", "c"]
         meta = _fake_metadata(labels)
         monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
 
         rt = vb.ResultTemplateSimilarityMatrix(
             task="people",
@@ -478,6 +487,9 @@ class TestComputeFromScratchMocked:
         monkeypatch.setattr(
             vb, "get_interference_per_entity_path", lambda task, **k: path
         )
+        monkeypatch.setattr(
+            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
+        )
 
         rt = vb.ResultTemplateSignificantRelationshipNumerical(
             task="people",
@@ -510,6 +522,9 @@ class TestComputeFromScratchMocked:
         monkeypatch.setattr(
             vb, "get_interference_per_entity_path", lambda task, **k: path
         )
+        monkeypatch.setattr(
+            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
+        )
 
         rt = vb.ResultTemplateSignificantRelationshipCategorical(
             task="people",
@@ -530,9 +545,11 @@ class TestComputeFromScratchMocked:
         # assert the pipeline produces a well-formed result; methodological
         # review items (entity-leaking split, MAPE, feature strip) are
         # deferred and intentionally NOT tested here.
+        pytest.importorskip("shap", reason="shap not installed; install vision-unlearning[testbed]")
         labels = [f"p{i}" for i in range(8)]
         meta = _fake_metadata(labels)
         monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
 
         def fake_im_compute(self: Any) -> Dict[str, Any]:
             res = []
