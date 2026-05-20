@@ -16,6 +16,15 @@ jobs:
       - run: pip install poetry
       - run: poetry install --no-interaction --no-root
       - run: |
+          echo '----------- Mypy check (install stubs silently) ---------------'
+          # First pass: install any missing type stubs. Suppress output to avoid noise.
+          # Flags must match the Makefile exactly to ensure CI and local checks agree.
+          poetry run mypy --install-types --non-interactive ./vision_unlearning > /dev/null 2>&1 || true
+
           echo '----------- Mypy check ---------------'
-          poetry run mypy --install-types --non-interactive ./vision_unlearning
-          poetry run mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
+          poetry run mypy \
+            --no-warn-incomplete-stub \
+            --disable-error-code import-untyped \
+            --explicit-package-bases \
+            --check-untyped-defs \
+            ./vision_unlearning
