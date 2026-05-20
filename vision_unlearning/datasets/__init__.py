@@ -9,7 +9,7 @@ try:
     from vision_unlearning.datasets.imagenette import *
     from vision_unlearning.datasets.local import *
     from vision_unlearning.datasets.others import *
-except ImportError:
+except ModuleNotFoundError:
     pass
 
 # testbed is intentionally NOT guarded: it is needed by I_care.metadata and
