@@ -285,9 +285,9 @@ Across all tasks, the benchmark results are summarized in the following files:
   * Not all results are saved, many are generated on the fly
   * Most results are computed by `5a. Analyze results.ipynb`... but see also `5b. Interactive exploring.ipynb` and what is computed on-the-fly in Forgetty
   * Also, for historical reasons some results are still in weird folders
-    * `display_results_many`, compiuted by `1. Equalize.ipynb`, not saved
+    * `display_results_many`, computed by `1. Equalize.ipynb`, not saved
     * display_interesting_interferences f'assets/datasets/interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}_summary_{metric}_{seed}.png' --> maybe should not be saved at all...
-  * This whole thing is being refactored for standarization...
+  * This whole thing is being refactored for standardization...
 
 # Citation
 

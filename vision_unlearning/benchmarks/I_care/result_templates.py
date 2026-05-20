@@ -980,7 +980,7 @@ class ResultTemplateCountSignificantRelationship(ResultTemplate):
                         continue
                     except Exception as e:
                         logger.warning(f'Combination {self.model}, {self.task}, {unlearning_algorithm}, {interference_entity}, {attribute} failled with {e}')
-                        assert 1 == 0  # continue
+                        continue
                     results.append([self.model, self.task, unlearning_algorithm, interference_entity, attribute, data['result']['significant']])
         df = pd.DataFrame(results, columns=['model', 'task', 'unlearning_algorithm', 'interference_entity', 'attribute', 'significant'])
         #TODO

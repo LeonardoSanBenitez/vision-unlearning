@@ -264,7 +264,7 @@ def huggingface_dataset_file_download(
     folder_datasets: str,
     dataset_repository: str,
     file_path: str,
-    token: str,
+    token: Optional[str],
     folder_cache: str = '/tmp/huggingface_cache',
 ) -> None:
     '''
@@ -372,7 +372,7 @@ def huggingface_dataset_download_parallel(
     dataset_config: str,
     token: str,
     clean: bool = False,
-    folder_cache: str = "C:/tmp/huggingface_cache",
+    folder_cache: str = "/tmp/huggingface_cache",
     hf_prefix: str = "datasets",
     max_workers: int = 12,
 ) -> None:

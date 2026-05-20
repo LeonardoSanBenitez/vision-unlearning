@@ -4,7 +4,7 @@ from functools import partial
 import numpy as np
 import torch
 from PIL import Image
-from torchmetrics.multimodal.clip_score import CLIPScore, _clip_score_update
+from torchmetrics.multimodal.clip_score import CLIPScore
 
 from vision_unlearning.metrics.base import Metric
 
@@ -111,6 +111,12 @@ class MetricImageTextSimilarity(Metric):
 
         tensors: List[torch.Tensor] = [self._load_image(img) for img in images]
         texts_repeated: List[str] = [text] * len(images)
+
+        try:
+            from torchmetrics.multimodal.clip_score import _clip_score_update
+        except ImportError:
+            # Private symbol removed in a newer torchmetrics — fall back to the serial path.
+            return [self.score(img, text) for img in images]
 
         with torch.inference_mode():
             per_pair_scores, _ = _clip_score_update(
