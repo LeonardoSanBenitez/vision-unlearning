@@ -6,7 +6,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from vision_unlearning.metrics.text_and_text import MetricTextTextSimilarity
 from vision_unlearning.utils.logger import get_logger
 
 
@@ -56,7 +55,7 @@ def get_target_overwrite(
         # target does needs to have an article,for example: picture of a poodle
         target_overwrite = 'a cat'
         article = 'an' if (target[0].lower() in 'aeiou') else 'a'
-        target = re.sub(r'\bdog\b', '', target, flags=re.IGNORECASE)
+        #target = re.sub(r'\bdog\b', '', target, flags=re.IGNORECASE)
         target = f"{article} {target}"
     elif task == 'scenes':
         # target does needs to have an article,for example: picture of a phone_booth
@@ -115,6 +114,16 @@ def exists_metadata_filtered(
 ) -> bool:
     return os.path.exists(get_metadata_filtered_path(task, base_folder=base_folder))
 
+
+def get_attribute_for_entity(
+    metadata_filtered: List[Dict[str, Any]],
+    entity_name: str, 
+    attribute: str,
+) -> Any:
+    for item in metadata_filtered:
+        if item['name'] == entity_name:
+            return item[attribute]
+    return None
 
 ##########################################
 # Training dataset
@@ -181,30 +190,82 @@ def exists_unlearned_dataset(
     generate_dataset_seeds: List[int],
     prompts: List[str],
 ) -> bool:
+    """Return True if the entity dataset folder contains all expected on_* images.
+
+    Entity folders now contain only lora_state='on' (unlearned model) images.
+    Baseline lora_state='off' images live in the separate baseline folder; see
+    get_baseline_dataset_folder() and get_off_image_path().
+
+    Expected file count: len(seeds) * len(prompts) on_*.png files + 1 metadata.jsonl.
+    """
     if not os.path.exists(generated_dataset_output_path):
         return False
 
     file_list = os.listdir(generated_dataset_output_path)
     file_list = [f for f in file_list if f != '.ipynb_checkpoints']
 
-    if len(file_list) != len(generate_dataset_seeds) * len(['on', 'off']) * len(prompts) + 1:
+    # Only on_* images are expected in entity folders now.
+    if len(file_list) != len(generate_dataset_seeds) * len(prompts) + 1:
         return False
     if not all(filename.endswith('.png') or filename.endswith('.jsonl') for filename in file_list):
         return False
     return True
 
 
+def get_baseline_dataset_folder(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    target: str,
+    base_folder: str = 'assets',
+) -> str:
+    """Return the folder path for method-agnostic baseline (lora_state='off') images.
+
+    Baseline images are generated once per entity by 0_generate_dataset_original.py
+    and shared across all methods.  The folder is distinct from the per-method entity
+    folder returned by get_generated_dataset_folder().
+
+    Convention: assets/datasets/generated_{task}_baseline_{target}/
+    """
+    return os.path.join(base_folder, "datasets", f"generated_{task}_baseline_{target}")
+
+
+def get_off_image_path(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    target: str,
+    method: Literal['munba', 'uce', 'distil'],
+    num_train_epochs: int,
+    seed: int,
+    prompt: str,
+    base_folder: str = 'assets',
+) -> str:
+    """Return the path to a baseline (lora_state='off') image for a given entity/seed/prompt.
+
+    Encapsulates backward-compatibility fallback logic in a single place:
+    1. If the baseline folder (get_baseline_dataset_folder) exists on disk, use it.
+    2. Otherwise fall back to the old entity folder (get_generated_dataset_folder),
+       which was the pre-refactor location for both on_* and off_* images.
+
+    This means existing datasets that contain off_* files in the entity folder continue
+    to work transparently until baseline folders are generated.
+    """
+    baseline_folder = get_baseline_dataset_folder(task, target, base_folder)
+    if os.path.exists(baseline_folder):
+        return os.path.join(baseline_folder, get_generated_dataset_file('off', seed, prompt))
+    # Fallback: old entity folder contains both off and on images.
+    entity_folder = get_generated_dataset_folder(task, method, num_train_epochs, target, base_folder)
+    return os.path.join(entity_folder, get_generated_dataset_file('off', seed, prompt))
+
+
 ##########################################
 # Similarity
 ##########################################
-def get_similarity_clip_path(
+def get_similarity_clip_path(  # deprecated, use ResultTemplateSimilarityMatrix._get_path
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
 ) -> str:
     return os.path.join(base_folder, f"similarity_clip_{task}.json")  # TODO: this should be in the results folder
 
 
-def get_similarity_clip_df(
+def get_similarity_clip_df(  # deprecated, use ResultTemplateSimilarityMatrix._get_similarity_df
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
 ) -> pd.DataFrame:
@@ -213,11 +274,13 @@ def get_similarity_clip_df(
     return df_similarities_clip
 
 
-def calculate_similarity_clip(
+def calculate_similarity_clip(  # deprecated, use ResultTemplateSimilarityMatrix._calculate
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     labels: List[str],
     base_folder: str = 'assets',
-):
+) -> None:
+    # Lazy import: torchmetrics/torch only needed when this function is called.
+    from vision_unlearning.metrics.text_and_text import MetricTextTextSimilarity  # noqa: PLC0415
     clip_text_metric = MetricTextTextSimilarity(metrics=['clip_text'])
 
     # Load existing
@@ -245,7 +308,7 @@ def calculate_similarity_clip(
     return df_similarities_clip
 
 
-def plot_heatmap(df, figsize=None, cmap="viridis", title="Heatmap"):
+def plot_heatmap(df, figsize=None, cmap="viridis", title="Heatmap"):  # deprecated, use ResultTemplateSimilarityMatrix._plot_heatmap
     """
     Plot a heatmap for a square DataFrame with all labels visible.
 

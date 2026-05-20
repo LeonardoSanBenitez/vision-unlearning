@@ -5,6 +5,7 @@ import lpips
 from torchvision import transforms
 from vision_unlearning.metrics.base import Metric
 
+import os
 import tempfile
 import numpy as np
 
@@ -79,6 +80,27 @@ class MetricImageImage(Metric):
         assert len(distances) == len(self.metrics)
         return {k: float(v) for k, v in distances.items()}
 
+    @staticmethod
+    def _pil_or_array_to_path(img: Union[str, Image.Image, "np.ndarray"]) -> "tuple[str, bool]":  # type: ignore[name-defined]
+        """Return (file_path, is_temp).  Caller must unlink when is_temp is True."""
+        if isinstance(img, str):
+            return img, False
+        # Convert numpy array to PIL if needed.
+        if isinstance(img, Image.Image):
+            image_obj = img
+        else:
+            arr = img
+            if arr.dtype != np.uint8:
+                arr = (arr * 255).astype(np.uint8)
+            image_obj = Image.fromarray(arr)
+        # Windows: NamedTemporaryFile holds an exclusive lock while open, so PIL
+        # cannot write to it by name.  Use delete=False, close immediately, then
+        # clean up manually in the caller.
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp.close()
+        image_obj.save(tmp.name, format="PNG")
+        return tmp.name, True
+
     def score(
         self, org_img: Union[str, Image.Image], pred_img: Union[str, Image.Image]
     ) -> Dict[str, float]:
@@ -88,42 +110,15 @@ class MetricImageImage(Metric):
 
         # Otherwise, ensure we have file paths for the underlying libraries by
         # saving non-path inputs to temporary files.
-        with tempfile.NamedTemporaryFile(suffix=".png") as tmp_org, tempfile.NamedTemporaryFile(
-            suffix=".png"
-        ) as tmp_pred:
-            # org path
-            if isinstance(org_img, str):
-                org_path = org_img
-            else:
-                # org_img is PIL.Image or ndarray
-                if isinstance(org_img, Image.Image):
-                    image_obj = org_img
-                else:
-                    # numpy array -> ensure uint8 and create Image
-                    arr = org_img
-                    if arr.dtype != np.uint8:
-                        arr = (arr * 255).astype(np.uint8)
-                    image_obj = Image.fromarray(arr)
-                image_obj.save(tmp_org.name, format="PNG")
-                tmp_org.flush()
-                org_path = tmp_org.name
-
-            # pred path
-            if isinstance(pred_img, str):
-                pred_path = pred_img
-            else:
-                if isinstance(pred_img, Image.Image):
-                    image_obj = pred_img
-                else:
-                    arr = pred_img
-                    if arr.dtype != np.uint8:
-                        arr = (arr * 255).astype(np.uint8)
-                    image_obj = Image.fromarray(arr)
-                image_obj.save(tmp_pred.name, format="PNG")
-                tmp_pred.flush()
-                pred_path = tmp_pred.name
-
+        org_path, org_is_temp = self._pil_or_array_to_path(org_img)
+        pred_path, pred_is_temp = self._pil_or_array_to_path(pred_img)
+        try:
             return self._score_from_paths(org_path, pred_path)
+        finally:
+            if org_is_temp:
+                os.unlink(org_path)
+            if pred_is_temp:
+                os.unlink(pred_path)
 
     def score_batch(
         self,
