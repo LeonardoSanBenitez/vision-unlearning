@@ -192,24 +192,27 @@ def exists_unlearned_dataset(
 ) -> bool:
     """Return True if the entity dataset folder contains all expected on_* images.
 
-    Entity folders now contain only lora_state='on' (unlearned model) images.
-    Baseline lora_state='off' images live in the separate baseline folder; see
-    get_baseline_dataset_folder() and get_off_image_path().
+    Only on_* (unlearned model) images are counted. off_* files that may exist in
+    legacy entity folders (pre-baseline-refactor data) are ignored so that old datasets
+    remain valid without requiring a re-generation pass.
 
-    Expected file count: len(seeds) * len(prompts) on_*.png files + 1 metadata.jsonl.
+    Baseline lora_state='off' images live in the separate baseline folder after the
+    refactor; see get_baseline_dataset_folder() and get_off_image_path().
+
+    Expected: len(seeds) * len(prompts) on_*.png files + 1 metadata.jsonl.
     """
     if not os.path.exists(generated_dataset_output_path):
         return False
 
-    file_list = os.listdir(generated_dataset_output_path)
-    file_list = [f for f in file_list if f != '.ipynb_checkpoints']
+    all_files = os.listdir(generated_dataset_output_path)
+    all_files = [f for f in all_files if f != '.ipynb_checkpoints']
 
-    # Only on_* images are expected in entity folders now.
-    if len(file_list) != len(generate_dataset_seeds) * len(prompts) + 1:
-        return False
-    if not all(filename.endswith('.png') or filename.endswith('.jsonl') for filename in file_list):
-        return False
-    return True
+    # Count only on_*.png images; off_* files (legacy) are intentionally ignored.
+    on_images = [f for f in all_files if f.startswith('on_') and f.endswith('.png')]
+    has_metadata = any(f.endswith('.jsonl') for f in all_files)
+
+    expected_on_count = len(generate_dataset_seeds) * len(prompts)
+    return len(on_images) == expected_on_count and has_metadata
 
 
 def get_baseline_dataset_folder(

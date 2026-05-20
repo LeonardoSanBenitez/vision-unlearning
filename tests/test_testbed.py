@@ -4,7 +4,8 @@ Covers:
 - get_baseline_dataset_folder(): path construction.
 - get_off_image_path(): baseline folder preferred when it exists on disk;
   falls back to entity folder when baseline folder is absent.
-- exists_unlearned_dataset(): counts only on_* images now (not on_* + off_*).
+- exists_unlearned_dataset(): counts only on_* images; off_* files in legacy
+  entity folders are ignored for backward compatibility.
 """
 from __future__ import annotations
 
@@ -104,7 +105,11 @@ class TestGetOffImagePath(unittest.TestCase):
 
 
 class TestExistsUnlearnedDataset(unittest.TestCase):
-    """exists_unlearned_dataset counts only on_* images (no off_* any more)."""
+    """exists_unlearned_dataset counts only on_* images; off_* files are ignored.
+
+    Backward-compat: legacy entity folders that contain both on_* and off_* images
+    (generated before the baseline-folder refactor) must still pass this check.
+    """
 
     def _write_files(self, folder: str, filenames: list) -> None:
         os.makedirs(folder, exist_ok=True)
@@ -126,16 +131,22 @@ class TestExistsUnlearnedDataset(unittest.TestCase):
             self._write_files(tmp, files)
             self.assertTrue(exists_unlearned_dataset(tmp, seeds, prompts))
 
-    def test_returns_false_when_extra_off_images_present(self) -> None:
-        """Old mixed-folder format (on_ + off_) has too many files — should return False."""
+    def test_returns_true_when_legacy_off_images_also_present(self) -> None:
+        """Old mixed-folder format (on_ + off_) is valid — off_* files are ignored.
+
+        Backward compatibility: datasets generated before the baseline refactor store
+        both on_* and off_* images in the entity folder.  exists_unlearned_dataset must
+        accept those folders so that 1_unlearn_from_metadata.py does not raise an
+        AssertionError when processing already-generated entities.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             seeds = [42]
             prompts = ['An image of Alice']
-            # Old format: 1 on_ + 1 off_ + metadata.jsonl = 3 files
-            # New expected count: 1 * 1 + 1 = 2 files → mismatch → False
+            # Old format: 1 on_ + 1 off_ + metadata.jsonl
+            # off_* must be ignored; only on_* count matters.
             files = ['on_42_An image of Alice.png', 'off_42_An image of Alice.png', 'metadata.jsonl']
             self._write_files(tmp, files)
-            self.assertFalse(exists_unlearned_dataset(tmp, seeds, prompts))
+            self.assertTrue(exists_unlearned_dataset(tmp, seeds, prompts))
 
     def test_returns_false_when_too_few_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
