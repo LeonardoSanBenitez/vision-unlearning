@@ -9,5 +9,6 @@ services:
       - ./:/src
     environment:
       - PYTHONPATH=.:/src
+      - HF_HUB_ETAG_TIMEOUT=120
     ports:
        - 8889:8889

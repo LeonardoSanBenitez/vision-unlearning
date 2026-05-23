@@ -285,6 +285,73 @@ class TestEmbeddingUnlearningProfileCompute:
         assert ratio > 1.0, f"Expected ratio > 1 for strongly-shifted entity, got {ratio}"
         assert data["result"]["targeted"] is True
 
+    def test_ratio_source_inline_when_no_ipe(self, tmp_path: Any) -> None:
+        """When no IPE file is present, ratio_source must be 'inline'."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+
+        _write_baseline_file(tmp_path, task, method, epochs)
+        _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
+        # No IPE file written
+
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        original_epochs = rt_mod.unlearning_algorithm_to_epochs
+        rt_mod.unlearning_algorithm_to_epochs = {"people": {"distil": epochs, "uce": 0, "munba": 200}}
+        try:
+            rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                task=task,
+                unlearning_algorithm=method,
+                entity=FORGOTTEN_ENTITY,
+                base_folder=str(tmp_path),
+                save_outputs=False,
+            )
+            data = rt._compute_from_scratch()
+        finally:
+            rt_mod.unlearning_algorithm_to_epochs = original_epochs
+
+        assert data["result"]["ratio_source"] == "inline", (
+            "ratio_source must be 'inline' when IPE file is absent"
+        )
+
+    def test_ratio_source_ipe_when_ipe_present(self, tmp_path: Any) -> None:
+        """When IPE file has the ratio column, ratio_source must be 'ipe'."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+
+        _write_baseline_file(tmp_path, task, method, epochs)
+        _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
+        # Write IPE with ratio for FORGOTTEN_ENTITY
+        col_ratio = f"metric_{method}_{epochs}_embedding_specificity_ratio (↑)"
+        ipe_rows = [{"name": ent, col_ratio: 1.8 if ent == FORGOTTEN_ENTITY else 1.0}
+                    for ent in ENTITIES]
+        ipe_path = str(tmp_path / f"interference_per_entity_{task}.json")
+        with open(ipe_path, "w", encoding="utf-8") as f:
+            json.dump(ipe_rows, f)
+
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        original_epochs = rt_mod.unlearning_algorithm_to_epochs
+        rt_mod.unlearning_algorithm_to_epochs = {"people": {"distil": epochs, "uce": 0, "munba": 200}}
+        try:
+            rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                task=task,
+                unlearning_algorithm=method,
+                entity=FORGOTTEN_ENTITY,
+                base_folder=str(tmp_path),
+                save_outputs=False,
+            )
+            data = rt._compute_from_scratch()
+        finally:
+            rt_mod.unlearning_algorithm_to_epochs = original_epochs
+
+        assert data["result"]["ratio_source"] == "ipe", (
+            "ratio_source must be 'ipe' when IPE file has the ratio column for this entity"
+        )
+        assert math.isclose(data["result"]["embedding_specificity_ratio"], 1.8, rel_tol=1e-6), (
+            "Ratio value must match IPE when source is 'ipe'"
+        )
+
     def test_missing_baseline_raises(self, tmp_path: Any) -> None:
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         original_epochs = rt_mod.unlearning_algorithm_to_epochs
@@ -418,6 +485,45 @@ class TestEmbeddingForgettingEfficiencyCompute:
         assert isinstance(result["mean_ratio"], float)
         assert isinstance(result["std_ratio"], float)
         assert isinstance(result["spearman_r"], float)
+
+    def test_n_valid_matches_non_nan_ratios(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """n_valid must equal the number of entities with non-NaN ratios."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+        # Write IPE where only 3 of 5 entities have a non-NaN ratio
+        col_clip = f"metric_{method}_{epochs}_emitter_average_clip_diff (↑)"
+        col_ratio = f"metric_{method}_{epochs}_embedding_specificity_ratio (↑)"
+        rows = []
+        for i, ent in enumerate(ENTITIES):
+            row: Dict[str, Any] = {"name": ent, col_clip: float(-5.0 - i)}
+            if i < 3:
+                row[col_ratio] = float(1.5 + i * 0.1)  # valid for first 3 entities
+            # Last 2 entities have no ratio (simulates missing IPE data)
+            rows.append(row)
+        ipe_path = str(tmp_path / f"interference_per_entity_{task}.json")
+        with open(ipe_path, "w", encoding="utf-8") as f:
+            json.dump(rows, f)
+
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
+                            {"people": {"distil": epochs, "uce": 0, "munba": 200}})
+        rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
+            task=task,
+            unlearning_algorithm=method,
+            base_folder=str(tmp_path),
+            save_outputs=False,
+            n_permutations=50,
+        )
+        data = rt._compute_from_scratch()
+        result = data["result"]
+        assert result["n_valid"] == 3, (
+            f"Expected n_valid=3 (3 entities with valid ratio), got {result['n_valid']}"
+        )
+        assert result["n_entities"] == len(ENTITIES), (
+            f"n_entities must count ALL entities, got {result['n_entities']}"
+        )
+        assert result["n_valid"] <= result["n_entities"]
 
     def test_ratios_read_from_ipe_not_recomputed(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch

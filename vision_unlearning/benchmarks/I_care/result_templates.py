@@ -1688,10 +1688,24 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
       Points are coloured by the entity's self-interference (clip_diff) so that
       collateral damage is immediately visible.
     - Numeric summary: self-displacement magnitude (L2 norm), mean retained
-      displacement, ``embedding_specificity_ratio`` (cosine-distance of
-      self-displacement vs mean retained-entity displacement; same metric
-      written to *interference_per_entity_{task}.json* by
+      displacement, ``embedding_specificity_ratio`` (*directional* specificity,
+      cosine-distance of self-displacement vs mean retained-entity displacement;
+      same metric written to *interference_per_entity_{task}.json* by
       "4. Compute interference per entity.py").
+
+    **Metric note (directional vs. magnitude)**:
+    The ``embedding_specificity_ratio`` uses cosine distance and therefore captures
+    the *direction* of embedding change, not its magnitude.  A ratio > 1 means the
+    forgotten entity's embedding shifts in a more novel direction than the average
+    retained entity — this is *directional specificity*.  This is distinct from an
+    L2-based magnitude specificity (which would ask whether the shift is larger in
+    absolute terms).  The displacement bars on the right plot use L2 norm; the
+    specificity ratio shown in the title uses cosine distance.
+
+    **Provenance field**: each result includes ``ratio_source`` ("ipe" when the ratio
+    was read from *interference_per_entity_{task}.json*, "inline" when it was computed
+    from the embedding files directly because the IPE column was absent).  "ipe" is
+    the canonical value; "inline" is a transitional fallback.
 
     **Interpretation**:
     - Specificity ratio >> 1 and large self-displacement → targeted forgetting.
@@ -1844,11 +1858,13 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
                 f"{val:.2f}",
                 ha="center", va="bottom", fontsize=9,
             )
-        ax2.set_ylabel("Embedding displacement (L2 norm)")
+        ax2.set_ylabel("Embedding displacement (L2 norm; bars only)")
+        ratio_source = res.get("ratio_source", "unknown")
         ax2.set_title(
-            f"Displacement magnitude\n"
-            f"Embedding specificity ratio: {spec_ratio:.3f} "
-            f"({'targeted' if spec_ratio > 1 else 'diffuse'})"
+            f"Displacement magnitude (L2) + directional specificity ratio (cosine)\n"
+            f"Specificity ratio: {spec_ratio:.3f} "
+            f"({'targeted' if spec_ratio > 1 else 'diffuse'}) "
+            f"[source: {ratio_source}]"
         )
         ax2.axhline(0, color="gray", linewidth=0.5)
 
@@ -1968,6 +1984,7 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         # column is absent (e.g. in tests or before the pipeline has been run).
         hf_entity = self._resolve_hf_entity()
         embedding_specificity_ratio: float = float("nan")
+        ratio_source: str = "inline"  # updated to "ipe" if successfully read from IPE
         ipe_path = os.path.join(self.base_folder, f"interference_per_entity_{self.task}.json")
         if os.path.exists(ipe_path):
             with open(ipe_path, "r", encoding="utf-8") as _f:
@@ -1980,12 +1997,15 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
                 for row in ipe_list:
                     if row.get("name") == self.entity and ratio_col in row and row[ratio_col] is not None:
                         embedding_specificity_ratio = float(row[ratio_col])
+                        ratio_source = "ipe"
                         break
             except ValueError:
                 pass  # Column absent; fall through to inline computation below
 
         if np.isnan(embedding_specificity_ratio):
             # Fallback: compute inline from the already-loaded embedding matrices.
+            # ratio_source remains "inline" to flag that this is a transitional value,
+            # not the canonical IPE-derived value.
             cos_dist_self = self._cosine_distance(on_mat[forgotten_idx], off_mat[forgotten_idx])
             cos_dists_others = [
                 self._cosine_distance(on_mat[i], off_mat[i])
@@ -2023,6 +2043,7 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
                 "retained_displacement_magnitudes": retained_displacements,
                 "mean_retained_displacement": mean_retained,
                 "embedding_specificity_ratio": embedding_specificity_ratio,
+                "ratio_source": ratio_source,  # "ipe" = canonical; "inline" = fallback
                 "targeted": embedding_specificity_ratio > 1.0,
                 "pca_explained_variance_ratio": pca.explained_variance_ratio_.tolist(),
             },
@@ -2053,17 +2074,35 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
       entity, with Spearman correlation and a permutation test (n_permutations
       resamples; parametric t-tests are invalid here because embedding vectors
       from the same model are correlated by architecture and data).
-    - Numeric summary: mean/std of ratio, fraction of entities with ratio > 1,
-      Spearman r between ratio and self-clip_diff, permutation p-value.
+    - Numeric summary: ``n_total`` (all entities in task), ``n_valid`` (entities
+      with non-NaN ratio — typically those for which interference_per_pair files
+      were available), mean/std of ratio, fraction of entities with ratio > 1
+      *among valid entities*, Spearman r between ratio and self-clip_diff,
+      permutation p-value.
+
+    **Metric note (directional vs. magnitude)**:
+    ``embedding_specificity_ratio`` uses cosine distance (*directional* specificity).
+    A ratio > 1 means the forgotten entity shifts in a more novel direction than the
+    average retained entity.  This is distinct from an L2-based magnitude ratio.
+    Both numerator (self cosine distance) and denominator (mean retained cosine
+    distance) are stored separately so a reader can distinguish "ratio is low because
+    target barely moves" from "ratio is low because retained entities move MORE".
+
+    **Important caveat on n_valid**:
+    ``n_valid`` is typically far smaller than ``n_total`` because
+    ``embedding_specificity_ratio`` requires *interference_per_pair* files for each
+    entity.  Results from a small ``n_valid`` (e.g. 19/100) are underpowered and
+    should be treated as *preliminary*.  The permutation test p-values are reported
+    with ``n_valid`` in the title for transparency.
 
     **Interpretation**:
     - A method with most ratios >> 1 surgically targets each forgotten entity
       in embedding space without disturbing retained embeddings.
     - A high Spearman r (ratio vs. clip_diff) means embedding-space specificity
       and image-level forgetting agree: the method is consistently targeted at
-      both levels.  For UCE our data show r ≈ -0.18 (not significant) whereas
-      for distil r ≈ -0.69 (Spearman; p < permutation threshold): the two
-      signals decouple for UCE, consistent with the concealment hypothesis
+      both levels.  For UCE our data show r ≈ -0.14 (not significant) whereas
+      for distil r ≈ -0.12 (not significant at n_valid=19): the two signals
+      decouple for UCE, consistent with the concealment hypothesis
       (Sharma et al., arXiv 2409.05668).
 
     **Relationship to other RTs**:
@@ -2113,12 +2152,14 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
         ax.axhline(1.0, color="black", linewidth=1.0, linestyle="--", label="ratio = 1")
         ax.set_xticks(x)
         ax.set_xticklabels(sorted_names, rotation=90, fontsize=5)
-        ax.set_ylabel("Embedding specificity ratio (cosine)")
+        n_valid = res.get("n_valid", res["n_entities"])
+        n_total = res["n_entities"]
+        ax.set_ylabel("Directional specificity ratio (cosine)")
         ax.set_title(
             f"Specificity ratio per entity\n"
             f"Method: {meta['unlearning_algorithm']}, Task: {meta['task'].title()}\n"
-            f"Mean={res['mean_ratio']:.3f}, "
-            f"{res['fraction_above_1']:.0%} > 1 (n={res['n_entities']})"
+            f"Mean={res['mean_ratio']:.3f} (n_valid={n_valid}/{n_total}), "
+            f"{res['fraction_above_1']:.0%} > 1 among valid"
         )
         ax.legend(fontsize=8)
 
@@ -2141,13 +2182,15 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
         ax2.axhline(0.0, color="gray", linewidth=0.5, linestyle="--")
         spearman_r = res["spearman_r"]
         perm_p = res["permutation_pvalue"]
+        n_valid = res.get("n_valid", res["n_entities"])
+        n_total = res["n_entities"]
         sig_str = "significant" if perm_p < meta["significance_threshold"] else "not significant"
-        ax2.set_xlabel("Embedding specificity ratio (cosine)")
+        ax2.set_xlabel("Directional specificity ratio (cosine)")
         ax2.set_ylabel("Self clip_diff (image-level forgetting)")
         ax2.set_title(
             f"Specificity vs image-level forgetting\n"
             f"Spearman r={spearman_r:.3f}, "
-            f"permutation p={perm_p:.4f} ({sig_str})"
+            f"permutation p={perm_p:.4f} ({sig_str}, n_valid={n_valid}/{n_total})"
         )
 
         fig.suptitle(
@@ -2227,6 +2270,8 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
 
         ratios_arr = np.array(ratios, dtype=float)
         valid_ratios = ratios_arr[~np.isnan(ratios_arr)]
+        n_total = len(ratios)
+        n_valid = int(len(valid_ratios))
         mean_ratio = float(np.nanmean(ratios_arr))
         std_ratio = float(np.nanstd(ratios_arr))
         fraction_above_1 = float(np.mean(valid_ratios > 1.0)) if len(valid_ratios) > 0 else float("nan")
@@ -2264,11 +2309,26 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
                 "ratio_col": ratio_col,
                 "concealment_reference": "Sharma et al., arXiv 2409.05668",
                 "pinpoint_reference": "Holistic Unlearning Benchmark (ICCV 2025)",
+                "note_n_valid": (
+                    "n_valid may be far smaller than n_entities because "
+                    "embedding_specificity_ratio requires interference_per_pair files. "
+                    "Results based on small n_valid are preliminary."
+                ),
+                "note_components": (
+                    "The ratio numerator (self cosine distance) and denominator "
+                    "(mean retained cosine distance) are not separately stored in "
+                    "interference_per_entity_{task}.json. To distinguish 'ratio low "
+                    "because target barely moves' from 'ratio low because retained "
+                    "entities move MORE', inspect EmbeddingUnlearningProfile outputs "
+                    "per entity, or re-run '4. Compute interference per entity.py' "
+                    "after adding those columns."
+                ),
             },
             "result": {
                 "entity_names": entity_names,
                 "embedding_specificity_ratios": ratios,
-                "n_entities": len(ratios),
+                "n_entities": n_total,
+                "n_valid": n_valid,
                 "mean_ratio": mean_ratio,
                 "std_ratio": std_ratio,
                 "fraction_above_1": fraction_above_1,
