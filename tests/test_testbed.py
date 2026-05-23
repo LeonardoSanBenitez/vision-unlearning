@@ -1089,5 +1089,124 @@ class TestGetOffImagePathHFDownloadCascade(unittest.TestCase):
             self.assertEqual(path, os.path.join(shared_folder, expected_filename))
 
 
+class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
+    """compute(): step 2 — data absent locally but present on HuggingFace.
+
+    Verifies that:
+    - huggingface_dataset_exists is called with the correct path_in_repo.
+    - huggingface_dataset_download is called with the correct path_in_repo.
+    - compute() returns the folder_path after a successful download.
+    - The HF-side path uses the datasets/ prefix (hf_path_in_repo), not the bare
+      config name — regression for the bug where baselines were uploaded/downloaded
+      from the HF repo root instead of datasets/.
+    """
+
+    def _write_files_to_folder(self, folder: str, seeds: list, prompts: list, prefix: str = 'off') -> None:
+        os.makedirs(folder, exist_ok=True)
+        for seed in seeds:
+            for prompt in prompts:
+                fname = f'{prefix}_{seed:02d}_{prompt}.png'
+                open(os.path.join(folder, fname), 'w').close()
+        open(os.path.join(folder, 'metadata.jsonl'), 'w').close()
+
+    def test_baseline_hf_download_uses_correct_path_in_repo(self) -> None:
+        """compute() for a shared baseline dataset uses hf_path_in_repo
+        (e.g. 'datasets/generated_breeds_baseline') not the bare config name
+        when calling huggingface_dataset_exists and huggingface_dataset_download."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of a griffon bruxellois dog']
+            ds = GeneratedDataset(task='breeds', base_folder=tmp)
+
+            def fake_download(folder_datasets: str, dataset_repository: str,
+                              dataset_config: str, token: str, path_in_repo: str = None) -> None:  # type: ignore[assignment]
+                # Simulate HF download: write files to the local folder
+                self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='off')
+
+            mock_exists = MagicMock(return_value=True)
+
+            with patch(
+                'vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                mock_exists,
+            ):
+                with patch(
+                    'vision_unlearning.integrations.huggingface.huggingface_dataset_download',
+                    side_effect=fake_download,
+                ) as mock_download:
+                    result = ds.compute(seeds=seeds, prompts=prompts)
+
+            self.assertEqual(result, ds.folder_path)
+            # exists check must use path_in_repo = 'datasets/generated_breeds_baseline'
+            exists_kwargs = mock_exists.call_args.kwargs
+            self.assertEqual(
+                exists_kwargs.get('path_in_repo'),
+                'datasets/generated_breeds_baseline',
+                "huggingface_dataset_exists must use hf_path_in_repo (datasets/ prefix)",
+            )
+            # download must also use the same path_in_repo
+            download_kwargs = mock_download.call_args.kwargs
+            self.assertEqual(
+                download_kwargs.get('path_in_repo'),
+                'datasets/generated_breeds_baseline',
+                "huggingface_dataset_download must use hf_path_in_repo (datasets/ prefix)",
+            )
+
+    def test_entity_dataset_hf_download_uses_correct_path_in_repo(self) -> None:
+        """compute() for an entity dataset downloads with the correct path_in_repo."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of a griffon bruxellois dog']
+            ds = GeneratedDataset(task='breeds', target='a griffon bruxellois dog',
+                                  method='uce', num_train_epochs=0, base_folder=tmp)
+
+            def fake_download(folder_datasets: str, dataset_repository: str,
+                              dataset_config: str, token: str, path_in_repo: str = None) -> None:  # type: ignore[assignment]
+                self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='on')
+
+            mock_exists = MagicMock(return_value=True)
+
+            with patch(
+                'vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                mock_exists,
+            ):
+                with patch(
+                    'vision_unlearning.integrations.huggingface.huggingface_dataset_download',
+                    side_effect=fake_download,
+                ) as mock_download:
+                    result = ds.compute(seeds=seeds, prompts=prompts)
+
+            self.assertEqual(result, ds.folder_path)
+            expected_path = f'datasets/{ds.hf_config_name}'
+            exists_kwargs = mock_exists.call_args.kwargs
+            self.assertEqual(
+                exists_kwargs.get('path_in_repo'), expected_path,
+                "huggingface_dataset_exists must use hf_path_in_repo (datasets/ prefix)",
+            )
+            download_kwargs = mock_download.call_args.kwargs
+            self.assertEqual(
+                download_kwargs.get('path_in_repo'), expected_path,
+                "huggingface_dataset_download must use hf_path_in_repo (datasets/ prefix)",
+            )
+
+    def test_compute_skips_hf_when_local_data_present(self) -> None:
+        """compute() does NOT call HuggingFace when data is already present locally."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of a griffon bruxellois dog']
+            ds = GeneratedDataset(task='breeds', base_folder=tmp)
+            # Pre-populate local folder so exists() returns True
+            self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='off')
+
+            mock_hf_exists = MagicMock()
+            with patch(
+                'vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                mock_hf_exists,
+            ):
+                result = ds.compute(seeds=seeds, prompts=prompts)
+
+            self.assertEqual(result, ds.folder_path)
+            mock_hf_exists.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
