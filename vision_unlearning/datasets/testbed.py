@@ -248,20 +248,55 @@ def get_off_image_path(
     seed: int,
     prompt: str,
     base_folder: str = 'assets',
+    seeds: Optional[List[int]] = None,
+    prompts: Optional[List[str]] = None,
 ) -> str:
     """Return the path to a baseline (lora_state='off') image for a given entity/seed/prompt.
 
-    Fallback logic:
-    1. If the shared task-level baseline folder exists, use it (preferred — generated once
-       per task by 0_generate_dataset_original.py).
-    2. Otherwise fall back to the legacy entity folder (get_generated_dataset_folder),
+    Fallback / download cascade:
+    1. If the shared task-level baseline folder exists locally, use it (preferred).
+    2. If ``seeds`` and ``prompts`` (the *full* task-level lists) are provided and the
+       baseline folder is absent locally, attempt to download it from HuggingFace via
+       ``GeneratedDataset(task, method=None).compute(seeds, prompts)``.  This mirrors
+       the OO cascade: local → HF → scratch.  If HF has the data it is downloaded; if
+       not, ``_compute_from_scratch`` is called (which requires the base SD pipeline).
+    3. Otherwise fall back to the legacy entity folder (get_generated_dataset_folder),
        which was the pre-refactor location for both on_* and off_* images.
+
+    Parameters
+    ----------
+    task, target, method, num_train_epochs:
+        Used for the legacy entity-folder fallback (step 3) and to identify the baseline.
+    seed, prompt:
+        Identify the specific image file to return.
+    base_folder:
+        Root assets directory.
+    seeds, prompts:
+        Full task-level seed and prompt lists — required for ``exists()`` and
+        ``compute()`` on the shared baseline.  When provided the function will
+        attempt an HF download if the baseline folder is missing locally (step 2).
+        If omitted, the function skips the download attempt and falls back directly
+        to the entity folder (backward-compatible).
     """
-    # 1. Shared task-level baseline (preferred).
+    # 1. Shared task-level baseline already present locally.
     shared_folder = get_shared_baseline_folder(task, base_folder)
     if os.path.exists(shared_folder):
         return os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
-    # 2. Entity folder fallback (pre-refactor mixed on_* + off_* folder).
+
+    # 2. Baseline absent locally — attempt HF download when caller provides full seed/prompt lists.
+    # Only supported for tasks known to GeneratedDataset (_type_task).  'objects' is excluded
+    # because GeneratedDataset does not yet cover that task variant.
+    if seeds is not None and prompts is not None and task in ('breeds', 'scenes', 'people'):
+        # Use the class directly since it is in the same module.
+        # cast: task is narrowed to _type_task by the guard above.
+        from typing import cast as _cast  # noqa: PLC0415
+        baseline_ds = GeneratedDataset(task=_cast(_type_task, task), base_folder=base_folder)
+        baseline_ds.compute(seeds, prompts)
+        # After compute() the shared folder should now exist locally.
+        if os.path.exists(shared_folder):
+            return os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
+
+    # 3. Entity folder fallback (pre-refactor mixed on_* + off_* folder).
     entity_folder = get_generated_dataset_folder(task, method, num_train_epochs, target, base_folder)
     return os.path.join(entity_folder, get_generated_dataset_file('off', seed, prompt))
 
@@ -717,24 +752,34 @@ class GeneratedDataset(BaseModel):
         seed: int,
         prompt: str,
         base_folder: str = 'assets',
+        seeds: Optional[List[int]] = None,
+        prompts: Optional[List[str]] = None,
     ) -> str:
         """Return the path to a baseline (lora_state='off') image.
 
-        Fallback chain:
-        1. Shared task-level baseline folder (preferred).
-        2. Legacy entity folder (pre-refactor mixed on_* + off_* format).
+        Fallback / download cascade:
+        1. Shared task-level baseline folder present locally (preferred).
+        2. If ``seeds`` and ``prompts`` (full task-level lists) are provided and the
+           baseline folder is absent, download it from HuggingFace via
+           ``GeneratedDataset(task, method=None).compute(seeds, prompts)``.
+        3. Legacy entity folder (pre-refactor mixed on_* + off_* format).
 
-        This class method delegates to the module-level get_off_image_path().
-        Both exist; prefer this one for new code using GeneratedDataset.
+        This class method delegates to the module-level get_off_image_path() which
+        implements the same cascade.  Both exist; prefer this classmethod for new
+        code using GeneratedDataset.
 
         Parameters
         ----------
         task, target, method, num_train_epochs:
-            Used only for the legacy entity-folder fallback (step 2).
+            Used for the legacy entity-folder fallback (step 3).
         seed, prompt:
             Identify the specific image file.
         base_folder:
             Root assets directory.
+        seeds, prompts:
+            Full task-level seed and prompt lists.  Required to enable the HF
+            download cascade (step 2).  When omitted the function falls back
+            directly to the entity folder (backward-compatible).
         """
         return get_off_image_path(
             task=task,
@@ -744,6 +789,8 @@ class GeneratedDataset(BaseModel):
             seed=seed,
             prompt=prompt,
             base_folder=base_folder,
+            seeds=seeds,
+            prompts=prompts,
         )
 
 

@@ -924,5 +924,170 @@ class TestComputeFromScratchMetadataJsonl(unittest.TestCase):
                              msg="exists() must return False when metadata.jsonl is absent")
 
 
+class TestGetOffImagePathHFDownloadCascade(unittest.TestCase):
+    """get_off_image_path: HuggingFace download cascade when seeds and prompts are provided.
+
+    When the shared baseline folder is absent locally AND the caller provides the
+    full seeds/prompts lists, get_off_image_path must attempt to download the baseline
+    via GeneratedDataset.compute() before falling back to the entity folder.
+    """
+
+    def _write_baseline_files(
+        self, folder: str, seeds: list, prompts: list
+    ) -> None:
+        os.makedirs(folder, exist_ok=True)
+        for s in seeds:
+            for p in prompts:
+                open(os.path.join(folder, f'off_{s:02d}_{p}.png'), 'w').close()
+        open(os.path.join(folder, 'metadata.jsonl'), 'w').close()
+
+    def test_downloads_baseline_from_hf_when_seeds_and_prompts_provided(self) -> None:
+        """When seeds and prompts are given and the baseline is missing locally,
+        compute() is called on the baseline GeneratedDataset — triggering HF download."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of Colin Powell']
+
+            # Simulate HF download: fake compute() writes the baseline folder to disk.
+            def fake_compute(s: list, p: list, batch_size: int = 16) -> str:
+                shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
+                self._write_baseline_files(shared_folder, s, p)
+                return shared_folder
+
+            with patch.object(
+                _testbed_module.GeneratedDataset,
+                'compute',
+                side_effect=fake_compute,
+            ):
+                path = get_off_image_path(
+                    task='people',
+                    target='Colin Powell',
+                    method='distil',
+                    num_train_epochs=400,
+                    seed=42,
+                    prompt='An image of Colin Powell',
+                    base_folder=tmp,
+                    seeds=seeds,
+                    prompts=prompts,
+                )
+
+            shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            self.assertEqual(path, os.path.join(shared_folder, expected_filename))
+
+    def test_falls_back_to_entity_folder_when_seeds_and_prompts_not_provided(self) -> None:
+        """Without seeds/prompts, the function must NOT attempt HF download
+        and must fall back to the entity folder (backward-compatible)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_compute = MagicMock()
+            with patch.object(_testbed_module.GeneratedDataset, 'compute', mock_compute):
+                path = get_off_image_path(
+                    task='people',
+                    target='Colin Powell',
+                    method='distil',
+                    num_train_epochs=400,
+                    seed=42,
+                    prompt='An image of Colin Powell',
+                    base_folder=tmp,
+                    # seeds and prompts NOT provided
+                )
+
+            mock_compute.assert_not_called()
+            entity_folder = get_generated_dataset_folder(
+                'people', 'distil', 400, 'Colin Powell', base_folder=tmp
+            )
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            self.assertEqual(path, os.path.join(entity_folder, expected_filename))
+
+    def test_falls_back_to_entity_folder_when_hf_download_fails_to_produce_folder(self) -> None:
+        """If compute() is called but the shared folder is still absent after it returns
+        (e.g. HF download failed silently), the function falls back to the entity folder."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # compute() does nothing — baseline folder remains absent.
+            def no_op_compute(s: list, p: list, batch_size: int = 16) -> str:
+                return get_shared_baseline_folder('people', base_folder=tmp)
+
+            with patch.object(
+                _testbed_module.GeneratedDataset,
+                'compute',
+                side_effect=no_op_compute,
+            ):
+                path = get_off_image_path(
+                    task='people',
+                    target='Colin Powell',
+                    method='distil',
+                    num_train_epochs=400,
+                    seed=42,
+                    prompt='An image of Colin Powell',
+                    base_folder=tmp,
+                    seeds=[42],
+                    prompts=['An image of Colin Powell'],
+                )
+
+            entity_folder = get_generated_dataset_folder(
+                'people', 'distil', 400, 'Colin Powell', base_folder=tmp
+            )
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            self.assertEqual(path, os.path.join(entity_folder, expected_filename))
+
+    def test_shared_folder_takes_priority_even_with_seeds_and_prompts(self) -> None:
+        """When the shared baseline folder already exists locally, no HF call should
+        be made — even if seeds and prompts are provided."""
+        with tempfile.TemporaryDirectory() as tmp:
+            shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
+            os.makedirs(shared_folder, exist_ok=True)
+
+            mock_compute = MagicMock()
+            with patch.object(_testbed_module.GeneratedDataset, 'compute', mock_compute):
+                path = get_off_image_path(
+                    task='people',
+                    target='Colin Powell',
+                    method='distil',
+                    num_train_epochs=400,
+                    seed=42,
+                    prompt='An image of Colin Powell',
+                    base_folder=tmp,
+                    seeds=[42],
+                    prompts=['An image of Colin Powell'],
+                )
+
+            mock_compute.assert_not_called()
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            self.assertEqual(path, os.path.join(shared_folder, expected_filename))
+
+    def test_classmethod_forwards_seeds_and_prompts(self) -> None:
+        """GeneratedDataset.get_off_image_path() classmethod correctly forwards
+        seeds and prompts to the module-level function."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of Colin Powell']
+
+            def fake_compute(s: list, p: list, batch_size: int = 16) -> str:
+                shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
+                self._write_baseline_files(shared_folder, s, p)
+                return shared_folder
+
+            with patch.object(
+                _testbed_module.GeneratedDataset,
+                'compute',
+                side_effect=fake_compute,
+            ):
+                path = GeneratedDataset.get_off_image_path(
+                    task='people',
+                    target='Colin Powell',
+                    method='distil',
+                    num_train_epochs=400,
+                    seed=42,
+                    prompt='An image of Colin Powell',
+                    base_folder=tmp,
+                    seeds=seeds,
+                    prompts=prompts,
+                )
+
+            shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            self.assertEqual(path, os.path.join(shared_folder, expected_filename))
+
+
 if __name__ == '__main__':
     unittest.main()
