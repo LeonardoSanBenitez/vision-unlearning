@@ -80,6 +80,9 @@ class TestGetOffImagePath(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
             os.makedirs(shared_folder, exist_ok=True)
+            # Create the expected baseline image so the new existence check passes.
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            open(os.path.join(shared_folder, expected_filename), 'w').close()
 
             path = get_off_image_path(
                 task='people',
@@ -90,7 +93,6 @@ class TestGetOffImagePath(unittest.TestCase):
                 prompt='An image of Colin Powell',
                 base_folder=tmp,
             )
-            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
             self.assertEqual(path, os.path.join(shared_folder, expected_filename))
 
     def test_falls_back_to_entity_folder_when_shared_absent(self) -> None:
@@ -421,6 +423,9 @@ class TestGeneratedDatasetGetOffImagePath(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             shared = GeneratedDataset(task='people', base_folder=tmp)
             os.makedirs(shared.folder_path, exist_ok=True)
+            # Create the expected baseline image so the existence check passes.
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            open(os.path.join(shared.folder_path, expected_filename), 'w').close()
             path = GeneratedDataset.get_off_image_path(
                 task='people', target='Colin Powell',
                 method='distil', num_train_epochs=400,
@@ -1036,6 +1041,9 @@ class TestGetOffImagePathHFDownloadCascade(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
             os.makedirs(shared_folder, exist_ok=True)
+            # Create the expected baseline image so the existence check passes.
+            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
+            open(os.path.join(shared_folder, expected_filename), 'w').close()
 
             mock_compute = MagicMock()
             with patch.object(_testbed_module.GeneratedDataset, 'compute', mock_compute):
@@ -1052,7 +1060,6 @@ class TestGetOffImagePathHFDownloadCascade(unittest.TestCase):
                 )
 
             mock_compute.assert_not_called()
-            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
             self.assertEqual(path, os.path.join(shared_folder, expected_filename))
 
     def test_classmethod_forwards_seeds_and_prompts(self) -> None:
@@ -1206,6 +1213,133 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
 
             self.assertEqual(result, ds.folder_path)
             mock_hf_exists.assert_not_called()
+
+    def test_compute_idempotent_second_call_returns_folder(self) -> None:
+        """Calling compute() twice with the same seeds/prompts returns same folder_path
+        and does not attempt HF access on the second call (idempotency).
+
+        This guards against regressions where re-calling compute() triggers redundant
+        downloads or generations for a caller bug-fix scenario (Cidral review 2026-05-23,
+        question 1: 'is compute() idempotent?').
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42, 43]
+            prompts = ['An image of a griffon bruxellois dog']
+            ds = GeneratedDataset(task='breeds', base_folder=tmp)
+            # Pre-populate local folder so exists() returns True on first call
+            self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='off')
+
+            mock_hf_exists = MagicMock()
+            with patch(
+                'vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                mock_hf_exists,
+            ):
+                result1 = ds.compute(seeds=seeds, prompts=prompts)
+                result2 = ds.compute(seeds=seeds, prompts=prompts)
+
+            # Both calls return the same folder_path.
+            self.assertEqual(result1, ds.folder_path)
+            self.assertEqual(result2, ds.folder_path)
+            # HF is never called on either invocation.
+            mock_hf_exists.assert_not_called()
+
+
+class TestGetOffImagePathSeedPromptValidation(unittest.TestCase):
+    """get_off_image_path raises ValueError when the shared baseline folder exists
+    but does not contain the requested seed/prompt combination.
+
+    This validates the fail-loud contract added per Cidral review 2026-05-23
+    (questions 2 and 3: seed mismatch and metadata_filtered subset tests).
+    """
+
+    def _setup_baseline_folder(
+        self,
+        tmp: str,
+        task: str,
+        seeds: list,
+        prompts: list,
+    ) -> str:
+        """Write a minimal shared baseline folder with off_*.png files."""
+        from vision_unlearning.datasets.testbed import get_shared_baseline_folder
+        shared = get_shared_baseline_folder(task, base_folder=tmp)
+        os.makedirs(shared, exist_ok=True)
+        for seed in seeds:
+            for prompt in prompts:
+                fname = f'off_{seed:02d}_{prompt}.png'
+                open(os.path.join(shared, fname), 'w').close()
+        open(os.path.join(shared, 'metadata.jsonl'), 'w').close()
+        return shared
+
+    def test_seed_mismatch_raises_value_error(self) -> None:
+        """Requesting seed=99 from a baseline generated with seeds=[42,43] raises ValueError.
+
+        If the caller passes a seed that was not in the compute() seed list, the image
+        file will not exist. Rather than silently returning a non-existent path, the
+        function now raises ValueError immediately.
+        """
+        from vision_unlearning.datasets.testbed import get_off_image_path
+        with tempfile.TemporaryDirectory() as tmp:
+            task = 'breeds'
+            seeds = [42, 43]
+            prompt = 'An image of a dog'
+            self._setup_baseline_folder(tmp, task, seeds, [prompt])
+
+            with self.assertRaises(ValueError, msg="Should raise ValueError for unknown seed"):
+                get_off_image_path(
+                    task=task,
+                    target='a dog',
+                    method='distil',
+                    num_train_epochs=400,
+                    seed=99,   # NOT in seeds=[42, 43]
+                    prompt=prompt,
+                    base_folder=tmp,
+                )
+
+    def test_prompt_mismatch_raises_value_error(self) -> None:
+        """Requesting an unknown prompt from a baseline raises ValueError.
+
+        If metadata_filtered is a pruned subset and the baseline was computed only
+        with prompts from that subset, a downstream caller requesting a prompt not
+        in the subset will get a clear error rather than a silently wrong path.
+        (Cidral review 2026-05-23, question 3: metadata_filtered subset test.)
+        """
+        from vision_unlearning.datasets.testbed import get_off_image_path
+        with tempfile.TemporaryDirectory() as tmp:
+            task = 'breeds'
+            seed = 42
+            prompts = ['An image of a dog']
+            self._setup_baseline_folder(tmp, task, [seed], prompts)
+
+            with self.assertRaises(ValueError, msg="Should raise ValueError for unknown prompt"):
+                get_off_image_path(
+                    task=task,
+                    target='a cat',
+                    method='distil',
+                    num_train_epochs=400,
+                    seed=seed,
+                    prompt='An image of a cat',   # NOT in prompts
+                    base_folder=tmp,
+                )
+
+    def test_known_seed_and_prompt_returns_path(self) -> None:
+        """When the seed and prompt are both in the baseline, returns the correct path."""
+        from vision_unlearning.datasets.testbed import get_off_image_path
+        with tempfile.TemporaryDirectory() as tmp:
+            task = 'breeds'
+            seed = 42
+            prompt = 'An image of a dog'
+            self._setup_baseline_folder(tmp, task, [seed], [prompt])
+
+            path = get_off_image_path(
+                task=task,
+                target='a dog',
+                method='distil',
+                num_train_epochs=400,
+                seed=seed,
+                prompt=prompt,
+                base_folder=tmp,
+            )
+            self.assertTrue(os.path.exists(path), "Path should exist in baseline folder")
 
 
 if __name__ == '__main__':

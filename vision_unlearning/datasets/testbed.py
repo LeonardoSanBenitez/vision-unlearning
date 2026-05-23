@@ -253,6 +253,15 @@ def get_off_image_path(
 ) -> str:
     """Return the path to a baseline (lora_state='off') image for a given entity/seed/prompt.
 
+    .. note::
+        This module-level function and ``GeneratedDataset.get_off_image_path()``
+        (classmethod) provide identical functionality.  Both exist because the
+        module-level version predates the ``GeneratedDataset`` class; the classmethod
+        delegates to this function.  New code should prefer the classmethod for
+        consistency with the OO abstraction, but the module-level function is NOT
+        vestigial — it is used by legacy callers and remains the implementation
+        backing both entry points.
+
     Fallback / download cascade:
     1. If the shared task-level baseline folder exists locally, use it (preferred).
     2. If ``seeds`` and ``prompts`` (the *full* task-level lists) are provided and the
@@ -281,7 +290,17 @@ def get_off_image_path(
     # 1. Shared task-level baseline already present locally.
     shared_folder = get_shared_baseline_folder(task, base_folder)
     if os.path.exists(shared_folder):
-        return os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
+        path = os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
+        if not os.path.exists(path):
+            raise ValueError(
+                f"Baseline image not found in shared folder: {path}. "
+                f"The baseline folder exists at {shared_folder} but does not contain "
+                f"an image for seed={seed!r}, prompt={prompt!r}. "
+                f"This usually means the baseline was computed with a different "
+                f"seed list or prompt list than what you are requesting. "
+                f"Re-run '0_generate_dataset_original.py' with the correct seeds and prompts."
+            )
+        return path
 
     # 2. Baseline absent locally — attempt HF download when caller provides full seed/prompt lists.
     # Only supported for tasks known to GeneratedDataset (_type_task).  'objects' is excluded
