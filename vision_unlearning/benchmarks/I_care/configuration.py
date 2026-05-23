@@ -565,6 +565,11 @@ domain_me = [
     "Emitter minus receiver average clip diff",
     "Emitter minus receiver average rmse",
     "Emitter minus receiver average ssim",
+    # Embedding-space specificity: cosine-distance of self-displacement vs mean
+    # retained-entity displacement (computed by "4. Compute interference per entity.py").
+    # Higher is better: ratio >> 1 means unlearning was targeted (forgotten entity
+    # drifted more than retained entities in DINOv2 space).
+    "Embedding specificity ratio",
 ]
 domain_s = [
     "Clip Cosine Similarity",

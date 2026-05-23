@@ -190,6 +190,9 @@ class TestTypeMeContainsEmbeddingSpecificityRatio:
     def test_embedding_specificity_ratio_in_type_me(self) -> None:
         assert "Embedding specificity ratio" in vb.type_me.__args__
 
+    def test_embedding_specificity_ratio_in_domain_me(self) -> None:
+        assert "Embedding specificity ratio" in vb.domain_me
+
     def test_choose_metric_column_embedding_specificity_ratio(self) -> None:
         cols = [
             "metric_distil_400_embedding_specificity_ratio (↑)",

@@ -112,18 +112,29 @@ def _write_entity_file(
 
 
 def _write_interference_per_entity(
-    tmp_path: Any, task: str, method: str, epochs: int
+    tmp_path: Any, task: str, method: str, epochs: int,
+    include_ratio: bool = True,
 ) -> str:
-    """Write a minimal interference_per_entity JSON for testing (optional clip_diff data)."""
+    """Write a minimal interference_per_entity JSON for testing.
+
+    Includes:
+    - clip_diff column (emitter_average_clip_diff) for scatter tests.
+    - embedding_specificity_ratio column when include_ratio=True (required by
+      ResultTemplateEmbeddingForgettingEfficiency._compute_from_scratch).
+    """
     col_clip = f"metric_{method}_{epochs}_emitter_average_clip_diff (↑)"
+    col_ratio = f"metric_{method}_{epochs}_embedding_specificity_ratio (↑)"
     rows = []
     for i, ent in enumerate(ENTITIES):
-        rows.append({
+        row: Dict[str, Any] = {
             "name": ent,
-            col_clip: float(-5.0 - i),           # decreasing clip_diff
-        })
+            col_clip: float(-5.0 - i),       # decreasing clip_diff
+        }
+        if include_ratio:
+            row[col_ratio] = float(1.5 + i * 0.1)  # ratio > 1 for all entities
+        rows.append(row)
     path = str(tmp_path / f"interference_per_entity_{task}.json")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f)
     return path
 
@@ -373,23 +384,19 @@ class TestEmbeddingForgettingEfficiencySerialize:
 
 
 class TestEmbeddingForgettingEfficiencyCompute:
-    """EmbeddingForgettingEfficiency now computes ratios from embedding files directly."""
-
-    def _patch_epochs(self, rt_mod: Any, epochs: int) -> Dict:
-        return {"people": {"distil": epochs, "uce": 0, "munba": 200}}
+    """EmbeddingForgettingEfficiency reads ratios from interference_per_entity file."""
 
     def test_smoke(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Minimal compute run with fake embedding data."""
+        """Minimal compute run: requires IPE file with embedding_specificity_ratio column."""
         task = "people"
         method = "distil"
         epochs = 400
-        _write_all_entity_embedding_files(tmp_path, task, method, epochs)
+        # Write IPE with both ratio and clip_diff columns
+        _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": epochs, "uce": 0, "munba": 200}})
-        monkeypatch.setattr(rt_mod, "get_metadata_filtered",
-                            lambda task, **kw: [{"name": e} for e in ENTITIES])
 
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task=task,
@@ -407,62 +414,90 @@ class TestEmbeddingForgettingEfficiencyCompute:
         assert result["n_entities"] == len(ENTITIES)
         assert len(result["entity_names"]) == len(ENTITIES)
         assert len(result["embedding_specificity_ratios"]) == len(ENTITIES)
-        # fraction_above_1 is computed; exact value depends on random data
         assert 0.0 <= result["fraction_above_1"] <= 1.0
         assert isinstance(result["mean_ratio"], float)
         assert isinstance(result["std_ratio"], float)
-        # No clip_diff data → spearman_r is NaN (no IPE provided)
         assert isinstance(result["spearman_r"], float)
 
-    def test_missing_baseline_raises(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_ratios_read_from_ipe_not_recomputed(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Values in result must match what was written to IPE, not be recomputed."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+        _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
+
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
+                            {"people": {"distil": epochs, "uce": 0, "munba": 200}})
+
+        rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
+            task=task,
+            unlearning_algorithm=method,
+            base_folder=str(tmp_path),
+            save_outputs=False,
+            n_permutations=50,
+        )
+        data = rt._compute_from_scratch()
+
+        # _write_interference_per_entity writes ratio = 1.5 + i*0.1 for entity i
+        expected_ratios = [1.5 + i * 0.1 for i in range(len(ENTITIES))]
+        actual_ratios = data["result"]["embedding_specificity_ratios"]
+        assert actual_ratios == expected_ratios, (
+            f"Ratios should be read from IPE, not recomputed. "
+            f"Expected {expected_ratios}, got {actual_ratios}"
+        )
+
+    def test_missing_ipe_raises(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No IPE file at all → InterferencePerEntity.compute() raises (no local, no HF)."""
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        import vision_unlearning.benchmarks.I_care.metadata as meta_mod
+        monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": 400, "uce": 0, "munba": 200}})
-        monkeypatch.setattr(rt_mod, "get_metadata_filtered",
-                            lambda task, **kw: [{"name": e} for e in ENTITIES])
+        # Patch HF check to return False so it falls through to compute_from_scratch
+        monkeypatch.setattr(meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False)
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task="people",
             unlearning_algorithm="distil",
             base_folder=str(tmp_path),
             save_outputs=False,
         )
-        with pytest.raises(FileNotFoundError, match="Baseline embedding file not found"):
+        with pytest.raises(NotImplementedError):
             rt._compute_from_scratch()
 
-    def test_no_entity_files_raises(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Baseline present but no per-entity files → ValueError."""
+    def test_missing_ratio_column_raises(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """IPE present but no embedding_specificity_ratio column → FileNotFoundError."""
         task = "people"
         method = "distil"
         epochs = 400
-        _write_baseline_file(tmp_path, task, method, epochs)
+        # Write IPE without ratio column
+        _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=False)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": epochs, "uce": 0, "munba": 200}})
-        monkeypatch.setattr(rt_mod, "get_metadata_filtered",
-                            lambda task, **kw: [{"name": e} for e in ENTITIES])
+
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task=task,
             unlearning_algorithm=method,
             base_folder=str(tmp_path),
             save_outputs=False,
         )
-        with pytest.raises(ValueError, match="No entity embedding files found"):
+        with pytest.raises(FileNotFoundError, match="embedding_specificity_ratio"):
             rt._compute_from_scratch()
 
     def test_permutation_p_value_in_range(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         task = "people"
         method = "distil"
         epochs = 400
-        _write_all_entity_embedding_files(tmp_path, task, method, epochs)
-        # Write IPE so we have clip_diff data for the scatter
-        _write_interference_per_entity(tmp_path, task, method, epochs)
+        _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": epochs, "uce": 0, "munba": 200}})
-        monkeypatch.setattr(rt_mod, "get_metadata_filtered",
-                            lambda task, **kw: [{"name": e} for e in ENTITIES])
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task=task,
             unlearning_algorithm=method,
@@ -478,13 +513,11 @@ class TestEmbeddingForgettingEfficiencyCompute:
         task = "people"
         method = "distil"
         epochs = 400
-        _write_all_entity_embedding_files(tmp_path, task, method, epochs)
+        _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": epochs, "uce": 0, "munba": 200}})
-        monkeypatch.setattr(rt_mod, "get_metadata_filtered",
-                            lambda task, **kw: [{"name": e} for e in ENTITIES])
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task=task,
             unlearning_algorithm=method,
@@ -505,13 +538,11 @@ class TestEmbeddingForgettingEfficiencyPlot:
         task = "people"
         method = "distil"
         epochs = 400
-        _write_all_entity_embedding_files(tmp_path, task, method, epochs)
+        _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": epochs, "uce": 0, "munba": 200}})
-        monkeypatch.setattr(rt_mod, "get_metadata_filtered",
-                            lambda task, **kw: [{"name": e} for e in ENTITIES])
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task=task,
             unlearning_algorithm=method,
