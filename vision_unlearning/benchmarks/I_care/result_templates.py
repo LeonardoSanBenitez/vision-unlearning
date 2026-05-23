@@ -1670,6 +1670,656 @@ class ResultTemplateMethodComparisonByMetricEntity(ResultTemplate):
         }
 
 
+class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
+    """
+    Embedding-space profile of one unlearning event (task, method, entity).
+
+    For the specified *forgotten entity*, shows how all 100 entity embeddings
+    shift between the baseline model (LoRA-OFF) and the model that forgot this
+    entity (LoRA-ON).  Quantifies whether the forgetting was *targeted* or
+    *diffuse* in embedding space.
+
+    **Arguments**: model, task, unlearning_algorithm, entity.
+
+    **Result**:
+    - PCA scatter (2-D) of all 100 entity mean embeddings.  Baseline positions
+      shown as open circles; unlearned positions as filled dots.  The forgotten
+      entity is highlighted with a star; an arrow marks its displacement.
+      Points are coloured by the entity's self-interference (clip_diff) so that
+      collateral damage is immediately visible.
+    - Numeric summary: self-displacement magnitude (L2 norm), mean retained
+      displacement, embedding specificity ratio (cosine-distance based, from
+      the existing ``embedding_specificity_ratio`` metric).
+
+    **Interpretation**:
+    - Specificity ratio >> 1 and large self-displacement → targeted forgetting.
+    - Specificity ratio ~ 1 or low self-displacement → the method caused
+      broad embedding drift without isolating the forgotten entity.
+    - Compare with the image-level ``clip_diff`` in the scatter colours to
+      detect the concealment pattern (embedding moves, image stays similar).
+
+    **Relationship to other RTs**:
+    - ``embedding_specificity_ratio`` used here is the same metric as in
+      ``MetricMetricAlignment`` and ``MethodComparisonByMetricEntity``.
+    - For cross-entity summaries, see ``ResultTemplateEmbeddingForgettingEfficiency``.
+    - The "pinpoint-ness" concept aligns with the Holistic Unlearning Benchmark
+      (ICCV 2025) definition of targeted forgetting.
+    """
+    model: type_model = "sd1.4"
+    task: type_task = "people"
+    unlearning_algorithm: type_unlearning_algorithm
+    entity: str  # The forgotten entity — either the metadata name (may have underscores)
+    #              or the HF entity name (may have spaces).  get_target_overwrite is used
+    #              to resolve the canonical HF name used in embedding file names.
+    n_pca_components: int = 2
+
+    def _serialize_parameters(self) -> str:
+        entity_slug = self.entity.lower().replace(" ", "_")
+        return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{entity_slug}"
+
+    def _resolve_hf_entity(self) -> str:
+        """Return the HF-compatible entity name used in embedding file names."""
+        return get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0]
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_baseline_embedding_path(self) -> str:
+        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+        fname = f"embeddings_{self.task}_original_{self.unlearning_algorithm}_{epochs:03d}.json"
+        return os.path.join(self.base_folder, "datasets", fname)
+
+    def _get_entity_embedding_path(self) -> str:
+        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+        hf_entity = self._resolve_hf_entity()
+        fname = f"embeddings_{self.task}_{hf_entity}_{self.unlearning_algorithm}_{epochs:03d}.json"
+        return os.path.join(self.base_folder, "datasets", fname)
+
+    @staticmethod
+    def _mean_embeddings(raw: dict) -> "Dict[str, np.ndarray]":
+        """Group embedding records by prompted_entity and compute mean per entity."""
+        from collections import defaultdict
+        buckets: Dict[str, List[List[float]]] = defaultdict(list)
+        for entry in raw["embeddings"]:
+            buckets[entry["prompted_entity"]].append(entry["embedding"])
+        return {ent: np.mean(np.array(vecs), axis=0) for ent, vecs in buckets.items()}
+
+    @staticmethod
+    def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
+        denom = np.linalg.norm(a) * np.linalg.norm(b)
+        if denom < 1e-12:
+            return 0.0
+        return float(1.0 - np.dot(a, b) / denom)
+
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def plot(
+        cls,
+        data: dict,
+        figsize: Tuple[int, int] = (12, 5),
+        return_fig: bool = False,
+    ) -> Optional[Tuple[Figure, plt.Axes]]:
+        meta = data["metadata"]
+        res = data["result"]
+
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+        # ── Left: PCA scatter ───────────────────────────────────────────
+        ax = axes[0]
+        off_2d = np.array(res["pca_off"])       # shape (N, 2)
+        on_2d = np.array(res["pca_on"])         # shape (N, 2)
+        entity_labels = res["entity_labels"]
+        clip_diffs = np.array(res["clip_diffs"])  # one per entity
+        forgotten_idx = res["forgotten_entity_index"]
+
+        cmap = plt.get_cmap("RdBu_r")
+        # Clip colour range symmetrically
+        clim = float(np.nanpercentile(np.abs(clip_diffs[~np.isnan(clip_diffs)]), 95))
+        clim = max(clim, 1.0)
+
+        # Retained entities: baseline circles (empty) and unlearned dots (filled)
+        mask = np.ones(len(entity_labels), dtype=bool)
+        mask[forgotten_idx] = False
+        sc = ax.scatter(
+            off_2d[mask, 0], off_2d[mask, 1],
+            c=clip_diffs[mask], cmap=cmap, vmin=-clim, vmax=clim,
+            marker="o", s=30, alpha=0.5, linewidths=0.3, edgecolors="gray",
+            label="Retained (baseline)",
+        )
+        ax.scatter(
+            on_2d[mask, 0], on_2d[mask, 1],
+            c=clip_diffs[mask], cmap=cmap, vmin=-clim, vmax=clim,
+            marker="o", s=30, alpha=0.8, linewidths=0.3, edgecolors="gray",
+        )
+
+        # Forgotten entity: star marker + arrow
+        ax.scatter(
+            off_2d[forgotten_idx, 0], off_2d[forgotten_idx, 1],
+            marker="o", s=80, edgecolors="black", facecolors="none",
+            linewidths=1.5, zorder=10,
+        )
+        ax.scatter(
+            on_2d[forgotten_idx, 0], on_2d[forgotten_idx, 1],
+            marker="*", s=200, color="black", zorder=11,
+            label=f"Forgotten ({entity_labels[forgotten_idx]})",
+        )
+        dx = on_2d[forgotten_idx, 0] - off_2d[forgotten_idx, 0]
+        dy = on_2d[forgotten_idx, 1] - off_2d[forgotten_idx, 1]
+        ax.annotate(
+            "", xy=(on_2d[forgotten_idx, 0], on_2d[forgotten_idx, 1]),
+            xytext=(off_2d[forgotten_idx, 0], off_2d[forgotten_idx, 1]),
+            arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
+        )
+        fig.colorbar(sc, ax=ax, label="clip_diff (self-interference)")
+        ax.set_title(
+            f"Embedding PCA\nMethod: {meta['unlearning_algorithm']}, "
+            f"Forgotten: {meta['entity']}"
+        )
+        ax.set_xlabel("PC1")
+        ax.set_ylabel("PC2")
+        ax.legend(fontsize=7)
+
+        # ── Right: displacement bar chart ───────────────────────────────
+        ax2 = axes[1]
+        self_disp = float(res["self_displacement_magnitude"])
+        retained_disps = res["retained_displacement_magnitudes"]
+        mean_ret = float(np.mean(retained_disps))
+        spec_ratio = res["embedding_specificity_ratio"]
+
+        categories = ["Forgotten entity", "Mean retained"]
+        values = [self_disp, mean_ret]
+        colors = ["#d62728", "#1f77b4"]
+        bars = ax2.bar(categories, values, color=colors, alpha=0.8, edgecolor="black")
+        for bar, val in zip(bars, values):
+            ax2.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                val + max(values) * 0.01,
+                f"{val:.2f}",
+                ha="center", va="bottom", fontsize=9,
+            )
+        ax2.set_ylabel("Embedding displacement (L2 norm)")
+        ax2.set_title(
+            f"Displacement magnitude\n"
+            f"Embedding specificity ratio: {spec_ratio:.3f} "
+            f"({'targeted' if spec_ratio > 1 else 'diffuse'})"
+        )
+        ax2.axhline(0, color="gray", linewidth=0.5)
+
+        fig.suptitle(
+            f"ResultTemplateEmbeddingUnlearningProfile\n"
+            f"Task: {meta['task'].title()} | Method: {meta['unlearning_algorithm']} | "
+            f"Entity: {meta['entity']}",
+            fontsize=10,
+        )
+        plt.tight_layout()
+
+        if return_fig:
+            return fig, axes  # type: ignore[return-value]
+        plt.show()
+        return None
+
+    # ------------------------------------------------------------------
+    # Compute
+    # ------------------------------------------------------------------
+
+    def _compute_from_scratch(self) -> dict:
+        from sklearn.decomposition import PCA
+
+        baseline_path = self._get_baseline_embedding_path()
+        entity_path = self._get_entity_embedding_path()
+
+        if not os.path.exists(baseline_path):
+            raise FileNotFoundError(
+                f"Baseline embedding file not found: {baseline_path}. "
+                f"Run 3_compute_embeddings.py --task {self.task} "
+                f"--method {self.unlearning_algorithm} first."
+            )
+        if not os.path.exists(entity_path):
+            raise FileNotFoundError(
+                f"Entity embedding file not found: {entity_path}. "
+                f"Run 3_compute_embeddings.py --task {self.task} "
+                f"--method {self.unlearning_algorithm} "
+                f"--identities '{self.entity}' first."
+            )
+
+        with open(baseline_path, "r", encoding="utf-8") as f:
+            baseline_raw = json.load(f)
+        with open(entity_path, "r", encoding="utf-8") as f:
+            entity_raw = json.load(f)
+
+        entity_means_off = self._mean_embeddings(baseline_raw)
+        entity_means_on = self._mean_embeddings(entity_raw)
+
+        # Resolve the HF entity name used inside the embedding records.
+        # self.entity may be a metadata name (underscores) or an HF name (spaces).
+        # get_target_overwrite maps metadata names → HF names.
+        hf_entity = self._resolve_hf_entity()
+
+        # Entities present in both
+        common_entities = sorted(
+            set(entity_means_off.keys()) & set(entity_means_on.keys())
+        )
+        if hf_entity not in common_entities:
+            raise ValueError(
+                f"Entity '{self.entity}' (HF: '{hf_entity}') not found in both embedding files. "
+                f"Available: {common_entities[:5]}..."
+            )
+
+        # Load interference_per_entity for clip_diff colouring (optional)
+        ipe_path = os.path.join(self.base_folder, f"interference_per_entity_{self.task}.json")
+        clip_diff_by_entity: Dict[str, float] = {}
+        if os.path.exists(ipe_path):
+            with open(ipe_path, "r", encoding="utf-8") as f:
+                ipe_list = json.load(f)
+            epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+            # Try both epoch formats (padded and non-padded)
+            col_candidates = [
+                f"metric_{self.unlearning_algorithm}_{epochs}_emitter_minus_receiver_average_clip_diff (↑)",
+                f"metric_{self.unlearning_algorithm}_{epochs:03d}_emitter_minus_receiver_average_clip_diff (↑)",
+            ]
+            for row in ipe_list:
+                name = row.get("name", "")
+                for col_key in col_candidates:
+                    if col_key in row and row[col_key] is not None:
+                        try:
+                            clip_diff_by_entity[name] = float(row[col_key])
+                        except (TypeError, ValueError):
+                            pass
+                        break
+
+        # Stack embeddings in consistent order
+        entity_labels = common_entities
+        n = len(entity_labels)
+        dim = len(next(iter(entity_means_off.values())))
+        off_mat = np.zeros((n, dim), dtype=float)
+        on_mat = np.zeros((n, dim), dtype=float)
+        for i, ent in enumerate(entity_labels):
+            off_mat[i] = entity_means_off[ent]
+            on_mat[i] = entity_means_on[ent]
+
+        # PCA: fit on combined baseline+unlearned matrix
+        combined = np.vstack([off_mat, on_mat])
+        pca = PCA(n_components=self.n_pca_components, random_state=42)
+        pca.fit(combined)
+        off_2d = pca.transform(off_mat).tolist()
+        on_2d = pca.transform(on_mat).tolist()
+
+        forgotten_idx = entity_labels.index(hf_entity)
+
+        # Displacements (L2 norm)
+        displacements = [
+            float(np.linalg.norm(on_mat[i] - off_mat[i]))
+            for i in range(n)
+        ]
+        self_displacement = displacements[forgotten_idx]
+        retained_displacements = [d for i, d in enumerate(displacements) if i != forgotten_idx]
+        mean_retained = float(np.mean(retained_displacements)) if retained_displacements else 0.0
+
+        # Embedding specificity ratio (cosine distance, consistent with
+        # the existing embedding_specificity_ratio metric computed by
+        # "4. Compute interference per entity.py").
+        cos_dist_self = self._cosine_distance(on_mat[forgotten_idx], off_mat[forgotten_idx])
+        cos_dists_others = [
+            self._cosine_distance(on_mat[i], off_mat[i])
+            for i in range(n) if i != forgotten_idx
+        ]
+        mean_cos_others = float(np.mean(cos_dists_others)) if cos_dists_others else 0.0
+        embedding_specificity_ratio = (
+            cos_dist_self / mean_cos_others if mean_cos_others > 1e-12 else float("nan")
+        )
+
+        # clip_diff per entity (for colouring; NaN if unavailable)
+        clip_diffs = [
+            clip_diff_by_entity.get(ent, float("nan"))
+            for ent in entity_labels
+        ]
+
+        return {
+            "metadata": {
+                "RT": self.__class__.__name__,
+                "model": self.model,
+                "task": self.task,
+                "unlearning_algorithm": self.unlearning_algorithm,
+                "entity": self.entity,
+                "n_pca_components": self.n_pca_components,
+                "embedding_model": baseline_raw["metadata"].get("embedding_model", "dinov2_vits14"),
+                "citation_pinpoint_ness": "Holistic Unlearning Benchmark (ICCV 2025)",
+            },
+            "result": {
+                "entity_labels": entity_labels,
+                "forgotten_entity_index": forgotten_idx,
+                "pca_off": off_2d,
+                "pca_on": on_2d,
+                "clip_diffs": clip_diffs,
+                "self_displacement_magnitude": self_displacement,
+                "retained_displacement_magnitudes": retained_displacements,
+                "mean_retained_displacement": mean_retained,
+                "embedding_specificity_ratio": embedding_specificity_ratio,
+                "targeted": embedding_specificity_ratio > 1.0,
+                "pca_explained_variance_ratio": pca.explained_variance_ratio_.tolist(),
+            },
+        }
+
+
+class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
+    """
+    Embedding-space forgetting efficiency distribution for one (task, method).
+
+    Aggregates the ``embedding_specificity_ratio`` (cosine-distance self vs.
+    retained, already in *interference_per_entity_{task}.json*) across **all**
+    entities in the task.  Also measures how tightly the embedding-space
+    specificity (cosine-distance ratio) aligns with the image-level forgetting
+    signal (``clip_diff``).
+
+    **Arguments**: model, task, unlearning_algorithm.
+
+    **Result**:
+    - Bar chart of ``embedding_specificity_ratio`` per entity, sorted
+      descending; dashed line at ratio = 1 (no specificity).
+    - Scatter of ``embedding_specificity_ratio`` vs. self-``clip_diff`` per
+      entity, with Spearman correlation and a permutation test (n_permutations
+      resamples, replacing the previously used t-test which assumed i.i.d.
+      observations).
+    - Numeric summary: mean/std of ratio, fraction of entities with ratio > 1,
+      Spearman r between ratio and self-clip_diff, permutation p-value.
+
+    **Interpretation**:
+    - A method with most ratios >> 1 surgically targets each forgotten entity
+      in embedding space without disturbing retained embeddings.
+    - A high Spearman r (ratio vs. clip_diff) means embedding-space specificity
+      and image-level forgetting agree: the method is consistently targeted at
+      both levels.  For UCE our data show r ≈ -0.18 (not significant) whereas
+      for distil r ≈ -0.69 (Spearman; p < permutation threshold): the two
+      signals decouple for UCE, consistent with the concealment hypothesis
+      (Sharma et al., arXiv 2409.05668).
+    - Note: the ``embedding_specificity_ratio`` used here is cosine-distance
+      based (computed by the embedding pipeline); it is *not* identical to the
+      L2-norm FER studied in report_latent_viz.py, but captures the same
+      conceptual property.
+
+    **Relationship to other RTs**:
+    - For per-entity detail, see ``ResultTemplateEmbeddingUnlearningProfile``.
+    - ``embedding_specificity_ratio`` is also available via
+      ``MethodComparisonByMetricEntity`` for cross-method boxplots.
+    """
+    model: type_model = "sd1.4"
+    task: type_task = "people"
+    unlearning_algorithm: type_unlearning_algorithm
+    n_permutations: int = 10000
+    significance_threshold: float = 0.05
+
+    def _serialize_parameters(self) -> str:
+        return f"{self.model}_{self.task}_{self.unlearning_algorithm}"
+
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def plot(
+        cls,
+        data: dict,
+        figsize: Tuple[int, int] = (14, 5),
+        return_fig: bool = False,
+    ) -> Optional[Tuple[Figure, plt.Axes]]:
+        meta = data["metadata"]
+        res = data["result"]
+
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+        # ── Left: bar chart of ratio per entity ─────────────────────────
+        ax = axes[0]
+        entity_names = res["entity_names"]
+        ratios = np.array(res["embedding_specificity_ratios"])
+
+        # Sort descending by ratio
+        order = np.argsort(ratios)[::-1]
+        sorted_names = [entity_names[i] for i in order]
+        sorted_ratios = ratios[order]
+
+        x = np.arange(len(sorted_names))
+        colors = ["#d62728" if r > 1.0 else "#1f77b4" for r in sorted_ratios]
+        ax.bar(x, sorted_ratios, color=colors, alpha=0.8, edgecolor="none")
+        ax.axhline(1.0, color="black", linewidth=1.0, linestyle="--", label="ratio = 1")
+        ax.set_xticks(x)
+        ax.set_xticklabels(sorted_names, rotation=90, fontsize=5)
+        ax.set_ylabel("Embedding specificity ratio (cosine)")
+        ax.set_title(
+            f"Specificity ratio per entity\n"
+            f"Method: {meta['unlearning_algorithm']}, Task: {meta['task'].title()}\n"
+            f"Mean={res['mean_ratio']:.3f}, "
+            f"{res['fraction_above_1']:.0%} > 1 (n={res['n_entities']})"
+        )
+        ax.legend(fontsize=8)
+
+        # ── Right: scatter ratio vs self-clip_diff ───────────────────────
+        ax2 = axes[1]
+        ratios_scat = np.array(res["scatter_ratios"])
+        clip_diffs_scat = np.array(res["scatter_clip_diffs"])
+        mask = ~(np.isnan(ratios_scat) | np.isnan(clip_diffs_scat))
+        if mask.sum() >= 2:
+            ax2.scatter(ratios_scat[mask], clip_diffs_scat[mask], alpha=0.7, s=40)
+            # regression line
+            try:
+                from scipy.stats import linregress
+                slope, intercept, *_ = linregress(ratios_scat[mask], clip_diffs_scat[mask])
+                xs = np.linspace(ratios_scat[mask].min(), ratios_scat[mask].max(), 100)
+                ax2.plot(xs, slope * xs + intercept, "r--", linewidth=1.2)
+            except Exception:
+                pass
+        ax2.axvline(1.0, color="black", linewidth=0.8, linestyle="--")
+        ax2.axhline(0.0, color="gray", linewidth=0.5, linestyle="--")
+        spearman_r = res["spearman_r"]
+        perm_p = res["permutation_pvalue"]
+        sig_str = "significant" if perm_p < meta["significance_threshold"] else "not significant"
+        ax2.set_xlabel("Embedding specificity ratio (cosine)")
+        ax2.set_ylabel("Self clip_diff (image-level forgetting)")
+        ax2.set_title(
+            f"Specificity vs image-level forgetting\n"
+            f"Spearman r={spearman_r:.3f}, "
+            f"permutation p={perm_p:.4f} ({sig_str})"
+        )
+
+        fig.suptitle(
+            f"ResultTemplateEmbeddingForgettingEfficiency\n"
+            f"Task: {meta['task'].title()} | Method: {meta['unlearning_algorithm']}",
+            fontsize=10,
+        )
+        plt.tight_layout()
+
+        if return_fig:
+            return fig, axes  # type: ignore[return-value]
+        plt.show()
+        return None
+
+    # ------------------------------------------------------------------
+    # Internal helpers (shared with EmbeddingUnlearningProfile)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _mean_embeddings_eff(raw: dict) -> "Dict[str, np.ndarray]":
+        from collections import defaultdict
+        buckets: Dict[str, List[List[float]]] = defaultdict(list)
+        for entry in raw["embeddings"]:
+            buckets[entry["prompted_entity"]].append(entry["embedding"])
+        return {ent: np.mean(np.array(vecs), axis=0) for ent, vecs in buckets.items()}
+
+    @staticmethod
+    def _cosine_distance_eff(a: np.ndarray, b: np.ndarray) -> float:
+        denom = np.linalg.norm(a) * np.linalg.norm(b)
+        if denom < 1e-12:
+            return 0.0
+        return float(1.0 - np.dot(a, b) / denom)
+
+    # ------------------------------------------------------------------
+    # Compute
+    # ------------------------------------------------------------------
+
+    def _compute_from_scratch(self) -> dict:
+        from scipy.stats import spearmanr
+
+        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+
+        # Load baseline embedding (lora-OFF) — same for all entities
+        baseline_fname = (
+            f"embeddings_{self.task}_original_{self.unlearning_algorithm}_{epochs:03d}.json"
+        )
+        baseline_path = os.path.join(self.base_folder, "datasets", baseline_fname)
+        if not os.path.exists(baseline_path):
+            raise FileNotFoundError(
+                f"Baseline embedding file not found: {baseline_path}. "
+                f"Run 3_compute_embeddings.py --task {self.task} "
+                f"--method {self.unlearning_algorithm} first."
+            )
+        with open(baseline_path, "r", encoding="utf-8") as f:
+            baseline_raw = json.load(f)
+        entity_means_off = self._mean_embeddings_eff(baseline_raw)
+
+        # Load per-entity embedding files (lora-ON) for all available entities.
+        # File names use the HF entity name (e.g. "George W Bush"), which may differ
+        # from the metadata name (e.g. "George_W_Bush"). Use get_target_overwrite to
+        # resolve the HF name used in filenames and embedded records.
+        metadata = get_metadata_filtered(self.task)
+        entity_names: List[str] = []
+        ratios: List[float] = []
+
+        for row in metadata:
+            entity_meta = row["name"]  # metadata name (may have underscores)
+            hf_entity = get_target_overwrite(self.task, self.unlearning_algorithm, entity_meta)[0]
+            entity_fname = (
+                f"embeddings_{self.task}_{hf_entity}_{self.unlearning_algorithm}_{epochs:03d}.json"
+            )
+            entity_path = os.path.join(self.base_folder, "datasets", entity_fname)
+            if not os.path.exists(entity_path):
+                continue
+            with open(entity_path, "r", encoding="utf-8") as f:
+                entity_raw = json.load(f)
+            entity_means_on = self._mean_embeddings_eff(entity_raw)
+
+            # Only compute if the HF entity name is in both baseline and this file
+            if hf_entity not in entity_means_off or hf_entity not in entity_means_on:
+                continue
+
+            # Cosine distance: entity against itself (self) and against all others
+            cos_self = self._cosine_distance_eff(
+                entity_means_on[hf_entity], entity_means_off[hf_entity]
+            )
+            cos_others_list = [
+                self._cosine_distance_eff(entity_means_on[e], entity_means_off[e])
+                for e in entity_means_on
+                if e != hf_entity and e in entity_means_off
+            ]
+            mean_cos_others = float(np.mean(cos_others_list)) if cos_others_list else 0.0
+            ratio = (
+                cos_self / mean_cos_others if mean_cos_others > 1e-12 else float("nan")
+            )
+            entity_names.append(entity_meta)  # store metadata name for consistency
+            ratios.append(ratio)
+
+        if not ratios:
+            raise ValueError(
+                f"No entity embedding files found in {os.path.join(self.base_folder, 'datasets')} "
+                f"for method={self.unlearning_algorithm}, task={self.task}. "
+                f"Run 3_compute_embeddings.py first."
+            )
+
+        # Optionally load image-level clip_diff from interference_per_entity
+        # (optional — used for the scatter plot; NaN if unavailable).
+        # Check both in base_folder and one level up (forgety/assets pattern).
+        clip_diff_by_entity: Dict[str, float] = {}
+        for candidate_dir in [self.base_folder, os.path.join(self.base_folder, "..", "..", "forgety", "assets")]:
+            ipe_path = os.path.join(candidate_dir, f"interference_per_entity_{self.task}.json")
+            if os.path.exists(ipe_path):
+                with open(ipe_path, "r", encoding="utf-8") as f:
+                    ipe_list = json.load(f)
+                # Try both zero-padded and non-padded column formats
+                clip_col_candidates = [
+                    f"metric_{self.unlearning_algorithm}_{epochs}_emitter_average_clip_diff (↑)",
+                    f"metric_{self.unlearning_algorithm}_{epochs:03d}_emitter_average_clip_diff (↑)",
+                ]
+                for row in ipe_list:
+                    name = row.get("name", "")
+                    for col in clip_col_candidates:
+                        if col in row and row[col] is not None:
+                            try:
+                                clip_diff_by_entity[name] = float(row[col])
+                            except (TypeError, ValueError):
+                                pass
+                            break
+                if clip_diff_by_entity:
+                    break  # Found data, stop looking
+
+        scatter_ratios: List[float] = []
+        scatter_clip_diffs: List[float] = []
+        for name, ratio in zip(entity_names, ratios):
+            if not (isinstance(ratio, float) and np.isnan(ratio)):
+                if name in clip_diff_by_entity:
+                    scatter_ratios.append(ratio)
+                    scatter_clip_diffs.append(clip_diff_by_entity[name])
+
+        ratios_arr = np.array(ratios, dtype=float)
+        valid_ratios = ratios_arr[~np.isnan(ratios_arr)]
+        mean_ratio = float(np.nanmean(ratios_arr))
+        std_ratio = float(np.nanstd(ratios_arr))
+        fraction_above_1 = float(np.mean(valid_ratios > 1.0)) if len(valid_ratios) > 0 else float("nan")
+
+        # Spearman correlation + permutation test
+        spearman_r = float("nan")
+        perm_p = float("nan")
+        if len(scatter_ratios) >= 4:
+            rat = np.array(scatter_ratios, dtype=float)
+            cld = np.array(scatter_clip_diffs, dtype=float)
+            spearman_r = float(spearmanr(rat, cld).statistic)
+
+            # Permutation test: permute clip_diffs, recompute Spearman r, count
+            # how many permuted |r| >= observed |r|.
+            rng = np.random.default_rng(42)
+            obs_abs_r = abs(spearman_r)
+            count_extreme = 0
+            for _ in range(self.n_permutations):
+                perm_cld = rng.permutation(cld)
+                perm_r = float(spearmanr(rat, perm_cld).statistic)
+                if abs(perm_r) >= obs_abs_r:
+                    count_extreme += 1
+            perm_p = (count_extreme + 1) / (self.n_permutations + 1)
+
+        return {
+            "metadata": {
+                "RT": self.__class__.__name__,
+                "model": self.model,
+                "task": self.task,
+                "unlearning_algorithm": self.unlearning_algorithm,
+                "significance_threshold": self.significance_threshold,
+                "n_permutations": self.n_permutations,
+                "note_on_metric": (
+                    "embedding_specificity_ratio uses cosine distance (not L2 norm). "
+                    "Computed from per-entity DINOv2 embedding files in datasets/ directory. "
+                    "This is NOT identical to the L2-based FER in report_latent_viz.py "
+                    "but captures the same conceptual property."
+                ),
+                "concealment_reference": "Sharma et al., arXiv 2409.05668",
+                "pinpoint_reference": "Holistic Unlearning Benchmark (ICCV 2025)",
+            },
+            "result": {
+                "entity_names": entity_names,
+                "embedding_specificity_ratios": ratios,
+                "n_entities": len(ratios),
+                "mean_ratio": mean_ratio,
+                "std_ratio": std_ratio,
+                "fraction_above_1": fraction_above_1,
+                "scatter_ratios": scatter_ratios,
+                "scatter_clip_diffs": scatter_clip_diffs,
+                "spearman_r": spearman_r,
+                "permutation_pvalue": perm_p,
+                "significant": bool(perm_p < self.significance_threshold),
+            },
+        }
+
+
 # TODO: all this metadata should be computed automatically, defining which RTs we have and which values are valid should be some process of "discovery"
 
 
@@ -1686,6 +2336,8 @@ rt_name_to_class = {
     "UnlearningVisualSummary": ResultTemplateUnlearningVisualSummary,
     "InterferenceVisualSummary": ResultTemplateInterferenceVisualSummary,
     "MethodComparisonByMetricEntity": ResultTemplateMethodComparisonByMetricEntity,
+    "EmbeddingUnlearningProfile": ResultTemplateEmbeddingUnlearningProfile,
+    "EmbeddingForgettingEfficiency": ResultTemplateEmbeddingForgettingEfficiency,
 }
 
 
@@ -1702,6 +2354,8 @@ rt_name_to_params = {
     "UnlearningVisualSummary": ["model", "task", "unlearning_algorithm"],
     "InterferenceVisualSummary": ["model", "task", "unlearning_algorithm", "interference_pair", "entity"],
     "MethodComparisonByMetricEntity": ["model", "task", "interference_entity", "unlearning_algorithm_list"],
+    "EmbeddingUnlearningProfile": ["model", "task", "unlearning_algorithm", "entity"],
+    "EmbeddingForgettingEfficiency": ["model", "task", "unlearning_algorithm"],
 }
 
 
