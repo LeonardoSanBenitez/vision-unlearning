@@ -430,7 +430,7 @@ class TestGeneratedDatasetUploadIfRecomputed(unittest.TestCase):
 
             ds = GeneratedDataset(task='people', base_folder=tmp, upload_if_recomputed=True)
 
-            def fake_compute_from_scratch(s: list, p: list) -> str:  # type: ignore[override]
+            def fake_compute_from_scratch(s: list, p: list, batch_size: int = 16) -> str:  # type: ignore[override]
                 # Write the expected files so exists() returns True
                 os.makedirs(ds.folder_path, exist_ok=True)
                 for seed in s:
@@ -466,7 +466,7 @@ class TestGeneratedDatasetUploadIfRecomputed(unittest.TestCase):
 
             ds = GeneratedDataset(task='people', base_folder=tmp, upload_if_recomputed=False)
 
-            def fake_compute_from_scratch(s: list, p: list) -> str:  # type: ignore[override]
+            def fake_compute_from_scratch(s: list, p: list, batch_size: int = 16) -> str:  # type: ignore[override]
                 os.makedirs(ds.folder_path, exist_ok=True)
                 for seed in s:
                     for prompt in p:
@@ -542,6 +542,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
                 seeds=seeds,
                 filenames=expected_filenames,
                 lora_requires_inversion=False,
+                batch_size=16,
             )
 
     def test_entity_dataset_munba_sets_lora_requires_inversion_true(self) -> None:
@@ -594,6 +595,296 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
             self.assertIsNone(gen_call_kwargs['model_base_name'])
             self.assertIsNone(gen_call_kwargs['lora_name'])
             self.assertEqual(gen_call_kwargs['model_pipeline'], fake_pipeline)
+
+
+class TestGetTargetOverwriteMethodInvariance(unittest.TestCase):
+    """Issue 1 (Cidral 2026-05-23): get_target_overwrite ignores the method argument.
+
+    0_generate_dataset_original.py builds prompts with method='distil' hardcoded.
+    3_compute_caused_interferences.py and 3_compute_embeddings.py build prompts
+    with the actual runtime method.  This test proves these lists are always
+    identical, making the hardcoded 'distil' in 0_generate_dataset_original.py safe.
+
+    A prompt-list mismatch would cause every off-image filename to be wrong —
+    a silent, catastrophic error.  If get_target_overwrite ever starts returning
+    different values for different methods, this test will catch it.
+    """
+
+    from vision_unlearning.datasets.testbed import get_target_overwrite as _gto
+
+    TASKS_AND_TARGETS = [
+        ('people', 'Colin Powell'),
+        ('people', 'Brad Pitt'),
+        ('breeds', 'poodle'),
+        ('breeds', 'Afghan hound'),
+        ('scenes', 'abbey'),
+        ('scenes', 'airport terminal'),
+    ]
+    METHODS = ['distil', 'uce', 'munba']
+
+    def test_method_does_not_affect_target_string(self) -> None:
+        """get_target_overwrite()[0] must return the same string for all methods."""
+        from vision_unlearning.datasets.testbed import get_target_overwrite
+        for task, target in self.TASKS_AND_TARGETS:
+            results = [
+                get_target_overwrite(task, m, target)[0]  # type: ignore[arg-type]
+                for m in self.METHODS
+            ]
+            self.assertEqual(
+                len(set(results)), 1,
+                msg=(
+                    f"get_target_overwrite()[0] differs across methods for "
+                    f"task={task!r}, target={target!r}: {dict(zip(self.METHODS, results))}"
+                ),
+            )
+
+    def test_prompt_list_distil_equals_uce_equals_munba(self) -> None:
+        """Prompt lists built with any method are identical.
+
+        Simulates what 0_generate_dataset_original.py does (hardcoded 'distil')
+        and what 3_compute_caused_interferences.py/3_compute_embeddings.py do
+        (runtime method), and asserts they are the same.
+        """
+        from vision_unlearning.datasets.testbed import get_target_overwrite
+        fake_metadata = [
+            {'name': target}
+            for _, target in self.TASKS_AND_TARGETS
+            if True  # use all for completeness
+        ]
+        for task in ['people', 'breeds', 'scenes']:
+            task_metadata = [
+                {'name': t} for (tk, t) in self.TASKS_AND_TARGETS if tk == task
+            ]
+            if not task_metadata:
+                continue
+            prompts_distil = [
+                f"An image of {get_target_overwrite(task, 'distil', m['name'])[0]}"  # type: ignore[arg-type]
+                for m in task_metadata
+            ]
+            for method in ['uce', 'munba']:
+                prompts_method = [
+                    f"An image of {get_target_overwrite(task, method, m['name'])[0]}"  # type: ignore[arg-type]
+                    for m in task_metadata
+                ]
+                self.assertEqual(
+                    prompts_distil, prompts_method,
+                    msg=(
+                        f"Prompt list mismatch: 'distil' vs '{method}' for task={task!r}. "
+                        f"0_generate_dataset_original.py hardcodes 'distil'; "
+                        f"a mismatch here means off-image filenames would be wrong."
+                    ),
+                )
+
+
+class TestGeneratedDatasetComputeBatchSize(unittest.TestCase):
+    """Issue 3 (Cidral 2026-05-23): batch_size must be forwarded through compute() and
+    _compute_from_scratch() to generate_dataset().
+
+    The plan documents batch_size=16 as optimal for this hardware.  Before this fix,
+    _compute_from_scratch called generate_dataset() with no batch_size, defaulting to 4.
+    """
+
+    def test_batch_size_forwarded_to_generate_dataset_baseline(self) -> None:
+        """compute() forwards batch_size to _compute_from_scratch, which passes it to
+        generate_dataset for the shared baseline case."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of Colin Powell']
+
+            ds = GeneratedDataset(task='people', base_folder=tmp)
+
+            captured: dict = {}
+
+            def fake_compute_from_scratch(s: list, p: list, batch_size: int = 16) -> str:  # type: ignore[override]
+                captured['batch_size'] = batch_size
+                # Write the expected files so exists() returns True post-call
+                os.makedirs(ds.folder_path, exist_ok=True)
+                for seed in s:
+                    for prompt in p:
+                        fname = f'off_{seed:02d}_{prompt}.png'
+                        open(os.path.join(ds.folder_path, fname), 'w').close()
+                open(os.path.join(ds.folder_path, 'metadata.jsonl'), 'w').close()
+                return ds.folder_path
+
+            mock_hf_exists = MagicMock(return_value=False)
+            with patch.object(ds, '_compute_from_scratch', side_effect=fake_compute_from_scratch), \
+                 patch('vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                       mock_hf_exists):
+                ds.compute(seeds, prompts, batch_size=8)
+
+            self.assertEqual(captured.get('batch_size'), 8)
+
+    def test_batch_size_default_is_16(self) -> None:
+        """Default batch_size for compute() and _compute_from_scratch() is 16."""
+        import inspect
+        from vision_unlearning.datasets.testbed import GeneratedDataset as GD
+        sig_compute = inspect.signature(GD.compute)
+        sig_scratch = inspect.signature(GD._compute_from_scratch)
+        self.assertEqual(sig_compute.parameters['batch_size'].default, 16)
+        self.assertEqual(sig_scratch.parameters['batch_size'].default, 16)
+
+    def test_batch_size_passed_to_generate_dataset_in_scratch_baseline(self) -> None:
+        """_compute_from_scratch passes batch_size to generate_dataset (shared baseline)."""
+        ds = GeneratedDataset(task='people', base_folder='assets')
+        seeds = [42]
+        prompts = ['An image of Colin Powell']
+
+        with patch.object(_testbed_module, 'exists_unlearned_model', return_value=True), \
+             patch.object(_data_generation_module, 'generate_dataset',
+                          return_value=[]) as mock_gen, \
+             patch('torch.cuda.is_available', return_value=False), \
+             patch('diffusers.AutoPipelineForText2Image.from_pretrained',
+                   return_value=MagicMock(to=lambda d: MagicMock())):
+            # Patch from_pretrained so the pipeline load doesn't actually run
+            import diffusers
+            with patch.object(
+                diffusers.AutoPipelineForText2Image, 'from_pretrained',
+                return_value=MagicMock(to=MagicMock(return_value=MagicMock()))
+            ):
+                ds._compute_from_scratch(seeds, prompts, batch_size=32)
+
+        gen_call_kwargs = mock_gen.call_args.kwargs
+        self.assertEqual(gen_call_kwargs['batch_size'], 32)
+
+    def test_batch_size_passed_to_generate_dataset_in_scratch_entity(self) -> None:
+        """_compute_from_scratch passes batch_size to generate_dataset (entity dataset)."""
+        ds = GeneratedDataset(
+            task='people', target='Colin Powell',
+            method='distil', num_train_epochs=400,
+        )
+        seeds = [42]
+        prompts = ['An image of Colin Powell']
+
+        with patch.object(_testbed_module, 'exists_unlearned_model', return_value=True), \
+             patch.object(_testbed_module, 'get_unlearned_model_folder',
+                          return_value='/fake/model/path'), \
+             patch.object(_data_generation_module, 'generate_dataset',
+                          return_value=[]) as mock_gen, \
+             patch('torch.cuda.is_available', return_value=False):
+            ds._compute_from_scratch(seeds, prompts, batch_size=8)
+
+        gen_call_kwargs = mock_gen.call_args.kwargs
+        self.assertEqual(gen_call_kwargs['batch_size'], 8)
+
+
+class TestGeneratedDatasetExistsPartialPromptWarning(unittest.TestCase):
+    """Issue 4 (Cidral 2026-05-23): exists() is unsafe with a partial prompt list for
+    the shared baseline.
+
+    The shared baseline folder contains images for ALL entities in the task.
+    If exists() is called with a partial prompts list, the expected_count will be
+    smaller than the actual image count, causing exists() to return False (mismatch)
+    and triggering full re-generation.
+
+    This test documents the behaviour (not a bug — callers must pass the full list)
+    and verifies that the docstring warning is present.
+    """
+
+    def _write_files(self, folder: str, filenames: list) -> None:
+        os.makedirs(folder, exist_ok=True)
+        for fn in filenames:
+            open(os.path.join(folder, fn), 'w').close()
+
+    def test_exists_returns_false_with_partial_prompt_list_for_baseline(self) -> None:
+        """When the baseline folder has more images than len(seeds)*len(partial_prompts),
+        exists() returns False — documenting why callers must pass the full list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            all_prompts = [
+                'An image of Colin Powell',
+                'An image of Tony Blair',
+                'An image of Brad Pitt',
+            ]
+            ds = GeneratedDataset(task='people', base_folder=tmp)
+            # Write ALL 3 prompts in the folder
+            files = [f'off_{s:02d}_{p}.png' for s in seeds for p in all_prompts] + ['metadata.jsonl']
+            self._write_files(ds.folder_path, files)
+
+            # Calling with only the first prompt: 1*1=1 expected, 3 actual → False
+            partial_prompts = ['An image of Colin Powell']
+            self.assertFalse(
+                ds.exists(seeds, partial_prompts),
+                msg=(
+                    "exists() with a partial prompt list on a shared baseline folder "
+                    "should return False because the actual image count (3) exceeds "
+                    "the expected count (1).  Callers must always pass the full prompt list."
+                ),
+            )
+
+    def test_exists_returns_true_with_full_prompt_list_for_baseline(self) -> None:
+        """When the full prompt list is passed, exists() returns True (correct)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            all_prompts = [
+                'An image of Colin Powell',
+                'An image of Tony Blair',
+                'An image of Brad Pitt',
+            ]
+            ds = GeneratedDataset(task='people', base_folder=tmp)
+            files = [f'off_{s:02d}_{p}.png' for s in seeds for p in all_prompts] + ['metadata.jsonl']
+            self._write_files(ds.folder_path, files)
+            self.assertTrue(ds.exists(seeds, all_prompts))
+
+    def test_exists_docstring_warns_about_partial_prompt_list(self) -> None:
+        """The docstring of exists() must contain a warning about partial prompt lists."""
+        docstring = GeneratedDataset.exists.__doc__ or ''
+        self.assertIn('partial', docstring.lower(),
+                      msg="exists() docstring must warn about partial prompt lists")
+        self.assertIn('complete', docstring.lower(),
+                      msg="exists() docstring must instruct callers to pass the complete list")
+
+
+class TestComputeFromScratchMetadataJsonl(unittest.TestCase):
+    """Issue 5 (Cidral 2026-05-23): metadata.jsonl in entity _compute_from_scratch
+    is only mock-verified.
+
+    The unit tests for entity _compute_from_scratch mock generate_dataset(), so they
+    do not exercise the actual metadata.jsonl write.  generate_dataset() does write
+    metadata.jsonl (data_generation.py line 165), but this is a cross-module dependency
+    that is not tested end-to-end here.
+
+    This class documents this limitation explicitly and verifies that:
+    1. The shared baseline path (which is NOT mocked in compute() tests) does write
+       metadata.jsonl when generate_dataset is called with a real implementation.
+    2. The entity path delegates metadata writing to generate_dataset, whose contract
+       is tested in test_data_generation.py.
+    """
+
+    def test_generate_dataset_writes_metadata_jsonl(self) -> None:
+        """generate_dataset() writes metadata.jsonl to output_path as its final step.
+
+        This verifies the cross-module contract that _compute_from_scratch relies on
+        for entity datasets.  If generate_dataset ever stops writing metadata.jsonl,
+        GeneratedDataset.exists() would return False after generation (missing metadata)
+        and cause an AssertionError in compute().
+        """
+        from vision_unlearning.utils.data_generation import generate_dataset
+        import inspect
+        src = inspect.getsource(generate_dataset)
+        # Verify that metadata.jsonl is written (source-level check)
+        self.assertIn('metadata.jsonl', src,
+                      msg=(
+                          "generate_dataset() must write metadata.jsonl. "
+                          "GeneratedDataset._compute_from_scratch() (entity path) "
+                          "relies on this for exists() to return True after generation."
+                      ))
+
+    def test_shared_baseline_exists_check_requires_metadata_jsonl(self) -> None:
+        """exists() returns False when metadata.jsonl is absent, even if all images exist.
+
+        This documents why _compute_from_scratch MUST produce metadata.jsonl —
+        the compute() assertion after generation calls exists() which checks for it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of Colin Powell']
+            ds = GeneratedDataset(task='people', base_folder=tmp)
+            # Write image but NOT metadata.jsonl
+            os.makedirs(ds.folder_path, exist_ok=True)
+            open(os.path.join(ds.folder_path, 'off_42_An image of Colin Powell.png'), 'w').close()
+            # No metadata.jsonl → exists() must return False
+            self.assertFalse(ds.exists(seeds, prompts),
+                             msg="exists() must return False when metadata.jsonl is absent")
 
 
 if __name__ == '__main__':

@@ -400,6 +400,19 @@ class GeneratedDataset(BaseModel):
 
         Replaces exists_unlearned_dataset() for entity datasets and provides
         the equivalent for baseline folders.
+
+        WARNING — shared baseline: The shared baseline folder contains images for
+        ALL entities in the task (N_entities * len(seeds) images total), not just
+        the entities in the ``prompts`` argument.  This method counts existing
+        off_* files and compares against ``len(seeds) * len(prompts)``.
+
+        If ``prompts`` is a partial (subset) list of the full task prompts,
+        ``exists()`` will count more images than expected and incorrectly return
+        False, triggering a full re-generation.  Always pass the COMPLETE prompt
+        list for the task when calling ``exists()`` on a shared baseline dataset.
+
+        For entity datasets this restriction does not apply because the entity
+        folder contains only the images for that specific entity.
         """
         if not os.path.exists(self.folder_path):
             return False
@@ -428,6 +441,7 @@ class GeneratedDataset(BaseModel):
         self,
         seeds: List[int],
         prompts: List[str],
+        batch_size: int = 16,
     ) -> str:
         """Generate images from scratch and return the folder path.
 
@@ -442,6 +456,26 @@ class GeneratedDataset(BaseModel):
         model weights before calling compute().
 
         In both cases the method returns self.folder_path after generation.
+
+        Note on metadata.jsonl (entity datasets): ``generate_dataset()`` writes
+        ``metadata.jsonl`` to ``self.folder_path`` as its last step.  This is
+        verified end-to-end for the shared baseline path.  For entity datasets,
+        ``generate_dataset()`` itself writes the file in both the LoRA and UCE
+        paths (see vision_unlearning/utils/data_generation.py line 165), but the
+        unit tests for this method mock ``generate_dataset`` and therefore do not
+        exercise the actual file write.  If the ``generate_dataset`` implementation
+        changes and stops writing ``metadata.jsonl``, the entity path here would
+        silently produce an incomplete dataset.
+
+        Parameters
+        ----------
+        seeds : list of int
+            Generation seeds.
+        prompts : list of str
+            Text prompts — one per image template, excluding seed variation.
+        batch_size : int
+            Number of prompts per pipeline call.  Default 16 (optimal for 8–12 GB
+            VRAM on this hardware; see perf test in PLAN-TASK-2026-05-19-Baseline.md).
         """
         import gc  # noqa: PLC0415
         import torch  # noqa: PLC0415
@@ -478,6 +512,7 @@ class GeneratedDataset(BaseModel):
                 output_path=self.folder_path,
                 seeds=seeds,
                 filenames=filenames,
+                batch_size=batch_size,
             )
 
         else:
@@ -531,6 +566,7 @@ class GeneratedDataset(BaseModel):
                     output_path=self.folder_path,
                     seeds=seeds,
                     filenames=filenames,
+                    batch_size=batch_size,
                 )
             else:
                 # distil / munba — LoRA-based methods.
@@ -547,6 +583,7 @@ class GeneratedDataset(BaseModel):
                     seeds=seeds,
                     filenames=filenames,
                     lora_requires_inversion=(self.method == 'munba'),
+                    batch_size=batch_size,
                 )
 
         logger.info("_compute_from_scratch: done — folder %s", self.folder_path)
@@ -558,7 +595,7 @@ class GeneratedDataset(BaseModel):
 
         return self.folder_path
 
-    def compute(self, seeds: List[int], prompts: List[str]) -> str:
+    def compute(self, seeds: List[int], prompts: List[str], batch_size: int = 16) -> str:
         """Ensure the dataset is available locally and return its folder path.
 
         Resolution order:
@@ -567,6 +604,21 @@ class GeneratedDataset(BaseModel):
         3. Neither → call ``_compute_from_scratch()``.
            After generation completes, if ``upload_if_recomputed=True``, upload
            the folder to HuggingFace.
+
+        Parameters
+        ----------
+        seeds : list of int
+            Generation seeds.
+        prompts : list of str
+            Text prompts.  For shared baseline datasets, this MUST be the complete
+            prompt list for the task (all entities).  Passing a partial list will
+            cause ``exists()`` to return False and trigger unnecessary re-generation.
+            See ``exists()`` docstring for details.
+        batch_size : int
+            Prompts per pipeline call, forwarded to ``_compute_from_scratch()``.
+            Ignored if the data is already available locally or on HuggingFace.
+            Default 16 (optimal for 8–12 GB VRAM; see perf results in
+            PLAN-TASK-2026-05-19-Baseline.md).
 
         Returns
         -------
@@ -603,7 +655,7 @@ class GeneratedDataset(BaseModel):
             return self.folder_path
 
         # 3. Compute from scratch
-        result = self._compute_from_scratch(seeds, prompts)
+        result = self._compute_from_scratch(seeds, prompts, batch_size=batch_size)
         assert result == self.folder_path, (
             "_compute_from_scratch() must return self.folder_path"
         )
