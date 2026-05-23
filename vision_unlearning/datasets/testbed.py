@@ -205,8 +205,8 @@ def exists_unlearned_dataset(
     legacy entity folders (pre-baseline-refactor data) are ignored so that old datasets
     remain valid without requiring a re-generation pass.
 
-    Baseline lora_state='off' images live in the separate baseline folder after the
-    refactor; see get_baseline_dataset_folder() and get_off_image_path().
+    Baseline lora_state='off' images live in the shared baseline folder; see
+    get_shared_baseline_folder() and get_off_image_path().
 
     Expected: len(seeds) * len(prompts) on_*.png files + 1 metadata.jsonl.
     """
@@ -236,27 +236,8 @@ def get_shared_baseline_folder(
     all entities and all methods.
 
     Convention: assets/datasets/generated_{task}_baseline/
-
-    Prefer this over get_baseline_dataset_folder() for new code.
     """
     return os.path.join(base_folder, "datasets", f"generated_{task}_baseline")
-
-
-def get_baseline_dataset_folder(
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    target: str,
-    base_folder: str = 'assets',
-) -> str:
-    """Return the per-entity baseline folder path (legacy API).
-
-    Kept for backward compatibility.  New code should use get_shared_baseline_folder()
-    which stores all baselines in ONE folder per task.  The per-entity folder was the
-    initial design; it is O(n) in storage/generation cost, whereas the shared folder
-    is O(1).
-
-    Convention: assets/datasets/generated_{task}_baseline_{target}/
-    """
-    return os.path.join(base_folder, "datasets", f"generated_{task}_baseline_{target}")
 
 
 def get_off_image_path(
@@ -270,24 +251,17 @@ def get_off_image_path(
 ) -> str:
     """Return the path to a baseline (lora_state='off') image for a given entity/seed/prompt.
 
-    Encapsulates backward-compatibility fallback logic in a single place:
-    1. If the shared task-level baseline folder exists, use it (preferred — O(1) generation).
-    2. If a per-entity baseline folder exists, use it (legacy — O(n) generation).
-    3. Otherwise fall back to the old entity folder (get_generated_dataset_folder),
+    Fallback logic:
+    1. If the shared task-level baseline folder exists, use it (preferred — generated once
+       per task by 0_generate_dataset_original.py).
+    2. Otherwise fall back to the legacy entity folder (get_generated_dataset_folder),
        which was the pre-refactor location for both on_* and off_* images.
-
-    This means existing datasets that contain off_* files in the entity folder continue
-    to work transparently until baseline folders are generated.
     """
     # 1. Shared task-level baseline (preferred).
     shared_folder = get_shared_baseline_folder(task, base_folder)
     if os.path.exists(shared_folder):
         return os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
-    # 2. Per-entity baseline (legacy, accepted for backward compat).
-    per_entity_folder = get_baseline_dataset_folder(task, target, base_folder)
-    if os.path.exists(per_entity_folder):
-        return os.path.join(per_entity_folder, get_generated_dataset_file('off', seed, prompt))
-    # 3. Entity folder fallback (pre-refactor mixed on_* + off_* folder).
+    # 2. Entity folder fallback (pre-refactor mixed on_* + off_* folder).
     entity_folder = get_generated_dataset_folder(task, method, num_train_epochs, target, base_folder)
     return os.path.join(entity_folder, get_generated_dataset_file('off', seed, prompt))
 
@@ -305,30 +279,30 @@ def get_off_image_path(
 class GeneratedDataset(BaseModel):
     """Abstraction over generated image dataset folders.
 
-    Represents exactly one dataset folder — either a shared baseline, a
-    per-entity legacy baseline, or a method-specific entity dataset.
+    Represents exactly one dataset folder — either the shared task-level
+    baseline or a method-specific entity dataset.
 
     Folder conventions
     ------------------
-    - **Shared baseline** (``method=None``, ``target=None``):
+    - **Shared baseline** (``method=None``):
         ``assets/datasets/generated_{task}_baseline/``
         All method-agnostic off-images for the whole task live here.
-        Preferred for new generation runs.
-    - **Per-entity baseline** (``method=None``, ``target=<str>``):
-        ``assets/datasets/generated_{task}_baseline_{target}/``
-        Legacy design; accepted for backward compatibility.
+        Generated once per task by 0_generate_dataset_original.py.
     - **Entity dataset** (``method=<str>``, ``target=<str>``):
         ``assets/datasets/generated_{task}_{target}_{method}_{epochs:03d}/``
         Contains ``on_*`` unlearned images (and possibly legacy ``off_*``).
 
     ``compute()`` resolves data in priority order:
-    1. Already present locally — return immediately.
-    2. Present in HuggingFace — download, then return.
-    3. Neither — calls ``_compute_from_scratch()``, which raises
-       ``NotImplementedError`` by default (subclass to add generation logic).
+    1. Already complete locally → return immediately.
+    2. Present in HuggingFace → download, then return.
+    3. Neither → call ``_compute_from_scratch()``, which generates images
+       from scratch using the Stable Diffusion pipeline.
+
+    After ``_compute_from_scratch()`` completes, if ``upload_if_recomputed``
+    is True the dataset folder is uploaded to HuggingFace.
 
     The ``get_off_image_path`` class method encapsulates the full fallback
-    chain for a baseline image: shared → per-entity → entity folder.
+    chain for a baseline image: shared baseline → entity folder.
     """
 
     task: _type_task
@@ -337,8 +311,8 @@ class GeneratedDataset(BaseModel):
     num_train_epochs: Optional[int] = None
     base_folder: str = 'assets'
     remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
-    save_outputs: bool = True
     recompute_if_exists: bool = False
+    upload_if_recomputed: bool = False
 
     @model_validator(mode='after')
     def _validate_consistency(self) -> 'GeneratedDataset':
@@ -348,6 +322,13 @@ class GeneratedDataset(BaseModel):
             )
             assert self.num_train_epochs is not None, (
                 "num_train_epochs must be set when method is specified (entity dataset)."
+            )
+        if self.method is None and self.target is not None:
+            raise ValueError(
+                "target must be None for a shared baseline dataset (method=None). "
+                "The per-entity baseline concept does not exist in I-CARE: baselines are "
+                "shared across all entities. Use target=None for a baseline, or provide "
+                "both target and method for an entity dataset."
             )
         return self
 
@@ -361,24 +342,15 @@ class GeneratedDataset(BaseModel):
         return self.method is None
 
     @property
-    def is_shared_baseline(self) -> bool:
-        """True when this is the shared task-level baseline folder."""
-        return self.method is None and self.target is None
-
-    @property
     def folder_path(self) -> str:
-        """Absolute-style local path to the dataset folder.
+        """Local path to the dataset folder.
 
         Replaces:
           - get_shared_baseline_folder()
-          - get_baseline_dataset_folder()
           - get_generated_dataset_folder()
         """
-        if self.is_shared_baseline:
-            return get_shared_baseline_folder(self.task, self.base_folder)
         if self.is_baseline:
-            assert self.target is not None
-            return get_baseline_dataset_folder(self.task, self.target, self.base_folder)
+            return get_shared_baseline_folder(self.task, self.base_folder)
         # Entity dataset
         assert self.target is not None
         assert self.num_train_epochs is not None
@@ -459,16 +431,61 @@ class GeneratedDataset(BaseModel):
     ) -> str:
         """Generate images from scratch and return the folder path.
 
-        Not implemented in the base class.  Callers that need in-process
-        generation should subclass GeneratedDataset and override this method
-        (or use the standalone generation scripts directly).
+        For the shared baseline (method=None): loads the base SD pipeline once
+        and generates all off-images for all (seed, prompt) pairs, storing them
+        in folder_path with the ``off_{seed:02d}_{prompt}.png`` filename convention.
+
+        For entity datasets (method set): not implemented — use the standalone
+        script 1_unlearn_from_metadata.py which handles LoRA training + generation.
         """
-        raise NotImplementedError(
-            "GeneratedDataset._compute_from_scratch is not implemented. "
-            "Use the generation scripts (0_generate_dataset_original.py, "
-            "1_unlearn_from_metadata.py) or subclass GeneratedDataset and "
-            "override _compute_from_scratch()."
+        if not self.is_baseline:
+            raise NotImplementedError(
+                "GeneratedDataset._compute_from_scratch for entity datasets is not supported "
+                "in-process. Use 1_unlearn_from_metadata.py to train and generate entity datasets."
+            )
+
+        # Shared baseline generation: load base SD pipeline, generate all images.
+        # This replicates the logic in 0_generate_dataset_original.py.
+        import gc  # noqa: PLC0415
+        import torch  # noqa: PLC0415
+        from diffusers import AutoPipelineForText2Image  # noqa: PLC0415
+        from vision_unlearning.utils.data_generation import generate_dataset  # noqa: PLC0415
+
+        model_base_name = "CompVis/stable-diffusion-v1-4"
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        logger.info("_compute_from_scratch: loading base pipeline %s on %s", model_base_name, device)
+        pipeline = AutoPipelineForText2Image.from_pretrained(
+            model_base_name,
+            torch_dtype=torch.float16,
+            safety_checker=None,
+        ).to(device)
+        logger.info("_compute_from_scratch: pipeline loaded; generating %d images", len(seeds) * len(prompts))
+
+        filenames = [
+            f'off_{seed}_{prompt}.png'
+            for seed in seeds
+            for prompt in prompts
+        ]
+
+        generate_dataset(
+            model_base_name=None,
+            lora_name=None,
+            model_pipeline=pipeline,
+            prompts=prompts,
+            output_path=self.folder_path,
+            seeds=seeds,
+            filenames=filenames,
         )
+
+        logger.info("_compute_from_scratch: done — folder %s", self.folder_path)
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
+        return self.folder_path
 
     def compute(self, seeds: List[int], prompts: List[str]) -> str:
         """Ensure the dataset is available locally and return its folder path.
@@ -476,8 +493,9 @@ class GeneratedDataset(BaseModel):
         Resolution order:
         1. Already complete locally → return immediately.
         2. Present in HuggingFace → download, return.
-        3. Neither → call ``_compute_from_scratch()`` (raises NotImplementedError
-           unless overridden).
+        3. Neither → call ``_compute_from_scratch()``.
+           After generation completes, if ``upload_if_recomputed=True``, upload
+           the folder to HuggingFace.
 
         Returns
         -------
@@ -494,6 +512,7 @@ class GeneratedDataset(BaseModel):
         from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
             huggingface_dataset_exists,
             huggingface_dataset_download,
+            huggingface_dataset_upload,
         )
         if not self.recompute_if_exists and huggingface_dataset_exists(
             self.remote_repository_name,
@@ -517,6 +536,26 @@ class GeneratedDataset(BaseModel):
         assert result == self.folder_path, (
             "_compute_from_scratch() must return self.folder_path"
         )
+        assert self.exists(seeds, prompts), (
+            f"_compute_from_scratch() completed but dataset is still incomplete: "
+            f"{self.folder_path}"
+        )
+
+        # Upload to HF if requested
+        if self.upload_if_recomputed:
+            assert hf_token, (
+                "upload_if_recomputed=True but HF_TOKEN is not set. "
+                "Set HF_TOKEN environment variable before calling compute()."
+            )
+            logger.info("Uploading recomputed dataset to HF: %s", self.hf_config_name)
+            huggingface_dataset_upload(
+                folder_datasets=os.path.join(self.base_folder, 'datasets'),
+                dataset_repository=self.remote_repository_name,
+                dataset_config=self.hf_config_name,
+                token=hf_token,
+            )
+            logger.info("Upload complete: %s", self.hf_config_name)
+
         return self.folder_path
 
     # ------------------------------------------------------------------
@@ -536,19 +575,17 @@ class GeneratedDataset(BaseModel):
     ) -> str:
         """Return the path to a baseline (lora_state='off') image.
 
-        Encapsulates the full fallback chain in a single place:
-        1. Shared task-level baseline folder (preferred — created by
-           0_generate_dataset_original.py).
-        2. Per-entity baseline folder (legacy — O(n) in storage).
-        3. Old entity folder (pre-refactor mixed on_* + off_* format).
+        Fallback chain:
+        1. Shared task-level baseline folder (preferred).
+        2. Legacy entity folder (pre-refactor mixed on_* + off_* format).
 
-        This class method supersedes the module-level get_off_image_path()
-        function; both exist for backward compatibility.
+        This class method delegates to the module-level get_off_image_path().
+        Both exist; prefer this one for new code using GeneratedDataset.
 
         Parameters
         ----------
         task, target, method, num_train_epochs:
-            Used only for the legacy entity-folder fallback (step 3).
+            Used only for the legacy entity-folder fallback (step 2).
         seed, prompt:
             Identify the specific image file.
         base_folder:

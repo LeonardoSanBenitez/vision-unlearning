@@ -2,26 +2,25 @@
 
 Covers:
 - get_shared_baseline_folder(): task-level shared baseline path construction.
-- get_baseline_dataset_folder(): per-entity legacy path construction.
-- get_off_image_path(): shared folder preferred; falls back to per-entity folder;
-  falls back to entity folder when no baseline folder exists.
+- get_off_image_path(): shared folder preferred; falls back to entity folder when
+  no baseline folder exists.
 - exists_unlearned_dataset(): counts only on_* images; off_* files in legacy
   entity folders are ignored for backward compatibility.
-- GeneratedDataset: OO abstraction — folder_path, is_baseline, is_shared_baseline,
-  file_path, exists, hf_config_name, validation, get_off_image_path class method.
+- GeneratedDataset: OO abstraction — folder_path, is_baseline, file_path, exists,
+  hf_config_name, validation, get_off_image_path class method, upload_if_recomputed.
 """
 from __future__ import annotations
 
 import os
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch, call
 
 import pytest
 from pydantic import ValidationError
 
 from vision_unlearning.datasets.testbed import (
     GeneratedDataset,
-    get_baseline_dataset_folder,
     get_generated_dataset_file,
     get_generated_dataset_folder,
     get_off_image_path,
@@ -64,45 +63,14 @@ class TestGetSharedBaselineFolder(unittest.TestCase):
         self.assertIn('baseline', path)
 
 
-class TestGetBaselineDatasetFolder(unittest.TestCase):
-    """get_baseline_dataset_folder returns the per-entity (legacy) path."""
-
-    def test_path_format(self) -> None:
-        path = get_baseline_dataset_folder('people', 'George W Bush', base_folder='assets')
-        self.assertEqual(path, os.path.join('assets', 'datasets', 'generated_people_baseline_George W Bush'))
-
-    def test_default_base_folder(self) -> None:
-        path = get_baseline_dataset_folder('scenes', 'abbey')
-        self.assertEqual(path, os.path.join('assets', 'datasets', 'generated_scenes_baseline_abbey'))
-
-    def test_custom_base_folder(self) -> None:
-        path = get_baseline_dataset_folder('breeds', 'poodle', base_folder='/tmp/my_assets')
-        self.assertEqual(path, os.path.join('/tmp/my_assets', 'datasets', 'generated_breeds_baseline_poodle'))
-
-    def test_no_method_in_path(self) -> None:
-        """Baseline folder must never include a method token."""
-        path = get_baseline_dataset_folder('people', 'Colin Powell')
-        self.assertNotIn('distil', path)
-        self.assertNotIn('uce', path)
-        self.assertNotIn('munba', path)
-
-    def test_baseline_token_present(self) -> None:
-        """Baseline folder must include 'baseline' as a literal token."""
-        path = get_baseline_dataset_folder('people', 'Colin Powell')
-        self.assertIn('baseline', path)
-
-
 class TestGetOffImagePath(unittest.TestCase):
-    """get_off_image_path falls through: shared folder -> per-entity folder -> entity folder."""
+    """get_off_image_path: shared folder preferred; falls back to entity folder."""
 
     def test_prefers_shared_baseline_folder(self) -> None:
-        """Shared task-level folder takes priority over per-entity and entity folders."""
+        """Shared task-level folder takes priority over entity folder."""
         with tempfile.TemporaryDirectory() as tmp:
             shared_folder = get_shared_baseline_folder('people', base_folder=tmp)
             os.makedirs(shared_folder, exist_ok=True)
-            # Also create per-entity folder to confirm shared wins.
-            per_entity_folder = get_baseline_dataset_folder('people', 'Colin Powell', base_folder=tmp)
-            os.makedirs(per_entity_folder, exist_ok=True)
 
             path = get_off_image_path(
                 task='people',
@@ -116,28 +84,10 @@ class TestGetOffImagePath(unittest.TestCase):
             expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
             self.assertEqual(path, os.path.join(shared_folder, expected_filename))
 
-    def test_falls_back_to_per_entity_folder_when_shared_absent(self) -> None:
-        """Per-entity (legacy) baseline folder is tried when shared folder absent."""
+    def test_falls_back_to_entity_folder_when_shared_absent(self) -> None:
+        """When no shared baseline folder exists, fall back to entity folder."""
         with tempfile.TemporaryDirectory() as tmp:
-            per_entity_folder = get_baseline_dataset_folder('people', 'Colin Powell', base_folder=tmp)
-            os.makedirs(per_entity_folder, exist_ok=True)
-
-            path = get_off_image_path(
-                task='people',
-                target='Colin Powell',
-                method='distil',
-                num_train_epochs=400,
-                seed=42,
-                prompt='An image of Colin Powell',
-                base_folder=tmp,
-            )
-            expected_filename = get_generated_dataset_file('off', 42, 'An image of Colin Powell')
-            self.assertEqual(path, os.path.join(per_entity_folder, expected_filename))
-
-    def test_falls_back_to_entity_folder_when_both_baselines_absent(self) -> None:
-        """When no baseline folders exist, fall back to entity folder (pre-refactor behavior)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            # Do NOT create any baseline folder — test the final fallback.
+            # Do NOT create any baseline folder — test the fallback.
             path = get_off_image_path(
                 task='people',
                 target='Colin Powell',
@@ -240,13 +190,6 @@ class TestGeneratedDatasetFolderPath(unittest.TestCase):
             os.path.join('assets', 'datasets', 'generated_people_baseline'),
         )
 
-    def test_per_entity_baseline_folder_path(self) -> None:
-        ds = GeneratedDataset(task='people', target='Colin Powell', base_folder='assets')
-        self.assertEqual(
-            ds.folder_path,
-            os.path.join('assets', 'datasets', 'generated_people_baseline_Colin Powell'),
-        )
-
     def test_entity_dataset_folder_path(self) -> None:
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
@@ -270,17 +213,11 @@ class TestGeneratedDatasetFolderPath(unittest.TestCase):
 
 
 class TestGeneratedDatasetIdentity(unittest.TestCase):
-    """is_baseline and is_shared_baseline reflect the dataset kind correctly."""
+    """is_baseline reflects the dataset kind correctly."""
 
-    def test_shared_baseline_is_baseline_and_shared(self) -> None:
+    def test_shared_baseline_is_baseline(self) -> None:
         ds = GeneratedDataset(task='people')
         self.assertTrue(ds.is_baseline)
-        self.assertTrue(ds.is_shared_baseline)
-
-    def test_per_entity_baseline_is_baseline_not_shared(self) -> None:
-        ds = GeneratedDataset(task='people', target='Colin Powell')
-        self.assertTrue(ds.is_baseline)
-        self.assertFalse(ds.is_shared_baseline)
 
     def test_entity_dataset_is_not_baseline(self) -> None:
         ds = GeneratedDataset(
@@ -288,7 +225,6 @@ class TestGeneratedDatasetIdentity(unittest.TestCase):
             method='distil', num_train_epochs=400,
         )
         self.assertFalse(ds.is_baseline)
-        self.assertFalse(ds.is_shared_baseline)
 
 
 class TestGeneratedDatasetValidation(unittest.TestCase):
@@ -302,14 +238,22 @@ class TestGeneratedDatasetValidation(unittest.TestCase):
         with self.assertRaises((ValidationError, AssertionError)):
             GeneratedDataset(task='people', target='Colin Powell', method='distil')
 
-    def test_baseline_with_no_target_and_no_method_is_valid(self) -> None:
+    def test_baseline_with_no_target_is_valid(self) -> None:
         ds = GeneratedDataset(task='breeds')
-        self.assertTrue(ds.is_shared_baseline)
-
-    def test_baseline_with_target_and_no_method_is_valid(self) -> None:
-        ds = GeneratedDataset(task='breeds', target='poodle')
         self.assertTrue(ds.is_baseline)
-        self.assertFalse(ds.is_shared_baseline)
+
+    def test_target_without_method_raises(self) -> None:
+        """Per-entity baseline concept does not exist — target requires method."""
+        with self.assertRaises((ValidationError, ValueError)):
+            GeneratedDataset(task='breeds', target='poodle')
+
+    def test_upload_if_recomputed_default_false(self) -> None:
+        ds = GeneratedDataset(task='people')
+        self.assertFalse(ds.upload_if_recomputed)
+
+    def test_upload_if_recomputed_can_be_set(self) -> None:
+        ds = GeneratedDataset(task='people', upload_if_recomputed=True)
+        self.assertTrue(ds.upload_if_recomputed)
 
 
 class TestGeneratedDatasetFilePath(unittest.TestCase):
@@ -349,10 +293,6 @@ class TestGeneratedDatasetHfConfigName(unittest.TestCase):
     def test_shared_baseline_config_name(self) -> None:
         ds = GeneratedDataset(task='people')
         self.assertEqual(ds.hf_config_name, 'generated_people_baseline')
-
-    def test_per_entity_baseline_config_name(self) -> None:
-        ds = GeneratedDataset(task='people', target='Colin Powell')
-        self.assertEqual(ds.hf_config_name, 'generated_people_baseline_Colin Powell')
 
     def test_entity_dataset_config_name(self) -> None:
         ds = GeneratedDataset(
@@ -449,6 +389,113 @@ class TestGeneratedDatasetGetOffImagePath(unittest.TestCase):
                 seed=42, prompt='An image of Colin Powell', base_folder=tmp,
             )
             self.assertTrue(path.startswith(shared.folder_path))
+
+
+class TestGeneratedDatasetComputeLocalHit(unittest.TestCase):
+    """compute() returns immediately when data is already present locally."""
+
+    def _write_files(self, folder: str, filenames: list) -> None:
+        os.makedirs(folder, exist_ok=True)
+        for fn in filenames:
+            open(os.path.join(folder, fn), 'w').close()
+
+    def test_compute_returns_folder_when_local_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of Colin Powell']
+            ds = GeneratedDataset(task='people', base_folder=tmp)
+            files = ['off_42_An image of Colin Powell.png', 'metadata.jsonl']
+            self._write_files(ds.folder_path, files)
+            # Should not call HF or scratch — data is already there
+            result = ds.compute(seeds, prompts)
+            self.assertEqual(result, ds.folder_path)
+
+
+class TestGeneratedDatasetUploadIfRecomputed(unittest.TestCase):
+    """compute() uploads to HF after scratch generation when upload_if_recomputed=True."""
+
+    def test_upload_called_after_scratch_generation(self) -> None:
+        """When _compute_from_scratch succeeds and upload_if_recomputed=True, upload is called."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of Colin Powell']
+
+            ds = GeneratedDataset(task='people', base_folder=tmp, upload_if_recomputed=True)
+
+            def fake_compute_from_scratch(s: list, p: list) -> str:  # type: ignore[override]
+                # Write the expected files so exists() returns True
+                os.makedirs(ds.folder_path, exist_ok=True)
+                for seed in s:
+                    for prompt in p:
+                        fname = f'off_{seed:02d}_{prompt}.png'
+                        open(os.path.join(ds.folder_path, fname), 'w').close()
+                open(os.path.join(ds.folder_path, 'metadata.jsonl'), 'w').close()
+                return ds.folder_path
+
+            mock_upload = MagicMock()
+            mock_hf_exists = MagicMock(return_value=False)
+
+            with patch.dict('os.environ', {'HF_TOKEN': 'fake_token'}):
+                with patch.object(ds, '_compute_from_scratch', side_effect=fake_compute_from_scratch):
+                    with patch(
+                        'vision_unlearning.integrations.huggingface.huggingface_dataset_upload',
+                        mock_upload,
+                    ):
+                        with patch(
+                            'vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                            mock_hf_exists,
+                        ):
+                            result = ds.compute(seeds, prompts)
+
+            self.assertEqual(result, ds.folder_path)
+            mock_upload.assert_called_once()
+
+    def test_upload_not_called_when_upload_if_recomputed_false(self) -> None:
+        """Default behaviour: upload is NOT called even after scratch generation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of Colin Powell']
+
+            ds = GeneratedDataset(task='people', base_folder=tmp, upload_if_recomputed=False)
+
+            def fake_compute_from_scratch(s: list, p: list) -> str:  # type: ignore[override]
+                os.makedirs(ds.folder_path, exist_ok=True)
+                for seed in s:
+                    for prompt in p:
+                        fname = f'off_{seed:02d}_{prompt}.png'
+                        open(os.path.join(ds.folder_path, fname), 'w').close()
+                open(os.path.join(ds.folder_path, 'metadata.jsonl'), 'w').close()
+                return ds.folder_path
+
+            mock_upload = MagicMock()
+            mock_hf_exists = MagicMock(return_value=False)
+
+            with patch.dict('os.environ', {'HF_TOKEN': 'fake_token'}):
+                with patch.object(ds, '_compute_from_scratch', side_effect=fake_compute_from_scratch):
+                    with patch(
+                        'vision_unlearning.integrations.huggingface.huggingface_dataset_upload',
+                        mock_upload,
+                    ):
+                        with patch(
+                            'vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                            mock_hf_exists,
+                        ):
+                            result = ds.compute(seeds, prompts)
+
+            self.assertEqual(result, ds.folder_path)
+            mock_upload.assert_not_called()
+
+
+class TestGeneratedDatasetComputeFromScratchEntityRaises(unittest.TestCase):
+    """_compute_from_scratch raises NotImplementedError for entity datasets."""
+
+    def test_entity_dataset_raises_not_implemented(self) -> None:
+        ds = GeneratedDataset(
+            task='people', target='Colin Powell',
+            method='distil', num_train_epochs=400,
+        )
+        with self.assertRaises(NotImplementedError):
+            ds._compute_from_scratch([42], ['An image of Colin Powell'])
 
 
 if __name__ == '__main__':
