@@ -3,7 +3,7 @@
 # triggering torch/torchvision at package-init time.  When torch IS installed
 # the behaviour is identical to before.
 try:
-    from vision_unlearning.datasets.base import *
+    #from vision_unlearning.datasets.base import *  # TODO: torchvision 0.23.0 is causing a import error, maybe a version incompatibility...
     from vision_unlearning.datasets.cifar import *
     from vision_unlearning.datasets.coco import *
     from vision_unlearning.datasets.imagenette import *
