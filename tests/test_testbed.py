@@ -19,6 +19,9 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 from pydantic import ValidationError
 
+import sys
+import importlib
+
 from vision_unlearning.datasets.testbed import (
     GeneratedDataset,
     get_generated_dataset_file,
@@ -27,6 +30,11 @@ from vision_unlearning.datasets.testbed import (
     get_shared_baseline_folder,
     exists_unlearned_dataset,
 )
+# Resolve the testbed and data_generation modules via sys.modules to avoid
+# the torchvision.datasets namespace collision that trips up the standard
+# `import vision_unlearning.datasets.testbed` syntax.
+_testbed_module = sys.modules['vision_unlearning.datasets.testbed']
+import vision_unlearning.utils.data_generation as _data_generation_module
 
 
 class TestGetSharedBaselineFolder(unittest.TestCase):
@@ -486,16 +494,106 @@ class TestGeneratedDatasetUploadIfRecomputed(unittest.TestCase):
             mock_upload.assert_not_called()
 
 
-class TestGeneratedDatasetComputeFromScratchEntityRaises(unittest.TestCase):
-    """_compute_from_scratch raises NotImplementedError for entity datasets."""
+class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
+    """_compute_from_scratch for entity datasets: model-not-found raises FileNotFoundError;
+    model-found path calls generate_dataset with the correct arguments."""
 
-    def test_entity_dataset_raises_not_implemented(self) -> None:
+    def test_entity_dataset_raises_file_not_found_when_model_missing(self) -> None:
+        """FileNotFoundError is raised when the trained model does not exist on disk."""
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
             method='distil', num_train_epochs=400,
         )
-        with self.assertRaises(NotImplementedError):
+        # exists_unlearned_model will return False because the path does not exist
+        # in the test environment — no patching needed.
+        with self.assertRaises(FileNotFoundError) as ctx:
             ds._compute_from_scratch([42], ['An image of Colin Powell'])
+        self.assertIn('Colin Powell', str(ctx.exception))
+        self.assertIn('distil', str(ctx.exception))
+
+    def test_entity_dataset_lora_method_calls_generate_dataset(self) -> None:
+        """For a LoRA method (distil), _compute_from_scratch calls generate_dataset
+        with model_base_name + lora_name + lora_requires_inversion=False."""
+        ds = GeneratedDataset(
+            task='people', target='Colin Powell',
+            method='distil', num_train_epochs=400,
+        )
+        seeds = [42]
+        prompts = ['An image of Colin Powell']
+        expected_filenames = ['on_42_An image of Colin Powell.png']
+
+        with patch.object(_testbed_module, 'exists_unlearned_model', return_value=True), \
+             patch.object(_testbed_module, 'get_unlearned_model_folder',
+                          return_value='/fake/model/path') as mock_model_folder, \
+             patch.object(_data_generation_module, 'generate_dataset',
+                          return_value=[]) as mock_gen, \
+             patch('torch.cuda.is_available', return_value=False):
+            ds._compute_from_scratch(seeds, prompts)
+
+            mock_model_folder.assert_called_once_with(
+                'people', 'distil', 400, 'Colin Powell', 'assets'
+            )
+            mock_gen.assert_called_once_with(
+                model_base_name='CompVis/stable-diffusion-v1-4',
+                lora_name='/fake/model/path',
+                model_pipeline=None,
+                prompts=prompts,
+                output_path=ds.folder_path,
+                seeds=seeds,
+                filenames=expected_filenames,
+                lora_requires_inversion=False,
+            )
+
+    def test_entity_dataset_munba_sets_lora_requires_inversion_true(self) -> None:
+        """For munba, lora_requires_inversion must be True."""
+        ds = GeneratedDataset(
+            task='people', target='Brad Pitt',
+            method='munba', num_train_epochs=400,
+        )
+        seeds = [42]
+        prompts = ['An image of Brad Pitt']
+
+        with patch.object(_testbed_module, 'exists_unlearned_model', return_value=True), \
+             patch.object(_testbed_module, 'get_unlearned_model_folder',
+                          return_value='/fake/model/path'), \
+             patch.object(_data_generation_module, 'generate_dataset',
+                          return_value=[]) as mock_gen, \
+             patch('torch.cuda.is_available', return_value=False):
+            ds._compute_from_scratch(seeds, prompts)
+
+        call_kwargs = mock_gen.call_args.kwargs
+        self.assertTrue(call_kwargs['lora_requires_inversion'])
+
+    def test_entity_dataset_uce_uses_get_pipeline_from_modified_weights(self) -> None:
+        """For UCE, _compute_from_scratch uses UCE.get_pipeline_from_modified_weights."""
+        from vision_unlearning.unlearner.uce_sd_erase import UCE
+        ds = GeneratedDataset(
+            task='people', target='Colin Powell',
+            method='uce', num_train_epochs=400,
+        )
+        seeds = [42]
+        prompts = ['An image of Colin Powell']
+        fake_pipeline = MagicMock()
+
+        with patch.object(_testbed_module, 'exists_unlearned_model', return_value=True), \
+             patch.object(_testbed_module, 'get_unlearned_model_folder',
+                          return_value='/fake/uce/path'), \
+             patch.object(_data_generation_module, 'generate_dataset',
+                          return_value=[]) as mock_gen, \
+             patch('torch.cuda.is_available', return_value=False), \
+             patch.object(UCE, 'get_pipeline_from_modified_weights',
+                          return_value=fake_pipeline) as mock_pipeline:
+            ds._compute_from_scratch(seeds, prompts)
+
+            mock_pipeline.assert_called_once_with(
+                pretrained_model_name_or_path='CompVis/stable-diffusion-v1-4',
+                device='cpu',
+                output_dir='/fake/uce/path',
+            )
+            gen_call_kwargs = mock_gen.call_args.kwargs
+            self.assertIsNone(gen_call_kwargs['model_base_name'])
+            self.assertIsNone(gen_call_kwargs['lora_name'])
+            self.assertEqual(gen_call_kwargs['model_pipeline'], fake_pipeline)
 
 
 if __name__ == '__main__':

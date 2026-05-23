@@ -433,50 +433,121 @@ class GeneratedDataset(BaseModel):
 
         For the shared baseline (method=None): loads the base SD pipeline once
         and generates all off-images for all (seed, prompt) pairs, storing them
-        in folder_path with the ``off_{seed:02d}_{prompt}.png`` filename convention.
+        in folder_path with the ``off_{seed}_{prompt}.png`` filename convention.
 
-        For entity datasets (method set): not implemented — use the standalone
-        script 1_unlearn_from_metadata.py which handles LoRA training + generation.
+        For entity datasets (method set): loads the already-trained unlearned
+        model identified by (task, target, method, num_train_epochs) and generates
+        on-images.  Raises FileNotFoundError if the trained model does not exist on
+        disk — the caller must run 1_unlearn_from_metadata.py first to produce the
+        model weights before calling compute().
+
+        In both cases the method returns self.folder_path after generation.
         """
-        if not self.is_baseline:
-            raise NotImplementedError(
-                "GeneratedDataset._compute_from_scratch for entity datasets is not supported "
-                "in-process. Use 1_unlearn_from_metadata.py to train and generate entity datasets."
-            )
-
-        # Shared baseline generation: load base SD pipeline, generate all images.
-        # This replicates the logic in 0_generate_dataset_original.py.
         import gc  # noqa: PLC0415
         import torch  # noqa: PLC0415
-        from diffusers import AutoPipelineForText2Image  # noqa: PLC0415
         from vision_unlearning.utils.data_generation import generate_dataset  # noqa: PLC0415
 
         model_base_name = "CompVis/stable-diffusion-v1-4"
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        logger.info("_compute_from_scratch: loading base pipeline %s on %s", model_base_name, device)
-        pipeline = AutoPipelineForText2Image.from_pretrained(
-            model_base_name,
-            torch_dtype=torch.float16,
-            safety_checker=None,
-        ).to(device)
-        logger.info("_compute_from_scratch: pipeline loaded; generating %d images", len(seeds) * len(prompts))
+        if self.is_baseline:
+            # ------------------------------------------------------------------
+            # Shared baseline: generate off-images using the base SD pipeline.
+            # ------------------------------------------------------------------
+            from diffusers import AutoPipelineForText2Image  # noqa: PLC0415
 
-        filenames = [
-            f'off_{seed}_{prompt}.png'
-            for seed in seeds
-            for prompt in prompts
-        ]
+            logger.info("_compute_from_scratch: loading base pipeline %s on %s", model_base_name, device)
+            pipeline = AutoPipelineForText2Image.from_pretrained(
+                model_base_name,
+                torch_dtype=torch.float16,
+                safety_checker=None,
+            ).to(device)
+            logger.info("_compute_from_scratch: pipeline loaded; generating %d images", len(seeds) * len(prompts))
 
-        generate_dataset(
-            model_base_name=None,
-            lora_name=None,
-            model_pipeline=pipeline,
-            prompts=prompts,
-            output_path=self.folder_path,
-            seeds=seeds,
-            filenames=filenames,
-        )
+            filenames = [
+                f'off_{seed}_{prompt}.png'
+                for seed in seeds
+                for prompt in prompts
+            ]
+
+            generate_dataset(
+                model_base_name=None,
+                lora_name=None,
+                model_pipeline=pipeline,
+                prompts=prompts,
+                output_path=self.folder_path,
+                seeds=seeds,
+                filenames=filenames,
+            )
+
+        else:
+            # ------------------------------------------------------------------
+            # Entity dataset: load the already-trained unlearned model and
+            # generate on-images.  Raise FileNotFoundError if model is missing.
+            # ------------------------------------------------------------------
+            assert self.target is not None
+            assert self.method is not None
+            assert self.num_train_epochs is not None
+
+            model_folder = get_unlearned_model_folder(
+                self.task, self.method, self.num_train_epochs, self.target, self.base_folder
+            )
+            if not exists_unlearned_model(
+                self.task, self.method, self.num_train_epochs, self.target, self.base_folder
+            ):
+                raise FileNotFoundError(
+                    f"Trained unlearned model not found at '{model_folder}'. "
+                    f"Run 1_unlearn_from_metadata.py first to produce the model weights "
+                    f"for task={self.task!r}, target={self.target!r}, "
+                    f"method={self.method!r}, epochs={self.num_train_epochs}."
+                )
+
+            filenames = [
+                f'on_{seed}_{prompt}.png'
+                for seed in seeds
+                for prompt in prompts
+            ]
+
+            if self.method == 'uce':
+                from vision_unlearning.unlearner.uce_sd_erase import UCE  # noqa: PLC0415
+                logger.info(
+                    "_compute_from_scratch: loading UCE pipeline from %s on %s",
+                    model_folder, device,
+                )
+                pipeline = UCE.get_pipeline_from_modified_weights(
+                    pretrained_model_name_or_path=model_base_name,
+                    device=device,
+                    output_dir=model_folder,
+                )
+                logger.info(
+                    "_compute_from_scratch: UCE pipeline loaded; generating %d images",
+                    len(seeds) * len(prompts),
+                )
+                generate_dataset(
+                    model_base_name=None,
+                    lora_name=None,
+                    model_pipeline=pipeline,
+                    prompts=prompts,
+                    output_path=self.folder_path,
+                    seeds=seeds,
+                    filenames=filenames,
+                )
+            else:
+                # distil / munba — LoRA-based methods.
+                logger.info(
+                    "_compute_from_scratch: loading %s LoRA from %s on %s",
+                    self.method, model_folder, device,
+                )
+                generate_dataset(
+                    model_base_name=model_base_name,
+                    lora_name=model_folder,
+                    model_pipeline=None,
+                    prompts=prompts,
+                    output_path=self.folder_path,
+                    seeds=seeds,
+                    filenames=filenames,
+                    lora_requires_inversion=(self.method == 'munba'),
+                )
 
         logger.info("_compute_from_scratch: done — folder %s", self.folder_path)
 
