@@ -7,7 +7,8 @@ Covers:
 - exists_unlearned_dataset(): counts only on_* images; off_* files in legacy
   entity folders are ignored for backward compatibility.
 - GeneratedDataset: OO abstraction — folder_path, is_baseline, file_path, exists,
-  hf_config_name, validation, get_off_image_path class method, upload_if_recomputed.
+  hf_config_name, hf_path_in_repo, validation, get_off_image_path class method,
+  upload_if_recomputed.
 """
 from __future__ import annotations
 
@@ -310,6 +311,35 @@ class TestGeneratedDatasetHfConfigName(unittest.TestCase):
         self.assertEqual(ds.hf_config_name, 'generated_people_Colin Powell_distil_400')
 
 
+class TestGeneratedDatasetHfPathInRepo(unittest.TestCase):
+    """hf_path_in_repo always places datasets under the datasets/ prefix in the HF repo."""
+
+    def test_shared_baseline_hf_path_in_repo(self) -> None:
+        ds = GeneratedDataset(task='breeds')
+        self.assertEqual(ds.hf_path_in_repo, 'datasets/generated_breeds_baseline')
+
+    def test_entity_dataset_hf_path_in_repo(self) -> None:
+        ds = GeneratedDataset(
+            task='people', target='Colin Powell',
+            method='distil', num_train_epochs=400,
+        )
+        self.assertEqual(ds.hf_path_in_repo, 'datasets/generated_people_Colin Powell_distil_400')
+
+    def test_hf_path_in_repo_starts_with_datasets_prefix(self) -> None:
+        """All generated datasets live under datasets/ in the HF repo."""
+        for task in ('people', 'scenes', 'breeds'):
+            ds = GeneratedDataset(task=task)  # type: ignore[arg-type]
+            self.assertTrue(
+                ds.hf_path_in_repo.startswith('datasets/'),
+                f"hf_path_in_repo for {task} baseline should start with 'datasets/': {ds.hf_path_in_repo}",
+            )
+
+    def test_hf_path_in_repo_uses_hf_config_name(self) -> None:
+        """hf_path_in_repo is datasets/{hf_config_name} by construction."""
+        ds = GeneratedDataset(task='scenes')
+        self.assertEqual(ds.hf_path_in_repo, f"datasets/{ds.hf_config_name}")
+
+
 class TestGeneratedDatasetExists(unittest.TestCase):
     """GeneratedDataset.exists() counts the right image type for each dataset kind."""
 
@@ -457,6 +487,13 @@ class TestGeneratedDatasetUploadIfRecomputed(unittest.TestCase):
 
             self.assertEqual(result, ds.folder_path)
             mock_upload.assert_called_once()
+            # Verify upload uses hf_path_in_repo (datasets/ prefix) not bare hf_config_name
+            call_kwargs = mock_upload.call_args.kwargs
+            self.assertEqual(
+                call_kwargs.get('path_in_repo'),
+                ds.hf_path_in_repo,
+                "upload must use hf_path_in_repo ('datasets/...'), not bare hf_config_name",
+            )
 
     def test_upload_not_called_when_upload_if_recomputed_false(self) -> None:
         """Default behaviour: upload is NOT called even after scratch generation."""

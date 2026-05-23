@@ -106,6 +106,7 @@ def huggingface_dataset_exists(
     dataset_repository: str,
     dataset_config: str,
     token: Optional[str],
+    path_in_repo: Optional[str] = None,
 ) -> bool:
     """
     Checks whether a folder exists in a Hugging Face dataset repository.
@@ -114,12 +115,18 @@ def huggingface_dataset_exists(
         dataset_repository="username/my_dataset"
         dataset_config="configs/en"
 
+    Args:
+        path_in_repo: HF-side path to check.  When None (default) the check
+            uses ``dataset_config`` as-is.  Pass an explicit value to decouple
+            the local folder name from its location in the HF repository (e.g.,
+            ``path_in_repo="datasets/generated_breeds_baseline"``).
+
     Works without listing the whole repository.
     """
-
+    hf_path = dataset_config if path_in_repo is None else path_in_repo
     url = (
         f"https://huggingface.co/api/datasets/"
-        f"{dataset_repository}/tree/main/{dataset_config.replace(os.sep, '/')}"
+        f"{dataset_repository}/tree/main/{hf_path.replace(os.sep, '/')}"
     )
 
     headers = {}
@@ -191,12 +198,25 @@ def huggingface_dataset_upload(
     dataset_repository: str,
     dataset_config: str,
     token: str,
-):
+    path_in_repo: Optional[str] = None,
+) -> None:
     '''
-    Supposes that a folder `dataset_config` exists in `folder_datasets`, and that it contains the dataset files
+    Upload a dataset folder to a HuggingFace repository.
+
+    Supposes that a folder ``dataset_config`` exists in ``folder_datasets``,
+    and that it contains the dataset files.
+
+    Args:
+        path_in_repo: Destination path inside the HF repo.  When None (default)
+            the files land at ``dataset_config`` relative to the repo root.
+            Pass an explicit value to decouple the local folder name from its
+            location in the HF repository (e.g.,
+            ``path_in_repo="datasets/generated_breeds_baseline"``).
     '''
     folder_dataset = os.path.join(folder_datasets, dataset_config)
     assert os.path.exists(folder_dataset)
+
+    hf_path = dataset_config if path_in_repo is None else path_in_repo
 
     # TODO: each config/version should be immutable... should this be ensured here?
     # TODO: upload_large_folder is better, but don't allow to set the path_in_repo
@@ -205,7 +225,7 @@ def huggingface_dataset_upload(
     api.upload_folder(
         folder_path=folder_dataset,
         repo_id=dataset_repository,
-        path_in_repo=dataset_config,
+        path_in_repo=hf_path,
         repo_type='dataset',
         token=token,
     )
@@ -219,10 +239,24 @@ def huggingface_dataset_download(
     clean: bool = False,
     folder_cache: str = '/tmp/huggingface_cache',
     clean_cache: bool = False,
-):
+    path_in_repo: Optional[str] = None,
+) -> None:
     '''
-    @param clean: If True, the folder will be deleted before downloading
+    Download a dataset folder from HuggingFace.
+
+    Args:
+        folder_datasets: Local parent directory.  The dataset is placed at
+            ``os.path.join(folder_datasets, dataset_config)``.
+        dataset_config: Name of the local subfolder to create under
+            ``folder_datasets``.
+        path_in_repo: Path inside the HF repository that contains the dataset
+            files.  When None (default) it is the same as ``dataset_config``.
+            Pass an explicit value when the HF-side path differs from the local
+            folder name (e.g., ``path_in_repo="datasets/generated_breeds_baseline"``).
+        clean: If True, the local folder is deleted before downloading.
     '''
+    hf_path = dataset_config if path_in_repo is None else path_in_repo
+
     folder_dataset = os.path.join(folder_datasets, dataset_config)
     if clean:
         if os.path.exists(folder_dataset):
@@ -240,17 +274,17 @@ def huggingface_dataset_download(
         repo_id=dataset_repository,
         repo_type="dataset",
         token=token,
-        allow_patterns=f"{dataset_config}/*",
+        allow_patterns=f"{hf_path}/*",
         cache_dir=folder_cache,
     )
 
     # Copy from cache to final folder
-    for root, _, files in os.walk(os.path.join(repo_path, dataset_config)):
+    for root, _, files in os.walk(os.path.join(repo_path, hf_path)):
         for file in files:
             source_path = os.path.join(root, file)
             if os.path.islink(source_path):
                 source_path = os.path.join(root, os.readlink(source_path))
-            target_path = os.path.join(folder_dataset, os.path.relpath(os.path.join(root, file), start=os.path.join(repo_path, dataset_config)))
+            target_path = os.path.join(folder_dataset, os.path.relpath(os.path.join(root, file), start=os.path.join(repo_path, hf_path)))
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             shutil.copy2(source_path, target_path)
 

@@ -362,8 +362,24 @@ class GeneratedDataset(BaseModel):
 
     @property
     def hf_config_name(self) -> str:
-        """HuggingFace config / folder name (basename of folder_path)."""
+        """HuggingFace config / folder name (basename of folder_path).
+
+        This is the bare folder name used for local path computation.
+        Use ``hf_path_in_repo`` when you need the full HF-side path.
+        """
         return os.path.basename(self.folder_path)
+
+    @property
+    def hf_path_in_repo(self) -> str:
+        """Full path inside the HuggingFace repository where this dataset lives.
+
+        All generated datasets (baseline and entity) live under the ``datasets/``
+        prefix in the HF repo, matching the convention used by the legacy
+        synchronisation notebook (0b. Synchronize.ipynb).
+
+        Example: ``"datasets/generated_breeds_baseline"``
+        """
+        return f"datasets/{self.hf_config_name}"
 
     # ------------------------------------------------------------------
     # File helpers
@@ -641,12 +657,14 @@ class GeneratedDataset(BaseModel):
             self.remote_repository_name,
             self.hf_config_name,
             token=hf_token,
+            path_in_repo=self.hf_path_in_repo,
         ):
             huggingface_dataset_download(
                 folder_datasets=os.path.join(self.base_folder, 'datasets'),
                 dataset_repository=self.remote_repository_name,
                 dataset_config=self.hf_config_name,
                 token=hf_token or '',
+                path_in_repo=self.hf_path_in_repo,
             )
             assert self.exists(seeds, prompts), (
                 f"HuggingFace download completed but dataset is still incomplete: "
@@ -670,14 +688,18 @@ class GeneratedDataset(BaseModel):
                 "upload_if_recomputed=True but HF_TOKEN is not set. "
                 "Set HF_TOKEN environment variable before calling compute()."
             )
-            logger.info("Uploading recomputed dataset to HF: %s", self.hf_config_name)
+            logger.info(
+                "Uploading recomputed dataset to HF: %s -> %s",
+                self.hf_config_name, self.hf_path_in_repo,
+            )
             huggingface_dataset_upload(
                 folder_datasets=os.path.join(self.base_folder, 'datasets'),
                 dataset_repository=self.remote_repository_name,
                 dataset_config=self.hf_config_name,
                 token=hf_token,
+                path_in_repo=self.hf_path_in_repo,
             )
-            logger.info("Upload complete: %s", self.hf_config_name)
+            logger.info("Upload complete: %s", self.hf_path_in_repo)
 
         return self.folder_path
 
