@@ -98,6 +98,7 @@ logger = get_logger('I_care')
 class ResultTemplate(BaseModel):
     recompute_if_exists: bool = False
     save_outputs: bool = True
+    upload_if_recomputed: bool = False
     base_folder: str = 'assets'
     remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
 
@@ -150,6 +151,27 @@ class ResultTemplate(BaseModel):
                 os.makedirs(os.path.dirname(self._get_data_path_local()), exist_ok=True)
                 with open(self._get_data_path_local(), "w", encoding="utf-8") as f:
                     json.dump(data, f)
+            # Upload to HF if requested
+            if self.upload_if_recomputed:
+                assert self.save_outputs, (
+                    "upload_if_recomputed=True requires save_outputs=True "
+                    "(no file to upload when save_outputs=False)."
+                )
+                assert hf_token, (
+                    "upload_if_recomputed=True but HF_TOKEN is not set. "
+                    "Set HF_TOKEN environment variable before calling compute()."
+                )
+                logger.info(
+                    "Uploading recomputed RT result to HF: %s",
+                    self._get_data_path_remote(),
+                )
+                huggingface_dataset_file_upload(
+                    file_path=self._get_data_path_local(),
+                    dataset_repository=self.remote_repository_name,
+                    dataset_path=self._get_data_path_remote(),
+                    token=hf_token,
+                )
+                logger.info("Upload complete: %s", self._get_data_path_remote())
 
         assert type(data) == dict, f"Expected a dict in the json file, but got {type(data)}"
         assert 'result' in data, f"Expected 'result' key in the json file, but got {list(data.keys())}"

@@ -26,6 +26,7 @@ import pytest  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+import vision_unlearning.benchmarks.I_care.metadata as _meta_mod  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
 
 
@@ -553,3 +554,122 @@ class TestInterferenceVisualSummaryOffImagePath:
         rt._compute_from_scratch()
 
         assert len(entity_folder_calls) > 0, "get_generated_dataset_folder was never called for 'on' images"
+
+
+# ---------------------------------------------------------------------------
+# upload_if_recomputed — InterferencePerEntity
+# ---------------------------------------------------------------------------
+
+_FAKE_IPE_DATA = [
+    {
+        "name": "Alice",
+        "metric_distil_400_emitter_minus_receiver_average_clip_diff (↑)": 0.5,
+    },
+    {
+        "name": "Bob",
+        "metric_distil_400_emitter_minus_receiver_average_clip_diff (↑)": 0.3,
+    },
+]
+
+
+class TestInterferencePerEntityUploadIfRecomputed:
+    """upload_if_recomputed=True triggers HF upload after compute-from-scratch."""
+
+    def test_default_is_false(self) -> None:
+        """upload_if_recomputed defaults to False."""
+        ipe = vb.InterferencePerEntity(task='people')
+        assert ipe.upload_if_recomputed is False
+
+    def test_can_be_set_true(self) -> None:
+        ipe = vb.InterferencePerEntity(task='people', upload_if_recomputed=True)
+        assert ipe.upload_if_recomputed is True
+
+    def test_upload_called_after_scratch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=True: huggingface_dataset_file_upload is called."""
+        ipe = vb.InterferencePerEntity(
+            task='people',
+            base_folder=str(tmp_path),
+            upload_if_recomputed=True,
+        )
+        monkeypatch.setattr(
+            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
+
+        upload_calls: List[Any] = []
+
+        def fake_upload(**kw: Any) -> None:
+            upload_calls.append(kw)
+
+        monkeypatch.setattr(_meta_mod, "huggingface_dataset_file_upload", fake_upload)
+
+        with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
+            result = ipe.compute()
+
+        assert len(result) == 2
+        assert len(upload_calls) == 1, "upload must be called exactly once"
+        assert upload_calls[0]["dataset_path"] == ipe._get_data_path_remote()
+        assert upload_calls[0]["dataset_repository"] == ipe.remote_repository_name
+
+    def test_upload_not_called_when_false(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=False (default): no upload even after scratch."""
+        ipe = vb.InterferencePerEntity(
+            task='people',
+            base_folder=str(tmp_path),
+            upload_if_recomputed=False,
+        )
+        monkeypatch.setattr(
+            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
+
+        upload_calls: List[Any] = []
+        monkeypatch.setattr(
+            _meta_mod,
+            "huggingface_dataset_file_upload",
+            lambda **kw: upload_calls.append(kw),
+        )
+
+        with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
+            ipe.compute()
+
+        assert len(upload_calls) == 0, "upload must NOT be called when upload_if_recomputed=False"
+
+    def test_upload_requires_save_outputs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=True with save_outputs=False raises AssertionError."""
+        ipe = vb.InterferencePerEntity(
+            task='people',
+            base_folder=str(tmp_path),
+            upload_if_recomputed=True,
+            save_outputs=False,
+        )
+        monkeypatch.setattr(
+            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
+        with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
+            with pytest.raises(AssertionError, match="save_outputs"):
+                ipe.compute()
+
+    def test_upload_requires_hf_token(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=True without HF_TOKEN raises AssertionError."""
+        ipe = vb.InterferencePerEntity(
+            task='people',
+            base_folder=str(tmp_path),
+            upload_if_recomputed=True,
+        )
+        monkeypatch.setattr(
+            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        with pytest.raises(AssertionError, match="HF_TOKEN"):
+            ipe.compute()

@@ -17,6 +17,7 @@ from vision_unlearning.datasets.testbed import get_metadata_filtered, get_genera
 from vision_unlearning.integrations.huggingface import (
     huggingface_dataset_file_exists,
     huggingface_dataset_file_download,
+    huggingface_dataset_file_upload,
 )
 from vision_unlearning.benchmarks.I_care.configuration import (
     type_task,
@@ -150,6 +151,7 @@ class InterferencePerEntity(BaseModel):
     remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
     save_outputs: bool = True
     recompute_if_exists: bool = False
+    upload_if_recomputed: bool = False
     # This class deprecates: save_interference_per_entity, get_interference_per_entity_path
 
     def _get_data_path_remote(self) -> str:
@@ -193,6 +195,27 @@ class InterferencePerEntity(BaseModel):
                 os.makedirs(os.path.dirname(self._get_data_path_local()), exist_ok=True)
                 with open(self._get_data_path_local(), "w", encoding="utf-8") as f:
                     json.dump(data, f)
+            # Upload to HF if requested
+            if self.upload_if_recomputed:
+                assert self.save_outputs, (
+                    "upload_if_recomputed=True requires save_outputs=True "
+                    "(no file to upload when save_outputs=False)."
+                )
+                assert hf_token, (
+                    "upload_if_recomputed=True but HF_TOKEN is not set. "
+                    "Set HF_TOKEN environment variable before calling compute()."
+                )
+                logger.info(
+                    "Uploading recomputed InterferencePerEntity to HF: %s",
+                    self._get_data_path_remote(),
+                )
+                huggingface_dataset_file_upload(
+                    file_path=self._get_data_path_local(),
+                    dataset_repository=self.remote_repository_name,
+                    dataset_path=self._get_data_path_remote(),
+                    token=hf_token,
+                )
+                logger.info("Upload complete: %s", self._get_data_path_remote())
         assert type(data) == list, f"Expected a dict in the json file, but got {type(data)}"
         assert len(data) > 0  # == 100
         assert all(isinstance(item, dict) for item in data)

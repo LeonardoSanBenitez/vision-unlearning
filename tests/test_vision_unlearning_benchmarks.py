@@ -27,6 +27,7 @@ import json
 import os
 import sys
 from typing import Any, Dict, List
+from unittest.mock import patch
 
 import matplotlib
 
@@ -656,6 +657,105 @@ class TestComputeFromScratchMocked:
         # The serialized SHAP must roundtrip back into an Explanation.
         restored = vb.dict_to_explanation(data["result"]["shap_explanations"])
         assert restored.values is not None
+
+
+# ---------------------------------------------------------------------------
+# upload_if_recomputed — ResultTemplate base class
+# ---------------------------------------------------------------------------
+
+class _FakeRT(vb.ResultTemplate):
+    """Minimal concrete ResultTemplate for testing upload_if_recomputed."""
+
+    def _serialize_parameters(self) -> str:
+        return "fake_params"
+
+    def _compute_from_scratch(self) -> dict:  # type: ignore[override]
+        return {"metadata": {"RT": "Fake"}, "result": {"value": 42}}
+
+
+class TestResultTemplateUploadIfRecomputed:
+    """upload_if_recomputed=True triggers HF file upload after compute-from-scratch."""
+
+    def test_default_is_false(self) -> None:
+        rt = _FakeRT()
+        assert rt.upload_if_recomputed is False
+
+    def test_can_be_set_true(self) -> None:
+        rt = _FakeRT(upload_if_recomputed=True)
+        assert rt.upload_if_recomputed is True
+
+    def test_upload_called_after_scratch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=True: huggingface_dataset_file_upload is called."""
+        rt = _FakeRT(base_folder=str(tmp_path), upload_if_recomputed=True)
+        monkeypatch.setattr(
+            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+
+        upload_calls: List[Any] = []
+
+        def fake_upload(**kw: Any) -> None:
+            upload_calls.append(kw)
+
+        monkeypatch.setattr(_rt_mod, "huggingface_dataset_file_upload", fake_upload)
+
+        with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
+            data = rt.compute()
+
+        assert data["result"]["value"] == 42
+        assert len(upload_calls) == 1, "upload must be called exactly once"
+        assert upload_calls[0]["dataset_path"] == rt._get_data_path_remote()
+        assert upload_calls[0]["dataset_repository"] == rt.remote_repository_name
+
+    def test_upload_not_called_when_false(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=False (default): no upload even after scratch."""
+        rt = _FakeRT(base_folder=str(tmp_path), upload_if_recomputed=False)
+        monkeypatch.setattr(
+            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+
+        upload_calls: List[Any] = []
+        monkeypatch.setattr(
+            _rt_mod,
+            "huggingface_dataset_file_upload",
+            lambda **kw: upload_calls.append(kw),
+        )
+
+        with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
+            rt.compute()
+
+        assert len(upload_calls) == 0, "upload must NOT be called when upload_if_recomputed=False"
+
+    def test_upload_requires_save_outputs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=True with save_outputs=False raises AssertionError."""
+        rt = _FakeRT(
+            base_folder=str(tmp_path),
+            upload_if_recomputed=True,
+            save_outputs=False,
+        )
+        monkeypatch.setattr(
+            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
+            with pytest.raises(AssertionError, match="save_outputs"):
+                rt.compute()
+
+    def test_upload_requires_hf_token(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """upload_if_recomputed=True without HF_TOKEN raises AssertionError."""
+        rt = _FakeRT(base_folder=str(tmp_path), upload_if_recomputed=True)
+        monkeypatch.setattr(
+            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        with pytest.raises(AssertionError, match="HF_TOKEN"):
+            rt.compute()
 
 
 # ---------------------------------------------------------------------------
