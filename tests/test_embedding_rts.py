@@ -407,8 +407,10 @@ class TestEmbeddingUnlearningProfileClipDiffNormalization:
         forgotten_entity_space = "Alice Smith"
         forgotten_entity_underscore = "Alice_Smith"
 
-        # Write baseline + entity embedding files using space-delimited entity names (as HF does)
-        for fname_suffix in ["original", *[e.replace(" ", "_") for e in entities_with_spaces]]:
+        # Write baseline + entity embedding files using space-delimited entity names (as real files do).
+        # Real filenames: embeddings_people_Andre Agassi_distil_400.json (spaces in name, not underscores).
+        # "original" is the baseline; each entity file uses the space-delimited name directly.
+        for fname_suffix in ["original", *entities_with_spaces]:
             rng2 = np.random.default_rng(hash(fname_suffix) % (2**31))
             fname = f"embeddings_{task}_{fname_suffix}_{method}_{epochs:03d}.json"
             path = str(tmp_path / "datasets" / fname)
@@ -418,7 +420,7 @@ class TestEmbeddingUnlearningProfileClipDiffNormalization:
                 for seed in range(4):
                     vec = rng2.standard_normal(16).tolist()
                     # Large shift for the forgotten entity in its own file → ratio > 1
-                    if fname_suffix == "Alice_Smith" and ent_space == forgotten_entity_space:
+                    if fname_suffix == forgotten_entity_space and ent_space == forgotten_entity_space:
                         vec = [v * -10 for v in rng2.standard_normal(16).tolist()]
                     records.append({"prompted_entity": ent_space, "seed": seed, "prompt": "x", "embedding": vec})
             with open(path, "w") as f:
