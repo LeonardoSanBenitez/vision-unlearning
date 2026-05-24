@@ -1690,8 +1690,7 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     - Numeric summary: self-displacement magnitude (L2 norm), mean retained
       displacement, ``embedding_specificity_ratio`` (*directional* specificity,
       cosine-distance of self-displacement vs mean retained-entity displacement;
-      same metric written to *interference_per_entity_{task}.json* by
-      "4. Compute interference per entity.py").
+      same metric stored in the InterferencePerEntity (Me) for this task).
 
     **Metric note (directional vs. magnitude)**:
     The ``embedding_specificity_ratio`` uses cosine distance and therefore captures
@@ -1703,9 +1702,9 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     specificity ratio shown in the title uses cosine distance.
 
     **Provenance field**: each result includes ``ratio_source`` ("ipe" when the ratio
-    was read from *interference_per_entity_{task}.json*, "inline" when it was computed
-    from the embedding files directly because the IPE column was absent).  "ipe" is
-    the canonical value; "inline" is a transitional fallback.
+    was read from the InterferencePerEntity (Me) for this task, "inline" when it was
+    computed from the embedding files directly because the IPE column was absent).
+    "ipe" is the canonical value; "inline" is a transitional fallback.
 
     **Interpretation**:
     - Specificity ratio >> 1 and large self-displacement → targeted forgetting.
@@ -1743,6 +1742,11 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     # ------------------------------------------------------------------
 
     def _get_baseline_embedding_path(self) -> str:
+        # NOTE: The baseline is method-agnostic (base SD1.4, no LoRA/unlearning).
+        # The file includes method+epoch in its name for historical/backward-compat
+        # reasons only (see 3_compute_embeddings.py comment on "filename coupling").
+        # All per-method baseline files should contain identical embeddings once
+        # generated from the shared baseline folder (generated_{task}_baseline/).
         epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
         fname = f"embeddings_{self.task}_original_{self.unlearning_algorithm}_{epochs:03d}.json"
         return os.path.join(self.base_folder, "datasets", fname)
@@ -1928,8 +1932,8 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
                 f"Available: {common_entities[:5]}..."
             )
 
-        # Load interference_per_entity for clip_diff colouring (optional)
-        ipe_path = os.path.join(self.base_folder, f"interference_per_entity_{self.task}.json")
+        # Load InterferencePerEntity (Me) for clip_diff colouring (optional)
+        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder)
         clip_diff_by_entity: Dict[str, float] = {}
         if os.path.exists(ipe_path):
             with open(ipe_path, "r", encoding="utf-8") as f:
@@ -1945,7 +1949,11 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
                 for col_key in col_candidates:
                     if col_key in row and row[col_key] is not None:
                         try:
-                            clip_diff_by_entity[name] = float(row[col_key])
+                            val = float(row[col_key])
+                            # IPE stores names with underscores; embedding labels use spaces.
+                            # Store under both forms so lookup works regardless of format.
+                            clip_diff_by_entity[name] = val
+                            clip_diff_by_entity[name.replace("_", " ")] = val
                         except (TypeError, ValueError):
                             pass
                         break
@@ -1978,14 +1986,13 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         retained_displacements = [d for i, d in enumerate(displacements) if i != forgotten_idx]
         mean_retained = float(np.mean(retained_displacements)) if retained_displacements else 0.0
 
-        # Read embedding_specificity_ratio from interference_per_entity if available.
-        # This is the canonical value written by "4. Compute interference per entity.py".
-        # Fall back to computing it inline only when the IPE file is missing or the
+        # Read embedding_specificity_ratio from InterferencePerEntity (Me) if available.
+        # Fall back to computing it inline only when the Me is missing or the
         # column is absent (e.g. in tests or before the pipeline has been run).
         hf_entity = self._resolve_hf_entity()
         embedding_specificity_ratio: float = float("nan")
-        ratio_source: str = "inline"  # updated to "ipe" if successfully read from IPE
-        ipe_path = os.path.join(self.base_folder, f"interference_per_entity_{self.task}.json")
+        ratio_source: str = "inline"  # updated to "ipe" if successfully read from Me
+        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder)
         if os.path.exists(ipe_path):
             with open(ipe_path, "r", encoding="utf-8") as _f:
                 ipe_list = json.load(_f)
@@ -2055,16 +2062,15 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
     Embedding-space forgetting efficiency distribution for one (task, method).
 
     Reads ``embedding_specificity_ratio`` (cosine-distance self-displacement vs.
-    mean retained-entity displacement) from *interference_per_entity_{task}.json*,
-    which is computed and saved by "4. Compute interference per entity.py".
-    This RT aggregates that pre-computed metric across all entities in the task
-    and correlates it with the image-level forgetting signal (``clip_diff``).
+    mean retained-entity displacement) from the InterferencePerEntity (Me) for
+    this task.  This RT aggregates that pre-computed metric across all entities
+    in the task and correlates it with the image-level forgetting signal
+    (``clip_diff``).
 
     **Arguments**: model, task, unlearning_algorithm.
 
-    **Prerequisites**: ``interference_per_entity_{task}.json`` must exist in
-    ``base_folder/`` and must contain the column
-    ``metric_{unlearning_algorithm}_{epochs}_embedding_specificity_ratio (↑)``.
+    **Prerequisites**: The InterferencePerEntity (Me) must exist and must contain
+    the ``embedding_specificity_ratio`` column for the requested method.
     Run "4. Compute interference per entity.py" first if it is missing.
 
     **Result**:
@@ -2110,6 +2116,10 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
     - ``embedding_specificity_ratio`` belongs to ``type_me`` and ``domain_me``,
       so it can be passed to ``MetricMetricAlignment`` and
       ``MethodComparisonByMetricEntity`` like any other per-entity metric.
+
+    References
+    concealment: "Sharma et al., arXiv 2409.05668"
+    pinpoint: "Holistic Unlearning Benchmark (ICCV 2025)"
     """
     model: type_model = "sd1.4"
     task: type_task = "people"
@@ -2229,8 +2239,8 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
             )
         except ValueError as exc:
             raise FileNotFoundError(
-                f"Column 'embedding_specificity_ratio' not found in "
-                f"interference_per_entity_{self.task}.json for "
+                f"Column 'embedding_specificity_ratio' not found in the "
+                f"InterferencePerEntity (Me) for task={self.task}, "
                 f"method={self.unlearning_algorithm}. "
                 f"Re-run '4. Compute interference per entity.py' with "
                 f"overwrite_metrics=True to add this column. "
@@ -2254,8 +2264,8 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
 
         if not ratios:
             raise ValueError(
-                f"No entity rows found in interference_per_entity_{self.task}.json "
-                f"for method={self.unlearning_algorithm}, task={self.task}."
+                f"No entity rows found in the InterferencePerEntity (Me) "
+                f"for task={self.task}, method={self.unlearning_algorithm}."
             )
 
         scatter_ratios: List[float] = []
@@ -2311,17 +2321,16 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
                 "pinpoint_reference": "Holistic Unlearning Benchmark (ICCV 2025)",
                 "note_n_valid": (
                     "n_valid may be far smaller than n_entities because "
-                    "embedding_specificity_ratio requires interference_per_pair files. "
-                    "Results based on small n_valid are preliminary."
+                    "embedding_specificity_ratio requires interference_per_pair files "
+                    "per entity. Results based on small n_valid are preliminary."
                 ),
                 "note_components": (
                     "The ratio numerator (self cosine distance) and denominator "
-                    "(mean retained cosine distance) are not separately stored in "
-                    "interference_per_entity_{task}.json. To distinguish 'ratio low "
-                    "because target barely moves' from 'ratio low because retained "
-                    "entities move MORE', inspect EmbeddingUnlearningProfile outputs "
-                    "per entity, or re-run '4. Compute interference per entity.py' "
-                    "after adding those columns."
+                    "(mean retained cosine distance) are stored in the "
+                    "InterferencePerEntity (Me) but not as separate columns. "
+                    "To distinguish 'ratio low because target barely moves' from "
+                    "'ratio low because retained entities move MORE', inspect "
+                    "EmbeddingUnlearningProfile outputs per entity."
                 ),
             },
             "result": {

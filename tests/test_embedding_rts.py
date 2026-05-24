@@ -391,6 +391,80 @@ class TestEmbeddingUnlearningProfileCompute:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
 
 
+class TestEmbeddingUnlearningProfileClipDiffNormalization:
+    """Test that clip_diff is populated when IPE names use underscores but embedding labels use spaces."""
+
+    def test_clip_diffs_loaded_when_ipe_name_has_underscores(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """IPE stores 'Alice_Smith' (underscores) but embedding file records use 'Alice Smith' (spaces).
+        The EUP must normalize so clip_diffs are non-NaN."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+        # Entities: embedding files record them with SPACES, IPE stores them with UNDERSCORES.
+        entities_with_spaces = ["Alice Smith", "Bob Jones", "Carol Doe", "Dave Lee", "Eve Fox"]
+        forgotten_entity_space = "Alice Smith"
+        forgotten_entity_underscore = "Alice_Smith"
+
+        # Write baseline + entity embedding files using space-delimited entity names (as HF does)
+        for fname_suffix in ["original", *[e.replace(" ", "_") for e in entities_with_spaces]]:
+            rng2 = np.random.default_rng(hash(fname_suffix) % (2**31))
+            fname = f"embeddings_{task}_{fname_suffix}_{method}_{epochs:03d}.json"
+            path = str(tmp_path / "datasets" / fname)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            records = []
+            for ent_space in entities_with_spaces:
+                for seed in range(4):
+                    vec = rng2.standard_normal(16).tolist()
+                    # Large shift for the forgotten entity in its own file → ratio > 1
+                    if fname_suffix == "Alice_Smith" and ent_space == forgotten_entity_space:
+                        vec = [v * -10 for v in rng2.standard_normal(16).tolist()]
+                    records.append({"prompted_entity": ent_space, "seed": seed, "prompt": "x", "embedding": vec})
+            with open(path, "w") as f:
+                json.dump({"metadata": {"embedding_model": "dinov2_vits14"}, "embeddings": records}, f)
+
+        # Write IPE with UNDERSCORE names and both ratio + clip_diff columns
+        col_clip = f"metric_{method}_{epochs}_emitter_minus_receiver_average_clip_diff (↑)"
+        col_ratio = f"metric_{method}_{epochs}_embedding_specificity_ratio (↑)"
+        rows = []
+        for i, ent_space in enumerate(entities_with_spaces):
+            rows.append({
+                "name": ent_space.replace(" ", "_"),   # underscore format in IPE
+                col_clip: float(-1.0 - i),
+                col_ratio: float(1.5 + i * 0.1),
+            })
+        ipe_path = str(tmp_path / f"interference_per_entity_{task}.json")
+        with open(ipe_path, "w", encoding="utf-8") as f:
+            json.dump(rows, f)
+
+        monkeypatch.setattr(
+            _rt_mod, "unlearning_algorithm_to_epochs",
+            {"people": {"distil": epochs, "uce": 0, "munba": 200}},
+        )
+
+        rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+            task=task,
+            unlearning_algorithm=method,
+            entity=forgotten_entity_space,   # entity name WITH spaces
+            base_folder=str(tmp_path),
+            save_outputs=False,
+        )
+
+        # Patch _resolve_hf_entity to return space-delimited name (matches embedding records)
+        # This simulates how get_target_overwrite() returns the HF display name
+        with patch.object(rt, "_resolve_hf_entity", return_value=forgotten_entity_space):
+            data = rt._compute_from_scratch()
+
+        clip_diffs = data["result"]["clip_diffs"]
+        valid_count = sum(1 for x in clip_diffs if x is not None and not math.isnan(float(x)))
+        # All 5 entities should have clip_diff populated (IPE has underscore names → normalized to spaces)
+        assert valid_count == len(entities_with_spaces), (
+            f"Expected {len(entities_with_spaces)} non-NaN clip_diffs but got {valid_count}. "
+            f"IPE underscore-to-space normalization may have failed."
+        )
+
+
 class TestEmbeddingUnlearningProfilePlot:
     def test_plot_runs_without_error(self, tmp_path: Any) -> None:
         task = "people"
