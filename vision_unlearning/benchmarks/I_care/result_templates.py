@@ -981,10 +981,18 @@ class ResultTemplateCountSignificantRelationship(ResultTemplate):
 
 
     def _serialize_parameters(self) -> str:
-        unlearning_algorithms_str = ','.join([str(ua) for ua in self.unlearning_algorithm_list])
-        interference_entities_str = ','.join(self.interference_entity_list)
-        attributes_str = ','.join(self.attribute_list)
-        return f"{self.model}_{self.task}_{unlearning_algorithms_str}_{interference_entities_str}_{attributes_str}"
+        # Joining all parameters (40 type_me values, many attributes) produces filenames
+        # exceeding the Windows MAX_PATH limit.  Use a content hash instead.
+        # The full parameter set is preserved in the JSON metadata for interpretability.
+        import hashlib
+        raw = (
+            f"model={self.model}|task={self.task}"
+            f"|algos={','.join(sorted(self.unlearning_algorithm_list))}"
+            f"|mes={','.join(sorted(self.interference_entity_list))}"
+            f"|attrs={','.join(sorted(self.attribute_list))}"
+        )
+        digest = hashlib.sha256(raw.encode()).hexdigest()[:16]
+        return f"{self.model}_{self.task}_{digest}"
 
     @classmethod
     def plot(cls, data: dict, figsize: Tuple[int, int] = (6, 5), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
@@ -1528,6 +1536,11 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             raise NotImplementedError(f"Similarity matrix not found locally or in Hugging Face Hub. Please compute it first with calculate_similarity_clip")
 
         elif self.similarity_metric == 'jacc':
+            # The partial file lives in the same directory as the final output.
+            # compute() creates that directory only after _compute_from_scratch() returns,
+            # so we must create it here before writing the first partial checkpoint.
+            os.makedirs(os.path.dirname(self._get_partial_path_local()), exist_ok=True)
+
             # Load partial
             # 100x100 matrix
             if os.path.exists(self._get_partial_path_local()) and not self.recompute_if_exists:
