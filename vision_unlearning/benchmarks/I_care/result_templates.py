@@ -1870,6 +1870,15 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
             xytext=(off_2d[forgotten_idx, 0], off_2d[forgotten_idx, 1]),
             arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
         )
+        # Fix axis limits to the baseline (off_2d) range only, with 10% padding.
+        # Without this, matplotlib autoscales to include pca_on which varies per
+        # entity, causing the background dots to visually shift between figures
+        # even though their absolute coordinates are identical.
+        pad_x = (off_2d[:, 0].max() - off_2d[:, 0].min()) * 0.10 + 1.0
+        pad_y = (off_2d[:, 1].max() - off_2d[:, 1].min()) * 0.10 + 1.0
+        ax.set_xlim(off_2d[:, 0].min() - pad_x, off_2d[:, 0].max() + pad_x)
+        ax.set_ylim(off_2d[:, 1].min() - pad_y, off_2d[:, 1].max() + pad_y)
+
         fig.colorbar(sc, ax=ax, label="clip_diff (self-interference)")
         ax.set_title(
             f"Embedding PCA\nMethod: {meta['unlearning_algorithm']}, "
@@ -1957,13 +1966,25 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         # get_target_overwrite maps metadata names → HF names.
         hf_entity = self._resolve_hf_entity()
 
-        # Entities present in both
-        common_entities = sorted(
-            set(entity_means_off.keys()) & set(entity_means_on.keys())
-        )
+        # The two files must contain exactly the same entity set.
+        # A silent intersection would produce a different off_mat per entity,
+        # making the PCA basis non-deterministic across figures. Fail loudly.
+        keys_off = set(entity_means_off.keys())
+        keys_on = set(entity_means_on.keys())
+        only_off = keys_off - keys_on
+        only_on = keys_on - keys_off
+        if only_off or only_on:
+            raise ValueError(
+                f"Embedding files have mismatched entity sets.\n"
+                f"  In baseline only ({len(only_off)}): {sorted(only_off)[:5]}\n"
+                f"  In entity file only ({len(only_on)}): {sorted(only_on)[:5]}\n"
+                f"Regenerate the embedding file for entity '{self.entity}' so it "
+                f"contains all {len(keys_off)} baseline entities."
+            )
+        common_entities = sorted(keys_off)
         if hf_entity not in common_entities:
             raise ValueError(
-                f"Entity '{self.entity}' (HF: '{hf_entity}') not found in both embedding files. "
+                f"Entity '{self.entity}' (HF: '{hf_entity}') not found in the embedding files. "
                 f"Available: {common_entities[:5]}..."
             )
 

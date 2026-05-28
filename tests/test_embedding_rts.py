@@ -390,6 +390,52 @@ class TestEmbeddingUnlearningProfileCompute:
         finally:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
 
+    def test_mismatched_entity_sets_raises(self, tmp_path: Any) -> None:
+        """If the entity file is missing an entity that the baseline has, raise ValueError.
+
+        The silent intersection was removed precisely to catch this: a different off_mat
+        per entity produces a different PCA basis, making dot positions inconsistent.
+        """
+        import json as _json
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        task = "people"
+        method = "distil"
+        epochs = 400
+        _write_baseline_file(tmp_path, task, method, epochs)
+
+        # Write an entity file that is missing one entity ('Eve') relative to the baseline.
+        rng = np.random.default_rng(99)
+        incomplete_entities = [e for e in ENTITIES if e != "Eve"]  # drop one
+        fname = f"embeddings_{task}_{FORGOTTEN_ENTITY}_{method}_{epochs:03d}.json"
+        path = str(tmp_path / "datasets" / fname)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        data = {
+            "metadata": {"task": task, "forgotten_entity": FORGOTTEN_ENTITY,
+                         "method": method, "num_train_epochs": epochs,
+                         "lora_state": "on", "embedding_model": "dinov2_vits14",
+                         "embedding_dim": DIM},
+            "embeddings": _make_embedding_records(
+                incomplete_entities, DIM, rng, "on", FORGOTTEN_ENTITY
+            ),
+        }
+        with open(path, "w") as f:
+            _json.dump(data, f)
+
+        original_epochs = rt_mod.unlearning_algorithm_to_epochs
+        rt_mod.unlearning_algorithm_to_epochs = {"people": {"distil": epochs, "uce": 0, "munba": 200}}
+        try:
+            rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                task=task,
+                unlearning_algorithm=method,
+                entity=FORGOTTEN_ENTITY,
+                base_folder=str(tmp_path),
+                save_outputs=False,
+            )
+            with pytest.raises(ValueError, match="mismatched entity sets"):
+                rt._compute_from_scratch()
+        finally:
+            rt_mod.unlearning_algorithm_to_epochs = original_epochs
+
 
 class TestEmbeddingUnlearningProfileClipDiffNormalization:
     """Test that clip_diff is populated when IPE names use underscores but embedding labels use spaces."""
