@@ -1816,7 +1816,7 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             from collections import defaultdict
             distil_epochs = unlearning_algorithm_to_epochs[self.task]['distil']
             embedding_path = os.path.join(
-                self.base_folder,
+                self.base_folder, 'datasets',
                 f'embeddings_{self.task}_original_distil_{distil_epochs:03d}.json'
             )
             assert os.path.exists(embedding_path), (
@@ -1824,23 +1824,42 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
                 f"Run 3_compute_embeddings.py --task {self.task} --method distil "
                 f"--max-identities 100 first."
             )
-            with open(embedding_path) as f:
+            with open(embedding_path, encoding='utf-8') as f:
                 raw = json.load(f)
 
-            # Group by prompted_entity, compute mean embedding per entity
+            # Build forward mapping: metadata_name -> expected prompt string.
+            # The embedding file's 'prompt' field is "An image of {get_target_overwrite(...)[0]}"
+            # and is consistent across tasks.  We key by prompt rather than 'prompted_entity'
+            # because 'prompted_entity' has inconsistent formatting across tasks (spaces vs
+            # underscores, article artifacts for scenes), whereas 'prompt' is clean.
+            # NOTE: get_target_overwrite's `method` parameter is not used in the transform,
+            # so any method value produces the same result.
+            ent_list = [e['name'] for e in metadata_filtered]
+            meta_to_prompt: Dict[str, str] = {
+                name: f"An image of {get_target_overwrite(self.task, 'distil', name)[0]}"
+                for name in ent_list
+            }
+
+            # Group embeddings by prompt, compute mean unit-vector per entity
             buckets: Dict[str, List[List[float]]] = defaultdict(list)
             for entry in raw['embeddings']:
-                buckets[entry['prompted_entity']].append(entry['embedding'])
+                buckets[entry['prompt']].append(entry['embedding'])
+
             entity_embeddings: Dict[str, np.ndarray] = {}
-            for entity, vecs in buckets.items():
+            for meta_name in ent_list:
+                expected_prompt = meta_to_prompt[meta_name]
+                if expected_prompt not in buckets:
+                    raise ValueError(
+                        f"No embeddings found for '{meta_name}' "
+                        f"(expected prompt: '{expected_prompt}'). "
+                        f"First 3 available prompts: {list(buckets.keys())[:3]}"
+                    )
+                vecs = buckets[expected_prompt]
                 arr = np.array(vecs)
                 mean_vec = arr.mean(axis=0)
-                entity_embeddings[entity] = mean_vec / np.linalg.norm(mean_vec)
+                entity_embeddings[meta_name] = mean_vec / np.linalg.norm(mean_vec)
 
             # Build N×N cosine similarity matrix (dot product of unit vectors)
-            ent_list = [e['name'] for e in metadata_filtered]
-            assert all(e in entity_embeddings for e in ent_list), \
-                "Some entities are missing from the baseline embeddings file."
             mat = np.array([entity_embeddings[e] for e in ent_list])
             sim_matrix = mat @ mat.T
             df_similarities = pd.DataFrame(sim_matrix, index=ent_list, columns=ent_list)

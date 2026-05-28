@@ -41,7 +41,13 @@ def _close_figs() -> Any:
 
 
 def _make_embedding_file(entities: List[str], dim: int = 8) -> dict:
-    """Build a minimal embeddings JSON structure for testing."""
+    """Build a minimal embeddings JSON structure for testing.
+
+    Prompt format matches the real files: ``"An image of {entity}"``.
+    The code uses the ``prompt`` field (not ``prompted_entity``) to identify
+    embeddings, so this must be consistent with what ``get_target_overwrite``
+    produces for the given task/entity combination.
+    """
     rng = np.random.default_rng(42)
     embeddings = []
     for entity in entities:
@@ -50,7 +56,7 @@ def _make_embedding_file(entities: List[str], dim: int = 8) -> dict:
             embeddings.append({
                 "prompted_entity": entity,
                 "seed": seed,
-                "prompt": f"a photo of {entity}",
+                "prompt": f"An image of {entity}",
                 "embedding": vec,
             })
     return {"embeddings": embeddings}
@@ -95,8 +101,8 @@ class TestSimilarityMatrixDinoCompute:
             _rt_mod, "get_metadata_filtered",
             lambda task, **kw: [{"name": e} for e in entities],
         )
-        # Write a baseline embedding file in tmp_path
-        emb_path = str(tmp_path / f"embeddings_people_original_distil_400.json")
+        # Write a baseline embedding file in tmp_path/datasets/ (correct sub-path).
+        emb_path = str(tmp_path / "datasets" / "embeddings_people_original_distil_400.json")
         _write_embedding_file(emb_path, entities)
 
         rt = vb.ResultTemplateSimilarityMatrix(
@@ -119,21 +125,27 @@ class TestSimilarityMatrixDinoCompute:
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
-        # Construct embeddings manually: entity A has all-ones, entity B has e1 direction
+        # Construct embeddings manually: Alpha has e0 direction, Beta has e1 direction.
+        # Names must be >=3 chars (get_target_overwrite assertion).
+        # For task='people', get_target_overwrite('people','distil','Alpha')[0] == 'Alpha',
+        # so the expected prompt is "An image of Alpha".
         dim = 4
         vec_a = [1.0, 0.0, 0.0, 0.0]
         vec_b = [0.0, 1.0, 0.0, 0.0]
+        entities = ["Alpha", "Beta"]
         embedding_data = {
             "embeddings": [
-                {"prompted_entity": "A", "seed": 0, "prompt": "p", "embedding": vec_a},
-                {"prompted_entity": "B", "seed": 0, "prompt": "p", "embedding": vec_b},
+                {"prompted_entity": "Alpha", "seed": 0, "prompt": "An image of Alpha", "embedding": vec_a},
+                {"prompted_entity": "Beta", "seed": 0, "prompt": "An image of Beta", "embedding": vec_b},
             ]
         }
-        emb_path = str(tmp_path / "embeddings_people_original_distil_400.json")
+        # Write embedding file in the correct sub-path (datasets/).
+        datasets_dir = tmp_path / "datasets"
+        datasets_dir.mkdir()
+        emb_path = str(datasets_dir / "embeddings_people_original_distil_400.json")
         with open(emb_path, "w") as f:
             json.dump(embedding_data, f)
 
-        entities = ["A", "B"]
         monkeypatch.setattr(
             vb, "get_metadata_filtered",
             lambda task, **kw: [{"name": e} for e in entities],
@@ -152,10 +164,10 @@ class TestSimilarityMatrixDinoCompute:
         data = rt._compute_from_scratch()
         # Build lookup: result is list of dicts with 'emitter' key
         result = {row["emitter"]: row for row in data["result"]}
-        assert result["A"]["A"] == pytest.approx(1.0, abs=1e-5)
-        assert result["B"]["B"] == pytest.approx(1.0, abs=1e-5)
-        assert result["A"]["B"] == pytest.approx(0.0, abs=1e-5)
-        assert result["B"]["A"] == pytest.approx(0.0, abs=1e-5)
+        assert result["Alpha"]["Alpha"] == pytest.approx(1.0, abs=1e-5)
+        assert result["Beta"]["Beta"] == pytest.approx(1.0, abs=1e-5)
+        assert result["Alpha"]["Beta"] == pytest.approx(0.0, abs=1e-5)
+        assert result["Beta"]["Alpha"] == pytest.approx(0.0, abs=1e-5)
 
     def test_dino_missing_file_raises(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any

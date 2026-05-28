@@ -579,6 +579,50 @@ class TestComputeFromScratchMocked:
         first = data["result"][0]
         assert first[first["emitter"]] == pytest.approx(1.0)
 
+    def test_similarity_matrix_dino_compute(
+        self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
+    ) -> None:
+        """SimilarityMatrix dino branch reads embeddings from base_folder/datasets/."""
+        import json as _json
+        labels = ["alpha", "beta", "gamma"]
+        meta = _fake_metadata(labels)
+        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+
+        # Write a minimal fake embeddings file at the correct sub-path.
+        # For task='people', distil epochs=400, the expected path is:
+        #   base_folder/datasets/embeddings_people_original_distil_400.json
+        datasets_dir = tmp_path / "datasets"
+        datasets_dir.mkdir()
+        emb_file = datasets_dir / "embeddings_people_original_distil_400.json"
+        rng = [1.0, 0.0, 0.0]
+        # The code matches by 'prompt' field: "An image of {get_target_overwrite(...)[0]}"
+        # For task='people', get_target_overwrite returns the name unchanged (spaces only).
+        # labels have no underscores, so the prompt is just "An image of {label}".
+        fake_embeddings = {
+            "embeddings": [
+                {"prompted_entity": e, "prompt": f"An image of {e}", "embedding": rng}
+                for e in labels
+            ]
+        }
+        emb_file.write_text(_json.dumps(fake_embeddings), encoding="utf-8")
+
+        rt = vb.ResultTemplateSimilarityMatrix(
+            task="people",
+            similarity_metric="dino",
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+        assert data["metadata"]["similarity_metric"] == "dino"
+        assert len(data["result"]) == len(labels)
+        # All embeddings are identical unit vectors -> cosine sim == 1.0 for all pairs.
+        first = data["result"][0]
+        for label in labels:
+            assert first[label] == pytest.approx(1.0), (
+                f"Expected cosine sim 1.0 for pair ({first['emitter']}, {label})"
+            )
+
     def test_metric_similarity_alignment_compute(
         self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
     ) -> None:
