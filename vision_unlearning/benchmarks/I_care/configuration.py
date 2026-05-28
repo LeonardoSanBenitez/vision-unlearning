@@ -570,6 +570,16 @@ domain_me = [
     # Higher is better: ratio >> 1 means unlearning was targeted (forgotten entity
     # drifted more than retained entities in DINOv2 space).
     "Embedding specificity ratio",
+    # CLIP-space unlearning quality (computed by "4. Compute interference per entity.py").
+    # forget_clip_diff: diagonal entry of the interference matrix — clip_diff of the
+    # forgotten entity on its own prompt.  (↓) = more negative = more effective forgetting.
+    # Expected range for effective unlearning: strongly negative values.
+    "Forget clip diff",
+    # retain_average_clip_diff: mean off-diagonal clip_diff — average CLIP change across
+    # all other N-1 entities' prompts after unlearning entity i.  (↑) = closer to zero =
+    # less collateral damage.  Together with Forget clip diff, enables equalization
+    # verification (paper Section ~3.2).
+    "Retain average clip diff",
 ]
 domain_s = [
     "Clip Cosine Similarity",
@@ -625,6 +635,8 @@ type_me = Literal[
     "Emitter minus receiver average rmse",
     "Emitter minus receiver average ssim",
     "Embedding specificity ratio",
+    "Forget clip diff",
+    "Retain average clip diff",
 ]
 type_s = Literal[
     "clip",

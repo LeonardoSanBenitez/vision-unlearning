@@ -167,6 +167,42 @@ class TestChooseMetricColumn:
                 "munba", "Emitter average rmse", ["metric_distil_400_emitter_average_rmse (↓)"]
             )
 
+    def test_forget_clip_diff_in_type_me(self) -> None:
+        from vision_unlearning.benchmarks.I_care.configuration import type_me
+        assert "Forget clip diff" in type_me.__args__
+
+    def test_retain_average_clip_diff_in_type_me(self) -> None:
+        from vision_unlearning.benchmarks.I_care.configuration import type_me
+        assert "Retain average clip diff" in type_me.__args__
+
+    def test_choose_metric_column_forget_clip_diff(self) -> None:
+        cols = [
+            "metric_distil_400_forget_clip_diff (↓)",
+            "metric_distil_400_emitter_average_clip_diff (↑)",
+        ]
+        chosen = vb.choose_metric_column_interference_per_entity(
+            "distil", "Forget clip diff", cols
+        )
+        assert chosen == "metric_distil_400_forget_clip_diff (↓)"
+
+    def test_choose_metric_column_retain_average_clip_diff(self) -> None:
+        cols = [
+            "metric_distil_400_retain_average_clip_diff (↑)",
+            "metric_distil_400_emitter_average_clip_diff (↑)",
+        ]
+        chosen = vb.choose_metric_column_interference_per_entity(
+            "distil", "Retain average clip diff", cols
+        )
+        assert chosen == "metric_distil_400_retain_average_clip_diff (↑)"
+
+    def test_forget_in_domain_me(self) -> None:
+        from vision_unlearning.benchmarks.I_care.configuration import domain_me
+        assert "Forget clip diff" in domain_me
+
+    def test_retain_in_domain_me(self) -> None:
+        from vision_unlearning.benchmarks.I_care.configuration import domain_me
+        assert "Retain average clip diff" in domain_me
+
 
 class TestPathHelpers:
     def test_interference_per_entity_path(self) -> None:
