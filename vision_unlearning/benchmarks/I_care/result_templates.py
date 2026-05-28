@@ -2003,10 +2003,15 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
             off_mat[i] = entity_means_off[ent]
             on_mat[i] = entity_means_on[ent]
 
-        # PCA: fit on combined baseline+unlearned matrix
-        combined = np.vstack([off_mat, on_mat])
+        # PCA: fit on BASELINE (off_mat) only.
+        # This pins the coordinate system to the pre-unlearning state so that
+        # baseline dot positions are identical across all per-entity EUP figures.
+        # on_mat (the unlearned model) is then projected into the same fixed space,
+        # making displacement arrows directly comparable across entities.
+        # Previously PCA was fit on vstack([off_mat, on_mat]), which changed the
+        # axes per entity and made cross-entity visual comparison impossible.
         pca = PCA(n_components=self.n_pca_components, random_state=42)
-        pca.fit(combined)
+        pca.fit(off_mat)
         off_2d = pca.transform(off_mat).tolist()
         on_2d = pca.transform(on_mat).tolist()
 
