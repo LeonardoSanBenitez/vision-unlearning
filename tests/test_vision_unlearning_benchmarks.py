@@ -409,6 +409,63 @@ class TestPlotFromFakeData:
         fig, ax = vb.ResultTemplateSimilarityMatrix.plot(data, return_fig=True)
         assert isinstance(fig, Figure)
 
+    def test_metric_metric_alignment_plot(self) -> None:
+        data = {
+            "metadata": {
+                "task": "people",
+                "unlearning_algorithm": "distil",
+                "interference_entity_1": "Forget clip diff",
+                "interference_entity_2": "Retain average clip diff",
+                "direction_1": "↓",
+                "direction_2": "↑",
+            },
+            "result": {
+                "x": [-14.0, -12.0, -10.0, -9.0, -13.5, -11.0],
+                "y": [-0.5, -0.2, -0.1, 0.0, -0.3, -0.4],
+                "entity_names": ["e0", "e1", "e2", "e3", "e4", "e5"],
+                "pearson_statistic": -0.22,
+                "pearson_pvalue": 0.03,
+                "spearman_statistic": -0.21,
+                "spearman_pvalue": 0.04,
+            },
+        }
+        fig, ax = vb.ResultTemplateMetricMetricAlignment.plot(data, return_fig=True)
+        assert isinstance(fig, Figure)
+
+    def test_metric_metric_alignment_plot_multi_method(self) -> None:
+        def _fake_data(method: str, xvals: List[float], yvals: List[float]) -> dict:
+            return {
+                "metadata": {
+                    "task": "people",
+                    "unlearning_algorithm": method,
+                    "interference_entity_1": "Forget clip diff",
+                    "interference_entity_2": "Retain average clip diff",
+                    "direction_1": "↓",
+                    "direction_2": "↑",
+                },
+                "result": {
+                    "x": xvals,
+                    "y": yvals,
+                    "entity_names": [f"{method}_e{i}" for i in range(len(xvals))],
+                    "pearson_statistic": 0.0,
+                    "pearson_pvalue": 0.5,
+                    "spearman_statistic": 0.0,
+                    "spearman_pvalue": 0.5,
+                },
+            }
+
+        method_data = {
+            "distil": _fake_data("distil", [-13.0, -12.0, -14.0], [-0.2, -0.3, -0.1]),
+            "munba": _fake_data("munba", [-6.0, -7.0, -5.0], [-5.5, -6.0, -5.0]),
+            "uce": _fake_data("uce", [-0.5, -0.3, -0.7], [0.0, 0.1, -0.1]),
+        }
+        fig, ax = vb.ResultTemplateMetricMetricAlignment.plot_multi_method(
+            method_data, return_fig=True
+        )
+        assert isinstance(fig, Figure)
+        legend_labels = [h.get_label() for h in ax.get_legend().legend_handles]
+        assert set(legend_labels) == {"distil", "munba", "uce"}
+
     def test_metric_similarity_alignment_multi_plot(self) -> None:
         # Build a tiny but real SHAP Explanation, serialize it the way the
         # RT stores it, and confirm the plot renders. This exercises the
@@ -693,6 +750,110 @@ class TestComputeFromScratchMocked:
         # The serialized SHAP must roundtrip back into an Explanation.
         restored = vb.dict_to_explanation(data["result"]["shap_explanations"])
         assert restored.values is not None
+
+
+# ---------------------------------------------------------------------------
+# MetricMetricAlignment
+# ---------------------------------------------------------------------------
+
+class TestMetricMetricAlignment:
+    """Unit tests for ResultTemplateMetricMetricAlignment."""
+
+    def test_serialize_parameters(self) -> None:
+        rt = vb.ResultTemplateMetricMetricAlignment(
+            model="sd1.4",
+            task="people",
+            unlearning_algorithm="distil",
+            interference_entity_1="Forget clip diff",
+            interference_entity_2="Retain average clip diff",
+            save_outputs=False,
+        )
+        s = rt._serialize_parameters()
+        assert s == "sd1.4_people_distil_forget_clip_diff_retain_average_clip_diff"
+
+    def test_compute_from_scratch_correlates(
+        self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
+    ) -> None:
+        import pandas as pd
+
+        # Use perfectly correlated values to get r=1
+        df = pd.DataFrame(
+            {
+                "name": [f"e{i}" for i in range(10)],
+                "metric_distil_400_forget_clip_diff (↓)": [
+                    float(-i) for i in range(10)
+                ],
+                "metric_distil_400_retain_average_clip_diff (↑)": [
+                    float(-i) * 0.1 for i in range(10)
+                ],
+            }
+        )
+        path = str(tmp_path / "interference_per_entity_people.json")
+        df.to_json(path)
+        monkeypatch.setattr(
+            vb, "get_interference_per_entity_path", lambda task, **k: path
+        )
+        monkeypatch.setattr(
+            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
+        )
+
+        rt = vb.ResultTemplateMetricMetricAlignment(
+            task="people",
+            unlearning_algorithm="distil",
+            interference_entity_1="Forget clip diff",
+            interference_entity_2="Retain average clip diff",
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+        result = data["result"]
+        assert "pearson_statistic" in result
+        assert "spearman_statistic" in result
+        assert "entity_names" in result
+        assert len(result["entity_names"]) == 10
+        assert abs(result["pearson_statistic"] - 1.0) < 1e-6, (
+            "Perfectly correlated inputs must give Pearson r=1"
+        )
+        meta = data["metadata"]
+        assert meta["col1"].startswith("metric_distil")
+        assert meta["col2"].startswith("metric_distil")
+        assert meta["direction_1"] == "↓"
+        assert meta["direction_2"] == "↑"
+
+    def test_compute_drops_nan_rows(
+        self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
+    ) -> None:
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "name": [f"e{i}" for i in range(5)],
+                "metric_distil_400_forget_clip_diff (↓)": [
+                    -1.0, -2.0, None, -4.0, -5.0
+                ],
+                "metric_distil_400_retain_average_clip_diff (↑)": [
+                    -0.1, -0.2, -0.3, None, -0.5
+                ],
+            }
+        )
+        path = str(tmp_path / "interference_per_entity_people.json")
+        df.to_json(path)
+        monkeypatch.setattr(
+            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
+        )
+
+        rt = vb.ResultTemplateMetricMetricAlignment(
+            task="people",
+            unlearning_algorithm="distil",
+            interference_entity_1="Forget clip diff",
+            interference_entity_2="Retain average clip diff",
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+        # Rows with NaN in either column are dropped: 3 remain (e0, e1, e4)
+        assert len(data["result"]["x"]) == 3
+        assert len(data["result"]["entity_names"]) == 3
 
 
 # ---------------------------------------------------------------------------

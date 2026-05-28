@@ -187,13 +187,264 @@ class ResultTemplateMetricMetricAlignment(ResultTemplate):
     **Result:** Pearson p-value, Spearman p-value, Pearson correlation, scatter plot.
     **Interpretation:** quantitative; the higher the correlation, the lower the need to
     calculate both metrics for this specific choice of `m`, `t`, and `u`.
+
+    **Extended use**:
+    Passing ``interference_entity_1="Forget clip diff"`` and
+    ``interference_entity_2="Retain average clip diff"`` produces a forget/retain
+    tradeoff scatter.  The class method :meth:`plot_multi_method` overlays results
+    for several methods on one axes, enabling visual comparison of method operating
+    regions (e.g. equalization verification and Pareto-style analysis).
     """
     model: type_model = "sd1.4"
     task: type_task = 'people'
     unlearning_algorithm: type_unlearning_algorithm
     interference_entity_1: type_me
     interference_entity_2: type_me
+    significance_threshold: float = 0.05
 
+    def _serialize_parameters(self) -> str:
+        e1_slug = self.interference_entity_1.lower().replace(' ', '_')
+        e2_slug = self.interference_entity_2.lower().replace(' ', '_')
+        return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{e1_slug}_{e2_slug}"
+
+    @classmethod
+    def plot(
+        cls,
+        data: dict,
+        figsize: Tuple[int, int] = (6, 5),
+        return_fig: bool = False,
+        annotate_top_n: int = 5,
+    ) -> Optional[Tuple[Figure, plt.Axes]]:
+        """Single-method scatter with regression line.
+
+        Top-N outliers (by absolute residual from the regression) are labelled
+        with the entity name.
+        """
+        result = data['result']
+        meta = data['metadata']
+        fig, ax = plt.subplots(figsize=figsize)
+
+        x: List[float] = result['x']
+        y: List[float] = result['y']
+        names: List[str] = result.get('entity_names', [])
+
+        sns.scatterplot(x=x, y=y, ax=ax, alpha=0.7)
+        sns.regplot(x=x, y=y, scatter=False, ax=ax,
+                    color='steelblue', line_kws={'linewidth': 1.5})
+
+        # Annotate top-N outliers by absolute residual from the regression line
+        if annotate_top_n > 0 and len(names) == len(x) and len(x) > 2:
+            x_arr = np.array(x, dtype=float)
+            y_arr = np.array(y, dtype=float)
+            slope, intercept, *_ = linregress(x_arr, y_arr)
+            residuals = np.abs(y_arr - (slope * x_arr + intercept))
+            top_idx = np.argsort(residuals)[-annotate_top_n:]
+            for idx in top_idx:
+                ax.annotate(
+                    names[int(idx)],
+                    xy=(x_arr[idx], y_arr[idx]),
+                    xytext=(4, 4),
+                    textcoords='offset points',
+                    fontsize=6,
+                    alpha=0.8,
+                )
+
+        dir1 = meta.get('direction_1', '')
+        dir2 = meta.get('direction_2', '')
+        ax.set_xlabel(
+            f"{meta['interference_entity_1']}"
+            + (f" ({dir1})" if dir1 else ""),
+            fontsize=9,
+        )
+        ax.set_ylabel(
+            f"{meta['interference_entity_2']}"
+            + (f" ({dir2})" if dir2 else ""),
+            fontsize=9,
+        )
+        ax.set_title(
+            f"Metric–Metric Alignment\n"
+            f"Task: {meta['task'].title()}  "
+            f"Method: {meta['unlearning_algorithm'].title()}\n"
+            f"Pearson r={result['pearson_statistic']:.3f} "
+            f"(p={result['pearson_pvalue']:.3f})  "
+            f"Spearman r={result['spearman_statistic']:.3f} "
+            f"(p={result['spearman_pvalue']:.3f})",
+            fontsize=9,
+        )
+        plt.tight_layout(pad=0.5)
+        if return_fig:
+            return fig, ax
+        plt.show()
+        return None
+
+    @classmethod
+    def plot_multi_method(
+        cls,
+        method_data: Dict[str, dict],
+        figsize: Tuple[int, int] = (7, 6),
+        return_fig: bool = False,
+        show_means: bool = True,
+        annotate_top_n: int = 3,
+    ) -> Optional[Tuple[Figure, plt.Axes]]:
+        """Overlay scatter for multiple methods on one plot.
+
+        Useful for visualising method operating regions (e.g. equalization
+        verification, Pareto-style analysis).
+
+        Parameters
+        ----------
+        method_data:
+            Mapping from method name to the dict returned by :meth:`compute`.
+        show_means:
+            If *True*, draw a diamond marker at the per-method centroid.
+        annotate_top_n:
+            Number of per-method outliers (farthest from centroid) to annotate.
+        """
+        palette = sns.color_palette("tab10", len(method_data))
+        fig, ax = plt.subplots(figsize=figsize)
+        legend_handles: List[Line2D] = []
+
+        for (method, data), colour in zip(method_data.items(), palette):
+            result = data['result']
+            x: List[float] = result['x']
+            y: List[float] = result['y']
+            names: List[str] = result.get('entity_names', [])
+
+            ax.scatter(x, y, color=colour, alpha=0.5, s=28)
+            legend_handles.append(
+                Line2D(
+                    [0], [0], marker='o', color='w',
+                    markerfacecolor=colour, markersize=8, label=method,
+                )
+            )
+
+            x_arr = np.array(x, dtype=float)
+            y_arr = np.array(y, dtype=float)
+            cx = float(x_arr.mean())
+            cy = float(y_arr.mean())
+
+            if show_means:
+                ax.scatter(cx, cy, color=colour, s=120, marker='D',
+                           zorder=5, edgecolors='black', linewidths=0.8)
+                ax.annotate(
+                    f"{method}\nμ=({cx:.1f}, {cy:.1f})",
+                    xy=(cx, cy),
+                    xytext=(6, 6),
+                    textcoords='offset points',
+                    fontsize=7,
+                    color=colour,
+                )
+
+            # Annotate top-N outliers per method (farthest from centroid)
+            if annotate_top_n > 0 and len(names) == len(x):
+                dist = np.sqrt((x_arr - cx) ** 2 + (y_arr - cy) ** 2)
+                top_idx = np.argsort(dist)[-annotate_top_n:]
+                for idx in top_idx:
+                    ax.annotate(
+                        names[int(idx)],
+                        xy=(x_arr[idx], y_arr[idx]),
+                        xytext=(3, 3),
+                        textcoords='offset points',
+                        fontsize=5,
+                        alpha=0.7,
+                        color=colour,
+                    )
+
+        # Derive axis labels from first data dict
+        first_data = next(iter(method_data.values()))
+        meta = first_data['metadata']
+        dir1 = meta.get('direction_1', '')
+        dir2 = meta.get('direction_2', '')
+        ax.set_xlabel(
+            f"{meta['interference_entity_1']}"
+            + (f" ({dir1})" if dir1 else ""),
+            fontsize=9,
+        )
+        ax.set_ylabel(
+            f"{meta['interference_entity_2']}"
+            + (f" ({dir2})" if dir2 else ""),
+            fontsize=9,
+        )
+        ax.set_title(
+            f"Metric–Metric Alignment — Multi-Method\n"
+            f"Task: {meta['task'].title()}",
+            fontsize=10,
+        )
+        ax.legend(handles=legend_handles, fontsize=8)
+        plt.tight_layout(pad=0.5)
+        if return_fig:
+            return fig, ax
+        plt.show()
+        return None
+
+    def _compute_from_scratch(self) -> dict:
+        interference_per_entity_path: str = get_interference_per_entity_path(self.task)
+        if not os.path.exists(interference_per_entity_path):
+            raise FileNotFoundError(
+                f"Interference per entity file not found at {interference_per_entity_path}. "
+                "Please compute it before running this RT."
+            )
+        df: pd.DataFrame = pd.read_json(interference_per_entity_path)
+        metric_cols: List[str] = [c for c in df.columns if c.startswith('metric_')]
+        for col in metric_cols:
+            df[col] = df[col].astype(float)
+
+        col1: str = choose_metric_column_interference_per_entity(
+            self.unlearning_algorithm, self.interference_entity_1, metric_cols
+        )
+        col2: str = choose_metric_column_interference_per_entity(
+            self.unlearning_algorithm, self.interference_entity_2, metric_cols
+        )
+
+        df_clean = df[['name', col1, col2]].dropna(subset=[col1, col2])
+        n_dropped = df.shape[0] - df_clean.shape[0]
+        if n_dropped > 0:
+            logger.warning(
+                'MetricMetricAlignment: dropped %d NaN rows aligning %r and %r',
+                n_dropped, col1, col2,
+            )
+
+        x: List[float] = df_clean[col1].astype(float).tolist()
+        y: List[float] = df_clean[col2].astype(float).tolist()
+        entity_names: List[str] = df_clean['name'].tolist()
+
+        pearson_res = pearsonr(x, y)
+        spearman_res = spearmanr(x, y)
+
+        def _direction(col: str) -> str:
+            try:
+                return col.split(' ')[1][1]
+            except (IndexError, TypeError):
+                return ''
+
+        return {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'task': self.task,
+                'unlearning_algorithm': self.unlearning_algorithm,
+                'interference_entity_1': self.interference_entity_1,
+                'interference_entity_2': self.interference_entity_2,
+                'col1': col1,
+                'col2': col2,
+                'direction_1': _direction(col1),
+                'direction_2': _direction(col2),
+                'significance_threshold': self.significance_threshold,
+            },
+            'result': {
+                'x': x,
+                'y': y,
+                'entity_names': entity_names,
+                'pearson_statistic': pearson_res.statistic,
+                'pearson_pvalue': pearson_res.pvalue,
+                'spearman_statistic': spearman_res.statistic,
+                'spearman_pvalue': spearman_res.pvalue,
+                'significant': bool(
+                    pearson_res.pvalue < self.significance_threshold
+                    or spearman_res.pvalue < self.significance_threshold
+                ),
+            },
+        }
 
 
 class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
