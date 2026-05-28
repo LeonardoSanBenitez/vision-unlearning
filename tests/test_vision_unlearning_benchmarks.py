@@ -484,7 +484,9 @@ class TestPlotFromFakeData:
             "result": {
                 "y_test_true": [1.0, 2.0, 3.0],
                 "y_test_pred": [1.1, 1.9, 3.2],
-                "mape_test": 0.12,
+                "r2_test": 0.95,
+                "rmse_test": 0.15,
+                "mae_test": 0.12,
                 "shap_explanations": vb.explanation_to_dict(expl),
             },
         }
@@ -783,6 +785,7 @@ class TestComputeFromScratchMocked:
             similarity_metric_list=["jacc", "clip"],
             include_attribute_diff_similarity=True,
             include_attribute_value_similarity=False,
+            include_emitter_forget_quality=False,  # Me file not mocked in this test
             regression_algorithm="linear_regression",
             save_outputs=False,
             base_folder=str(tmp_path),
@@ -790,10 +793,167 @@ class TestComputeFromScratchMocked:
         data = rt._compute_from_scratch()
         assert "r2_train" in data["result"]
         assert "r2_test" in data["result"]
+        assert "mae_train" in data["result"]
+        assert "mae_test" in data["result"]
         assert "shap_explanations" in data["result"]
         # The serialized SHAP must roundtrip back into an Explanation.
         restored = vb.dict_to_explanation(data["result"]["shap_explanations"])
         assert restored.values is not None
+
+    def test_metric_similarity_alignment_multi_serialize_includes_forget_quality_flag(
+        self,
+    ) -> None:
+        """_serialize_parameters must embed the include_emitter_forget_quality flag
+        so that cached results with different flag values do not collide."""
+        rt_with = vb.ResultTemplateMetricSimilarityAlignmentMulti(
+            task="people",
+            unlearning_algorithm="distil",
+            interference_pair="rmse",
+            similarity_metric_list=["clip"],
+            include_emitter_forget_quality=True,
+            save_outputs=False,
+        )
+        rt_without = vb.ResultTemplateMetricSimilarityAlignmentMulti(
+            task="people",
+            unlearning_algorithm="distil",
+            interference_pair="rmse",
+            similarity_metric_list=["clip"],
+            include_emitter_forget_quality=False,
+            save_outputs=False,
+        )
+        s_with = rt_with._serialize_parameters()
+        s_without = rt_without._serialize_parameters()
+        assert s_with != s_without, (
+            "_serialize_parameters must differ for include_emitter_forget_quality=True vs False"
+        )
+        assert "_1_" in s_with or s_with.endswith("_1"), (
+            "include_emitter_forget_quality=True must embed '1' in serialization"
+        )
+        assert "_0_" in s_without or s_without.endswith("_0"), (
+            "include_emitter_forget_quality=False must embed '0' in serialization"
+        )
+
+    def test_metric_similarity_alignment_multi_emitter_forget_quality_feature(
+        self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
+    ) -> None:
+        """When include_emitter_forget_quality=True, the emitter_forget_clip_diff
+        column must appear in the training data and mae_test must be in result."""
+        import pandas as pd
+
+        pytest.importorskip("shap", reason="shap not installed")
+        labels = [f"p{i}" for i in range(8)]
+        meta = _fake_metadata(labels)
+        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+
+        def fake_im_compute(self: Any) -> Dict[str, Any]:
+            rng = np.random.default_rng(0)
+            return {
+                "metadata": {},
+                "result": [
+                    {"emitter": em, **{rc: float(rng.uniform(0, 5)) for rc in labels}}
+                    for em in labels
+                ],
+            }
+
+        def fake_sm_compute(self: Any) -> Dict[str, Any]:
+            rng = np.random.default_rng(1)
+            return {
+                "metadata": {},
+                "result": [
+                    {"emitter": em, **{rc: float(rng.uniform(0, 1)) for rc in labels}}
+                    for em in labels
+                ],
+            }
+
+        monkeypatch.setattr(vb.ResultTemplateInterferenceMatrix, "compute", fake_im_compute)
+        monkeypatch.setattr(vb.ResultTemplateSimilarityMatrix, "compute", fake_sm_compute)
+
+        # Build a fake Me file with forget_clip_diff for each entity
+        df_me = pd.DataFrame({
+            "name": labels,
+            "metric_distil_400_forget_clip_diff (↓)": [float(-i) for i in range(len(labels))],
+        })
+        me_path = str(tmp_path / "interference_per_entity_people.json")
+        df_me.to_json(me_path)
+        monkeypatch.setattr(vb, "get_interference_per_entity_path", lambda task, **k: me_path)
+        monkeypatch.setattr(_rt_mod, "get_interference_per_entity_path", lambda task, **k: me_path)
+
+        rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
+            task="people",
+            unlearning_algorithm="distil",
+            interference_pair="rmse",
+            similarity_metric_list=["clip"],
+            include_attribute_diff_similarity=False,
+            include_attribute_value_similarity=False,
+            include_emitter_forget_quality=True,
+            regression_algorithm="linear_regression",
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+
+        # emitter_forget_clip_diff must appear in the feature list
+        # Note: ColumnTransformer prefixes numeric features with 'num__'
+        assert any("emitter_forget_clip_diff" in f for f in data["result"]["features"]), (
+            "emitter_forget_clip_diff must be a feature when include_emitter_forget_quality=True. "
+            f"Got features: {data['result']['features']}"
+        )
+        # mae metrics must be present
+        assert "mae_train" in data["result"]
+        assert "mae_test" in data["result"]
+        # metadata must record the flag
+        assert data["metadata"]["include_emitter_forget_quality"] is True
+
+    def test_metric_similarity_alignment_multi_missing_me_file_raises(
+        self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
+    ) -> None:
+        """When include_emitter_forget_quality=True and Me file is absent, a
+        clear FileNotFoundError must be raised — no silent NaN fallback."""
+        labels = [f"p{i}" for i in range(4)]
+        meta = _fake_metadata(labels)
+        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+
+        def fake_im_compute(self: Any) -> Dict[str, Any]:
+            rng = np.random.default_rng(0)
+            return {
+                "metadata": {},
+                "result": [
+                    {"emitter": em, **{rc: float(rng.uniform(0, 5)) for rc in labels}}
+                    for em in labels
+                ],
+            }
+
+        def fake_sm_compute(self: Any) -> Dict[str, Any]:
+            rng = np.random.default_rng(1)
+            return {
+                "metadata": {},
+                "result": [
+                    {"emitter": em, **{rc: float(rng.uniform(0, 1)) for rc in labels}}
+                    for em in labels
+                ],
+            }
+
+        monkeypatch.setattr(vb.ResultTemplateInterferenceMatrix, "compute", fake_im_compute)
+        monkeypatch.setattr(vb.ResultTemplateSimilarityMatrix, "compute", fake_sm_compute)
+
+        # Me file does NOT exist
+        missing_path = str(tmp_path / "interference_per_entity_people.json")
+        monkeypatch.setattr(vb, "get_interference_per_entity_path", lambda task, **k: missing_path)
+        monkeypatch.setattr(_rt_mod, "get_interference_per_entity_path", lambda task, **k: missing_path)
+
+        rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
+            task="people",
+            unlearning_algorithm="distil",
+            interference_pair="rmse",
+            similarity_metric_list=["clip"],
+            include_emitter_forget_quality=True,
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        with pytest.raises(FileNotFoundError, match="Me file not found"):
+            rt._compute_from_scratch()
 
 
 # ---------------------------------------------------------------------------

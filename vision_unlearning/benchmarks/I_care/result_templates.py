@@ -32,7 +32,7 @@ from huggingface_hub import hf_api, HfApi, snapshot_download
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import r2_score, mean_squared_error, root_mean_squared_error
+from sklearn.metrics import r2_score, mean_squared_error, root_mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
@@ -674,12 +674,24 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
     significance_threshold: float = 0.05
     include_attribute_diff_similarity: bool = True
     include_attribute_value_similarity: bool = True
+    include_emitter_forget_quality: bool = True
+    """Whether to include the emitter entity's forget_clip_diff (Me) as a feature.
+    Requires the Me file to be present on disk for the task.
+    This is an asymmetric, emitter-level feature capturing how aggressively
+    entity i was unlearned, which may explain how much it leaks into receivers."""
     regression_algorithm: type_regression_algorithm = 'linear_regression'
     random_state: int = 42
     test_size: float = 0.3
 
     def _serialize_parameters(self) -> str:
-        return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}_{'_'.join(self.similarity_metric_list)}_{int(self.include_attribute_diff_similarity)}_{int(self.include_attribute_value_similarity)}_{self.regression_algorithm}"
+        return (
+            f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}"
+            f"_{'_'.join(self.similarity_metric_list)}"
+            f"_{int(self.include_attribute_diff_similarity)}"
+            f"_{int(self.include_attribute_value_similarity)}"
+            f"_{int(self.include_emitter_forget_quality)}"
+            f"_{self.regression_algorithm}"
+        )
 
     def _get_partial_path_local(self):
         return self._get_data_path_local() + '.partial'
@@ -698,7 +710,13 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
         ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2)
         ax.set_xlabel('True value')
         ax.set_ylabel('Predicted value')
-        ax.set_title(f"True vs Predicted (MAPE: {data['result'].get('mape_test', float('nan')):.4f})")
+        r2 = data['result'].get('r2_test', float('nan'))
+        rmse = data['result'].get('rmse_test', float('nan'))
+        mae = data['result'].get('mae_test', float('nan'))
+        ax.set_title(
+            f"True vs Predicted\n"
+            f"R²={r2:.3f}  RMSE={rmse:.4f}  MAE={mae:.4f}"
+        )
         ax.grid(True, alpha=0.3)
 
 
@@ -754,7 +772,30 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
             if self.include_attribute_value_similarity:
                 columns.append(f'emitter_{attribute}_value')
                 columns.append(f'receiver_{attribute}_value')
-        df_prepared = pd.DataFrame(columns=columns)
+        if self.include_emitter_forget_quality:
+            columns.append('emitter_forget_clip_diff')
+
+        # Load emitter forget quality from Me file (required for include_emitter_forget_quality=True)
+        emitter_forget_map: Dict[str, float] = {}
+        if self.include_emitter_forget_quality:
+            me_path = get_interference_per_entity_path(self.task)
+            if not os.path.exists(me_path):
+                raise FileNotFoundError(
+                    f"Me file not found at {me_path}. Required for include_emitter_forget_quality=True. "
+                    "Run script 4 (Compute interference per entity) for this task first."
+                )
+            df_me = pd.read_json(me_path)
+            me_metric_cols = [c for c in df_me.columns if c.startswith('metric_')]
+            forget_col = choose_metric_column_interference_per_entity(
+                self.unlearning_algorithm, 'Forget clip diff', me_metric_cols
+            )
+            emitter_forget_map = df_me.set_index('name')[forget_col].to_dict()
+
+        # Build metadata lookup for O(1) access per pair (avoids O(n²) sequential scan)
+        metadata_by_name: Dict[str, Dict[str, Any]] = {
+            row[entity_col]: row for row in metadata_filtered
+        }
+        rows_list: List[Dict[str, Any]] = []
         for label_emitter in labels:
             for label_receiver in labels:
                 if exclude_diagonal and (label_emitter == label_receiver):
@@ -764,10 +805,9 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 for idx, similarity_metric in enumerate(self.similarity_metric_list):
                     row_dict[str(similarity_metric)] = df_s_list[idx].loc[label_emitter, label_receiver]
                 
-                # Feature engineering
-                # This logic is very similar to jacc_metric_score
-                row_emitter = next((row for row in metadata_filtered if row[entity_col] == label_emitter), None)
-                row_receiver = next((row for row in metadata_filtered if row[entity_col] == label_receiver), None)
+                # Feature engineering — O(1) lookup via pre-built dict
+                row_emitter = metadata_by_name.get(label_emitter)
+                row_receiver = metadata_by_name.get(label_receiver)
                 if row_emitter is None or row_receiver is None:
                     raise ValueError(f"Entities {label_emitter} and/or {label_receiver} not found in metadata")
                 if set(row_emitter.keys()) != set(row_receiver.keys()):
@@ -785,11 +825,23 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                         row_dict[f'emitter_{attribute}_value'] = row_emitter[attribute]
                         row_dict[f'receiver_{attribute}_value'] = row_receiver[attribute]
                 
-                row_df = pd.DataFrame([row_dict], index=[f'{label_emitter}_to_{label_receiver}'])
-                assert list(row_df.columns) == list(df_prepared.columns), f"Expected columns {df_prepared.columns}, but got {row_df.columns}"
-                assert row_df.shape == (1, len(columns))
-                df_prepared = pd.concat([df_prepared, row_df])
+                if self.include_emitter_forget_quality:
+                    forget_val = emitter_forget_map.get(label_emitter)
+                    if forget_val is None:
+                        raise ValueError(
+                            f"emitter_forget_clip_diff not found for entity '{label_emitter}'. "
+                            "Ensure the Me file is complete for all task entities."
+                        )
+                    row_dict['emitter_forget_clip_diff'] = float(forget_val)
+
+                rows_list.append(row_dict)
         
+        df_prepared = pd.DataFrame(rows_list, columns=columns)
+        df_prepared.index = [
+            f'{e}_to_{r}'
+            for e in labels for r in labels
+            if not (exclude_diagonal and e == r)
+        ]
         assert df_prepared.shape[0] == (df_mp.shape[0] * df_mp.shape[1] - (df_mp.shape[0] if exclude_diagonal else 0))
         for col in self.similarity_metric_list:
             assert col in df_prepared.columns, f"Expected column {col} in df_prepared, but got {df_prepared.columns}"
@@ -886,6 +938,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 'significance_threshold': self.significance_threshold,
                 'include_attribute_diff_similarity': self.include_attribute_diff_similarity,
                 'include_attribute_value_similarity': self.include_attribute_value_similarity,
+                'include_emitter_forget_quality': self.include_emitter_forget_quality,
                 'regression_algorithm': self.regression_algorithm,
                 'trained_model_path': trained_model_path,
             },
@@ -896,6 +949,8 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 'r2_test': r2_test,
                 'rmse_train': float(root_mean_squared_error(y_train, y_pred_train)),
                 'rmse_test': float(root_mean_squared_error(y_test, y_pred_test)),
+                'mae_train': float(mean_absolute_error(y_train, y_pred_train)),
+                'mae_test': float(mean_absolute_error(y_test, y_pred_test)),
                 'features': feature_names,
                 'y_test_true': y_test.tolist(),
                 'y_test_pred': y_pred_test.tolist(),
@@ -1169,8 +1224,9 @@ class ResultTemplateSignificantRelationshipCategorical(ResultTemplate):
             logger.debug(f'Metric {chosen_metric_col} has NaN values, dropped {df_temp_shape_after_attributes - df_temp.shape[0]} rows')
 
         # this part is specific to categorical attributes
+        # bool dtype (binary flags like "aged/ worn") is treated as binary categorical
         attribute_type = df_temp[self.attribute].dtype
-        if attribute_type != object:
+        if attribute_type != object and attribute_type != np.bool_ and attribute_type != bool:
             raise InvalidAttributeTypeError(f'Attribute {self.attribute} is not categorical, has type {attribute_type}')
 
         categories: List[str] = df_temp[self.attribute].unique().tolist()
@@ -1257,7 +1313,13 @@ class ResultTemplateCountSignificantRelationship(ResultTemplate):
                     try:
                         data = ResultTemplateSignificantRelationshipCategorical(model=self.model, task=self.task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
                     except InvalidAttributeTypeError:
-                        data = ResultTemplateSignificantRelationshipNumerical(model=self.model, task=self.task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
+                        try:
+                            data = ResultTemplateSignificantRelationshipNumerical(model=self.model, task=self.task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
+                        except (InvalidAttributeTypeError, InsufficientSamplesError):
+                            continue
+                        except Exception as e:
+                            logger.warning(f'Combination {self.model}, {self.task}, {unlearning_algorithm}, {interference_entity}, {attribute} failled with {e}')
+                            continue
                     except InsufficientSamplesError:
                         continue
                     except Exception as e:
