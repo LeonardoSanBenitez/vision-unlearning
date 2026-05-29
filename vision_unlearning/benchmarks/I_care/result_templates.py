@@ -2030,7 +2030,7 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
                 model=self.model,
                 base_folder=self.base_folder,
             )
-            df_similarities = compute_cosine_similarity_matrix(fingerprints, ent_list)
+            df_similarities = compute_cosine_similarity_matrix(fingerprints, labels)
 
         # Return to be saved in its final form
         data = {
