@@ -20,8 +20,11 @@ File naming convention (follows assets/datasets/ layout):
     act_fingerprints_{task}_{model}.json
     e.g. act_fingerprints_scenes_sd1.4.json
 
-Typical fingerprint dimensionality for SD 1.4 (14 cross-attn layers):
-    2×320 + 2×640 + 1×1280 + 3×1280 + 3×640 + 3×320 = 9920 dims
+Actual fingerprint dimensionality for SD 1.4 (16 cross-attn layers):
+    down[0]: 2×320=640, down[1]: 2×640=1280, down[2]: 2×1280=2560
+    mid: 1×1280=1280
+    up[1]: 3×1280=3840, up[2]: 3×640=1920, up[3]: 3×320=960
+    Total: 12480 dims  (SD1.4 has 3 CrossAttnDownBlocks, not 2)
 
 Run from: unlearning/unlearning-analysis/
 Interpreter: C:/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe
@@ -75,8 +78,7 @@ def extract_unet_crossattn_activations(
     activations (output of all attn2 modules) across denoising steps and seeds.
 
     Returns a L2-normalized 1-D fingerprint vector of shape (D,) where D is
-    the sum of hidden dims across all 14 cross-attention layers (typically 9920
-    for SD 1.4).
+    the sum of hidden dims across all 16 cross-attention layers (12480 for SD 1.4).
 
     The fingerprint is computed as:
       1. For each seed, run `pipeline(prompt, num_inference_steps=n_steps)`.
