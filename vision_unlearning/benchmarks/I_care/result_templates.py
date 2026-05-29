@@ -679,6 +679,14 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
     Requires the Me file to be present on disk for the task.
     This is an asymmetric, emitter-level feature capturing how aggressively
     entity i was unlearned, which may explain how much it leaks into receivers."""
+    include_baseline_quality: bool = False
+    """Whether to include the emitter entity's baseline CLIP text-image alignment score
+    as a feature (named 'emitter_baseline_clip'). This is the raw CLIP score of the
+    ORIGINAL model's generated images — not a difference. Computed as the mean
+    CLIP(image_off(i), prompt_i) across seeds for each entity i.
+    Requires baseline images to be present at assets/datasets/generated_{task}_baseline/.
+    Note: this is distinct from the 'clip' similarity feature (which is text-text CLIP
+    between entity prompts). This is image-text CLIP for the baseline (original SD) model."""
     regression_algorithm: type_regression_algorithm = 'linear_regression'
     random_state: int = 42
     test_size: float = 0.3
@@ -690,6 +698,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
             f"_{int(self.include_attribute_diff_similarity)}"
             f"_{int(self.include_attribute_value_similarity)}"
             f"_{int(self.include_emitter_forget_quality)}"
+            f"_{int(self.include_baseline_quality)}"
             f"_{self.regression_algorithm}"
         )
 
@@ -698,34 +707,76 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
 
     @classmethod
     def plot(cls, data: dict, figsize: Tuple[int, int] = (6, 15), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
-        explanations = dict_to_explanation(data['result']['shap_explanations'])
+        """Plot predicted-vs-actual scatter and SHAP feature importance panels.
 
-        fig, ax = plt.subplots(figsize=figsize)
+        The figure has 1 or 3 rows depending on whether SHAP is available:
+          Row 1: true-vs-predicted scatter with R²/RMSE/MAE in title
+          Row 2: SHAP bar chart (mean |SHAP|, feature importance)
+          Row 3: SHAP beeswarm chart (per-sample SHAP values)
+
+        SHAP plots are rendered to an off-screen buffer and embedded as images
+        to avoid the SHAP library creating separate standalone figures.
+        """
+        explanations = dict_to_explanation(data['result']['shap_explanations'])
+        has_shap = shap is not None
+
+        n_rows = 3 if has_shap else 1
+        fig = plt.figure(figsize=figsize, constrained_layout=True)
+        ax_scatter = fig.add_subplot(n_rows, 1, 1)
+
         y_true = np.asarray(data['result']['y_test_true'], dtype=float)
         y_pred = np.asarray(data['result']['y_test_pred'], dtype=float)
-
-        ax.scatter(y_true, y_pred, alpha=0.7)
+        ax_scatter.scatter(y_true, y_pred, alpha=0.7)
         min_val = float(np.nanmin([y_true.min(), y_pred.min()]))
         max_val = float(np.nanmax([y_true.max(), y_pred.max()]))
-        ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2)
-        ax.set_xlabel('True value')
-        ax.set_ylabel('Predicted value')
+        ax_scatter.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2)
+        ax_scatter.set_xlabel('True value')
+        ax_scatter.set_ylabel('Predicted value')
         r2 = data['result'].get('r2_test', float('nan'))
         rmse = data['result'].get('rmse_test', float('nan'))
         mae = data['result'].get('mae_test', float('nan'))
-        ax.set_title(
+        ax_scatter.set_title(
             f"True vs Predicted\n"
             f"R²={r2:.3f}  RMSE={rmse:.4f}  MAE={mae:.4f}"
         )
-        ax.grid(True, alpha=0.3)
+        ax_scatter.grid(True, alpha=0.3)
 
+        if has_shap:
+            def _shap_to_array(shap_fn: Any, expl: Any) -> np.ndarray:
+                """Render a SHAP plot to a numpy RGBA array via an off-screen PNG buffer.
 
-        if shap is not None:
-            shap.plots.bar(explanations)
-            shap.plots.beeswarm(explanations)
+                SHAP plotting functions (bar, beeswarm) sometimes draw on the current
+                active axes instead of creating a new figure.  We isolate this by
+                creating a blank figure before calling the SHAP function so that it
+                becomes the current target.  All intermediate figures created during
+                the call are closed after capture.
+                """
+                figs_before: set = set(plt.get_fignums())
+                plt.figure()  # fresh figure — becomes current; SHAP draws here
+                shap_fn(expl, show=False)
+                figs_after: set = set(plt.get_fignums())
+
+                shap_fig = plt.gcf()  # last figure created (our blank or a new SHAP one)
+                buf = io.BytesIO()
+                shap_fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+                buf.seek(0)
+                result: np.ndarray = np.array(Image.open(buf))
+
+                # Close only the figures created during this call (not the main figure)
+                for _num in sorted(figs_after - figs_before, reverse=True):
+                    plt.close(_num)
+                return result
+
+            ax_bar = fig.add_subplot(n_rows, 1, 2)
+            ax_bar.imshow(_shap_to_array(shap.plots.bar, explanations))
+            ax_bar.axis('off')
+
+            ax_bee = fig.add_subplot(n_rows, 1, 3)
+            ax_bee.imshow(_shap_to_array(shap.plots.beeswarm, explanations))
+            ax_bee.axis('off')
 
         if return_fig:
-            return fig, ax
+            return fig, ax_scatter
         plt.show()
         return None
 
@@ -774,6 +825,8 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 columns.append(f'receiver_{attribute}_value')
         if self.include_emitter_forget_quality:
             columns.append('emitter_forget_clip_diff')
+        if self.include_baseline_quality:
+            columns.append('emitter_baseline_clip')
 
         # Load emitter forget quality from Me file (required for include_emitter_forget_quality=True)
         emitter_forget_map: Dict[str, float] = {}
@@ -790,6 +843,37 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 self.unlearning_algorithm, 'Forget clip diff', me_metric_cols
             )
             emitter_forget_map = df_me.set_index('name')[forget_col].to_dict()
+
+        # Compute per-entity baseline CLIP text-image score (required for include_baseline_quality=True)
+        # This is clip_off(entity_i) = mean CLIP(image_off(i), prompt_i) across seeds.
+        # Images are loaded from the shared baseline folder (assets/datasets/generated_{task}_baseline/).
+        emitter_baseline_clip_map: Dict[str, float] = {}
+        if self.include_baseline_quality:
+            from vision_unlearning.metrics.image_and_text import MetricImageTextSimilarity  # lazy import
+            baseline_seeds = [42, 43, 44, 45]
+            num_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+            metric_clip_img = MetricImageTextSimilarity(metrics=['clip'])
+            logger.info(
+                "Computing baseline CLIP scores for %d entities (%d seeds each) ...",
+                len(labels), len(baseline_seeds)
+            )
+            for entity in labels:
+                target_name = get_target_overwrite(self.task, self.unlearning_algorithm, entity)[0]
+                entity_prompt = f"An image of {target_name}"
+                clip_scores: List[float] = []
+                for seed in baseline_seeds:
+                    img_path = get_off_image_path(
+                        task=self.task,
+                        target=target_name,
+                        method=self.unlearning_algorithm,
+                        num_train_epochs=num_epochs,
+                        seed=seed,
+                        prompt=entity_prompt,
+                        base_folder=self.base_folder,
+                    )
+                    img = Image.open(img_path).convert('RGB')
+                    clip_scores.append(metric_clip_img.score(img, entity_prompt)['clip'])
+                emitter_baseline_clip_map[entity] = float(sum(clip_scores) / len(clip_scores))
 
         # Build metadata lookup for O(1) access per pair (avoids O(n²) sequential scan)
         metadata_by_name: Dict[str, Dict[str, Any]] = {
@@ -834,6 +918,15 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                         )
                     row_dict['emitter_forget_clip_diff'] = float(forget_val)
 
+                if self.include_baseline_quality:
+                    baseline_val = emitter_baseline_clip_map.get(label_emitter)
+                    if baseline_val is None:
+                        raise ValueError(
+                            f"emitter_baseline_clip not found for entity '{label_emitter}'. "
+                            "Ensure include_baseline_quality=True and baseline images are present."
+                        )
+                    row_dict['emitter_baseline_clip'] = baseline_val
+
                 rows_list.append(row_dict)
         
         df_prepared = pd.DataFrame(rows_list, columns=columns)
@@ -877,7 +970,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
         
         # Fit regression model
         if self.regression_algorithm == 'random_forest':
-            regressor = RandomForestRegressor(n_estimators=50, random_state=self.random_state)
+            regressor = RandomForestRegressor(n_estimators=20, random_state=self.random_state)
         else:
             regressor = LinearRegression()
 
@@ -939,6 +1032,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 'include_attribute_diff_similarity': self.include_attribute_diff_similarity,
                 'include_attribute_value_similarity': self.include_attribute_value_similarity,
                 'include_emitter_forget_quality': self.include_emitter_forget_quality,
+                'include_baseline_quality': self.include_baseline_quality,
                 'regression_algorithm': self.regression_algorithm,
                 'trained_model_path': trained_model_path,
             },
