@@ -2020,6 +2020,18 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             sim_matrix = mat @ mat.T
             df_similarities = pd.DataFrame(sim_matrix, index=ent_list, columns=ent_list)
 
+        elif self.similarity_metric == 'act':
+            from vision_unlearning.utils.mechanistic_interpretability import (
+                load_act_fingerprints,
+                compute_cosine_similarity_matrix,
+            )
+            fingerprints = load_act_fingerprints(
+                task=self.task,
+                model=self.model,
+                base_folder=self.base_folder,
+            )
+            df_similarities = compute_cosine_similarity_matrix(fingerprints, ent_list)
+
         # Return to be saved in its final form
         data = {
             'metadata': {

@@ -584,6 +584,8 @@ domain_me = [
 domain_s = [
     "Clip Cosine Similarity",
     "Jacc Similarity",
+    "DINOv2 Cosine Similarity",
+    "UNet Cross-Attention Similarity",
 ]
 domain_l = [
     "Clip Embedding",
@@ -642,6 +644,7 @@ type_s = Literal[
     "clip",
     "jacc",
     "dino",
+    "act",
 ]
 
 type_l = Literal[
@@ -678,6 +681,7 @@ GUI_TO_BACKEND = {
         "Clip Cosine Similarity": "clip",
         "Jacc Similarity": "jacc",
         "DINOv2 Cosine Similarity": "dino",
+        "UNet Cross-Attention Similarity": "act",
     },
     "latent_embedding": {
         "Clip Embedding": "clip_embedding",
@@ -697,6 +701,7 @@ s_to_direction: Dict[type_s, type_direction] = {
     "clip": "↑",
     "jacc": "↑",
     "dino": "↑",
+    "act": "↑",  # higher cosine = more similar activation pattern
 }
 # me_to_direction can... be infered?
 
