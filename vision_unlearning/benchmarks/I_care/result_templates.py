@@ -1974,12 +1974,29 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
 
 class ResultTemplateMinimumCutInterference(ResultTemplate):
     """
-    Interprets a *task* as a directed weighted graph and computes the minimum cut separating two *entities*
-    As a consequence of the max-flow min-cut theorem, it directly follows that the minimum cut is the smallest influence whose removal eliminates every directed influence path from $e_1$ to $e_2$.
-    Based on this, we conjecture that if we need to unlearn $e_1$ while minimizing harm to $e_2$, then the ideal intervention in the unlearning process is to increase the preservation of the emitter-side nodes. More intuitively, we can think of this intervention as "blocking the interference path," as performed in electrical circuits to protect sensitive components (such as ground partitioning, shielding traces, among others.
-    **Arguments:** $m$, $t$, $u$, $e_1$, $e_2$, $m_p$.
-    **Result:** list of *entities* (corresponding to the emitter-side nodes).
-    **Interpretation:** qualitative; small set of nodes through which most of the interference from $e_1$ propagates to $e_2$.
+    Interprets a *task* as a directed weighted graph and computes the minimum s-t cut
+    separating ``entity_1`` (source) from ``entity_2`` (sink).
+
+    Each directed edge (e_i → e_j) carries a non-negative weight derived from the
+    interference metric ``interference_pair`` (see ``_interference_to_weight``).
+
+    By the max-flow min-cut theorem, the minimum cut capacity equals the maximum
+    interference flow from e_1 to e_2.  The emitter-side partition P1 (containing e_1)
+    is the minimal set of entities through which interference from e_1 must pass to
+    reach e_2 — the "interference bottleneck."
+
+    **Arguments:** ``m``, ``t``, ``u``, ``e_1``, ``e_2``, ``m_p``.
+
+    - ``lambda_quantile``: percentile of positive edge weights used as the inclusion
+      threshold (default 0.0 → include all positive-weight edges).
+    - ``lambda_value``: if set, overrides ``lambda_quantile`` with an explicit threshold.
+
+    **Result:** emitter-side partition, cut edges, cut capacity.
+
+    **Interpretation:** qualitative; the emitter-side set reveals which entities sit
+    on interference paths from e_1 to e_2.
+
+    Requires ``networkx >= 3.0`` (declared as an optional extra in pyproject.toml).
     """
     model: type_model = "sd1.4"
     task: type_task = 'people'
@@ -1987,6 +2004,322 @@ class ResultTemplateMinimumCutInterference(ResultTemplate):
     interference_pair: type_mp
     entity_1: str
     entity_2: str
+    lambda_quantile: float = 0.0
+    lambda_value: Optional[float] = None  # if set, overrides lambda_quantile
+
+    # ------------------------------------------------------------------
+    # Serialisation
+    # ------------------------------------------------------------------
+
+    def _serialize_parameters(self) -> str:
+        e1_slug = self.entity_1.lower().replace(' ', '_')
+        e2_slug = self.entity_2.lower().replace(' ', '_')
+        return (
+            f"{self.model}_{self.task}_{self.unlearning_algorithm}"
+            f"_{self.interference_pair}_{e1_slug}_{e2_slug}"
+        )
+
+    # ------------------------------------------------------------------
+    # Static helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _interference_to_weight(raw: float, mp: str) -> float:
+        """Convert raw m_p value to a non-negative edge weight.
+
+        Higher weight = stronger interference.
+
+        ``clip_diff`` and ``ssim``: direction "↑ = worse retention" means *more
+        negative* raw value → more interference.  We flip the sign.
+
+        ``brisque_diff`` and ``rmse``: direction "↓ = worse" means *more positive*
+        raw value → more interference.  We use the value directly.
+        """
+        if mp in ("clip_diff", "ssim"):
+            return max(0.0, -raw)
+        elif mp in ("brisque_diff", "rmse"):
+            return max(0.0, raw)
+        else:
+            raise ValueError(f"Unknown interference_pair: {mp!r}")
+
+    # ------------------------------------------------------------------
+    # Compute
+    # ------------------------------------------------------------------
+
+    def _compute_from_scratch(self) -> dict:  # type: ignore[override]
+        try:
+            import networkx as nx
+        except ImportError as exc:
+            raise ImportError(
+                "networkx is required for ResultTemplateMinimumCutInterference. "
+                "Install it with: pip install networkx"
+            ) from exc
+
+        if self.entity_1 == self.entity_2:
+            raise ValueError(
+                f"entity_1 and entity_2 must be different; "
+                f"got '{self.entity_1}' for both."
+            )
+
+        # ── 1. Load InterferenceMatrix (local cache first, then HF) ─────────
+        im_rt = ResultTemplateInterferenceMatrix(
+            model=self.model,
+            task=self.task,
+            unlearning_algorithm=self.unlearning_algorithm,
+            interference_pair=self.interference_pair,
+            base_folder=self.base_folder,
+            save_outputs=self.save_outputs,
+        )
+        im_data = im_rt.compute()
+        rows: List[Dict[str, Any]] = im_data['result']
+        entity_names: List[str] = [r['emitter'] for r in rows]
+
+        # Validate requested entities exist in the task
+        for attr, name in (('entity_1', self.entity_1), ('entity_2', self.entity_2)):
+            if name not in entity_names:
+                raise ValueError(
+                    f"{attr} '{name}' not found in task '{self.task}'. "
+                    f"Available entities (first 10): {entity_names[:10]}"
+                )
+
+        # ── 2. Collect positive-weight edges (for threshold computation) ─────
+        positive_weights: List[float] = []
+        for row in rows:
+            emitter: str = row['emitter']
+            for receiver, raw_val in row.items():
+                if receiver in ('emitter', emitter) or raw_val is None:
+                    continue
+                w = self._interference_to_weight(float(raw_val), self.interference_pair)
+                if w > 0.0:
+                    positive_weights.append(w)
+
+        # ── 3. Determine λ threshold ─────────────────────────────────────────
+        if self.lambda_value is not None:
+            lambda_threshold: float = float(self.lambda_value)
+        elif positive_weights:
+            lambda_threshold = float(np.quantile(positive_weights, self.lambda_quantile))
+        else:
+            lambda_threshold = 0.0
+
+        # ── 4. Build directed graph ───────────────────────────────────────────
+        G: Any = nx.DiGraph()
+        G.add_nodes_from(entity_names)
+        for row in rows:
+            emitter = row['emitter']
+            for receiver, raw_val in row.items():
+                if receiver in ('emitter', emitter) or raw_val is None:
+                    continue
+                w = self._interference_to_weight(float(raw_val), self.interference_pair)
+                if w > lambda_threshold:
+                    G.add_edge(emitter, receiver, capacity=w)
+
+        n_graph_nodes: int = G.number_of_nodes()
+        n_graph_edges: int = G.number_of_edges()
+
+        # ── 5. Direct edge weight (before thresholding) ───────────────────────
+        direct_raw_val: Optional[float] = None
+        for row in rows:
+            if row['emitter'] == self.entity_1:
+                v = row.get(self.entity_2)
+                if v is not None:
+                    direct_raw_val = float(v)
+                break
+        direct_edge_weight: float = (
+            self._interference_to_weight(direct_raw_val, self.interference_pair)
+            if direct_raw_val is not None
+            else 0.0
+        )
+
+        # ── 6. Min-cut computation ────────────────────────────────────────────
+        cut_value: float
+        emitter_set: List[str]
+        sink_set: List[str]
+        cut_edges: List[Dict[str, Any]]
+        no_path: bool
+
+        try:
+            if not nx.has_path(G, self.entity_1, self.entity_2):
+                reachable = set(nx.descendants(G, self.entity_1)) | {self.entity_1}
+                cut_value = 0.0
+                emitter_set = sorted(reachable)
+                sink_set = sorted(set(entity_names) - reachable)
+                cut_edges = []
+                no_path = True
+            else:
+                raw_cut_value, (emitter_set_nx, sink_set_nx) = nx.minimum_cut(
+                    G, self.entity_1, self.entity_2
+                )
+                cut_value = float(raw_cut_value)
+                emitter_set = sorted(emitter_set_nx)
+                sink_set = sorted(sink_set_nx)
+                emitter_set_s = set(emitter_set)
+                cut_edges = sorted(
+                    [
+                        {"from": u, "to": v, "weight": float(G[u][v]['capacity'])}
+                        for u, v in G.edges()
+                        if u in emitter_set_s and v not in emitter_set_s
+                    ],
+                    key=lambda e: -e['weight'],  # strongest first
+                )
+                no_path = False
+        except nx.NetworkXError as exc:
+            raise RuntimeError(f"min-cut computation failed: {exc}") from exc
+
+        direct_is_min_cut: bool = (
+            not no_path
+            and abs(cut_value - direct_edge_weight) < 1e-6
+            and direct_edge_weight > 0
+        )
+
+        return {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'task': self.task,
+                'unlearning_algorithm': self.unlearning_algorithm,
+                'interference_pair': self.interference_pair,
+                'entity_1': self.entity_1,
+                'entity_2': self.entity_2,
+                'lambda_quantile': self.lambda_quantile,
+                'lambda_value': lambda_threshold,
+                'n_graph_nodes': n_graph_nodes,
+                'n_graph_edges': n_graph_edges,
+            },
+            'result': {
+                'cut_value': cut_value,
+                'emitter_set': emitter_set,
+                'sink_set': sink_set,
+                'cut_edges': cut_edges,
+                'n_emitter': len(emitter_set),
+                'n_sink': len(sink_set),
+                'no_path': no_path,
+                'direct_edge_weight': direct_edge_weight,
+                'direct_is_min_cut': direct_is_min_cut,
+            },
+        }
+
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def plot(  # type: ignore[override]
+        cls,
+        data: dict,
+        figsize: Tuple[int, int] = (14, 5),
+        return_fig: bool = False,
+    ) -> Optional[Tuple[Figure, plt.Axes]]:
+        """2-panel figure: bar chart of cut edges (left) + text summary (right).
+
+        Parameters
+        ----------
+        data:
+            Dict returned by :meth:`compute`.
+        figsize:
+            Figure size in inches (width, height).
+        return_fig:
+            If True, return ``(fig, axes)`` without showing.
+        """
+        result = data['result']
+        meta = data['metadata']
+
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+        # ── Panel 1: horizontal bar chart of cut edges ────────────────────────
+        ax_bar = axes[0]
+        cut_edges = result['cut_edges']
+        if cut_edges:
+            top_n = min(15, len(cut_edges))
+            bar_labels = [f"{e['from']} → {e['to']}" for e in cut_edges[:top_n]]
+            bar_weights = [e['weight'] for e in cut_edges[:top_n]]
+            # Direct edge (e1→e2) in dark red; other cut edges in orange
+            bar_colors = [
+                '#d62728' if (e['from'] == meta['entity_1'] and e['to'] == meta['entity_2'])
+                else '#ff7f0e'
+                for e in cut_edges[:top_n]
+            ]
+            y_pos = list(range(top_n - 1, -1, -1))
+            ax_bar.barh(y_pos, bar_weights, color=bar_colors, edgecolor='black', linewidth=0.4)
+            ax_bar.set_yticks(y_pos)
+            ax_bar.set_yticklabels(bar_labels, fontsize=8)
+            ax_bar.set_xlabel(
+                f"Edge weight  ({meta['interference_pair']})", fontsize=9
+            )
+            ax_bar.set_title(f"Cut edges (top {top_n})", fontsize=10)
+            ax_bar.axvline(x=0, color='black', linewidth=0.5)
+        else:
+            ax_bar.text(
+                0.5, 0.5,
+                'No cut edges\n(no directed path exists)',
+                ha='center', va='center',
+                transform=ax_bar.transAxes, fontsize=11,
+            )
+            ax_bar.set_title("Cut edges", fontsize=10)
+            ax_bar.axis('off')
+
+        # ── Panel 2: text summary ─────────────────────────────────────────────
+        ax_txt = axes[1]
+        ax_txt.axis('off')
+
+        emitter_preview = result['emitter_set'][:8]
+        if len(result['emitter_set']) > 8:
+            emitter_str = (
+                ", ".join(emitter_preview)
+                + f"\n  … (+{len(result['emitter_set']) - 8} more)"
+            )
+        else:
+            emitter_str = ", ".join(emitter_preview) if emitter_preview else "(empty)"
+
+        flags: List[str] = []
+        if result.get('no_path'):
+            flags.append("⚠  No directed path — P1 = reachable set")
+        if result.get('direct_is_min_cut'):
+            flags.append("✓  Direct edge IS the min-cut")
+        elif not result.get('no_path') and result['cut_value'] < result['direct_edge_weight'] - 1e-6:
+            flags.append("ℹ  Cheaper cut via alternative paths")
+
+        summary_lines = [
+            f"Task: {meta['task'].title()}",
+            f"Method: {meta['unlearning_algorithm'].upper()}",
+            f"Metric: {meta['interference_pair']}",
+            f"Graph: {meta['n_graph_nodes']} nodes, {meta['n_graph_edges']} edges",
+            f"λ threshold: {meta['lambda_value']:.4f}  (q={meta['lambda_quantile']})",
+            "",
+            f"e₁ (source):  {meta['entity_1']}",
+            f"e₂ (sink):    {meta['entity_2']}",
+            "",
+            f"Min-cut:      {result['cut_value']:.4f}",
+            f"Direct edge:  {result['direct_edge_weight']:.4f}",
+            f"|P1| emitter: {result['n_emitter']} / {result['n_emitter'] + result['n_sink']}",
+            "",
+        ] + flags + [
+            "",
+            "Emitter-side partition:",
+            f"  {emitter_str}",
+        ]
+
+        ax_txt.text(
+            0.04, 0.97,
+            "\n".join(summary_lines),
+            transform=ax_txt.transAxes,
+            fontsize=8.5,
+            verticalalignment='top',
+            fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='#f7f7f7', alpha=0.85),
+        )
+        ax_txt.set_title("Summary", fontsize=10)
+
+        fig.suptitle(
+            f"Minimum Cut Interference\n"
+            f"{meta['entity_1']}  →  {meta['entity_2']}",
+            fontsize=12, fontweight='bold',
+        )
+        plt.tight_layout()
+
+        if return_fig:
+            return fig, axes  # type: ignore[return-value]
+        plt.show()
+        return None
 
 
 class ResultTemplateUnlearningVisualSummary(ResultTemplate):

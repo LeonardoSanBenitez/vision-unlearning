@@ -95,6 +95,7 @@ shap = "~0.49.1"
 #       is restructured to use extras properly (they are not needed for core unlearning).
 seaborn = "*"
 scikit-learn = "*"
+networkx = ">=3.0"  # Required by ResultTemplateMinimumCutInterference
 
 # Needed only for development/build
 # TODO: declare them separately
