@@ -1469,21 +1469,507 @@ print(df[df['task']=='people'].groupby('unlearning_algorithm').sum()['significan
 
 class ResultTemplateImplicitAssociationTest(ResultTemplate):
     """
-    Measures how the strength of automatic associations `B` between two pairs of
-    *entities* changes after unlearning.
+    Measures how the strength of automatic associations ``B`` between two categorical
+    *attribute* groups changes after unlearning (Image Embedding Association Test, iEAT).
 
-    **Arguments:** `m`, `t`, `u`, `a_1`, `a_2`, `l`.
-    **Result:** `|a| x |a|` real-valued tensor `ΔB`.
-    **Interpretation:** qualitative; a human should decide whether it is ethical or
-    desirable for the unlearning process to cause this change in implicit association
-    between the chosen *attributes*.
+    Inspired by Steed & Caliskan (2021) and Sirotkin et al. (2022), extended to
+    the unlearning context: we compare the association matrix of the original
+    model to those of each per-entity unlearned model, and report the mean shift.
+
+    **Arguments:** ``m``, ``t``, ``u``, ``a_1``, ``a_2``, ``l``.
+
+    - ``attribute_1``: target attribute name — a metadata key with categorical values
+      (e.g. ``"gender"``).
+    - ``attribute_2``: protected attribute name — a metadata key with categorical values
+      (e.g. ``"occupation_simplified"``).
+    - ``latent_embedding``: embedding space used to measure similarity
+      (currently only ``"dino_embedding"`` is implemented; DINOv2-ViT-S/14, 384-dim).
+
+    **Result:**
+    B ∈ R^(|a1_values| × |a2_values|) — average DINOv2 cosine similarity between
+    entity embeddings of each (attribute_1_value, attribute_2_value) group pair.
+    Computed for the original model (``B_original``) and, per unlearned entity,
+    for the unlearned model (``B_unlearned``).  Mean and std over all entities
+    are returned alongside per-entity deltas and a permutation p-value.
+
+    ``ΔB = B_original − B_unlearned_mean``.  A positive entry means unlearning
+    *weakened* the original model's implicit association between those two groups.
+
+    **Interpretation:** qualitative; a researcher should decide whether the shift
+    is ethically meaningful for the chosen attribute pair and task.
     """
     model: type_model = "sd1.4"
     task: type_task = 'people'
     unlearning_algorithm: type_unlearning_algorithm
     attribute_1: str
     attribute_2: str
-    latent_embedding: type_l
+    latent_embedding: type_l = "dino_embedding"
+    significance_threshold: float = 0.05
+    # Number of sign-flip permutations for the significance test.
+    n_permutations: int = 1000
+
+    # ------------------------------------------------------------------
+    # Serialisation
+    # ------------------------------------------------------------------
+
+    def _serialize_parameters(self) -> str:
+        attr1_slug = self.attribute_1.lower().replace(' ', '_')
+        attr2_slug = self.attribute_2.lower().replace(' ', '_')
+        return (
+            f"{self.model}_{self.task}_{self.unlearning_algorithm}"
+            f"_{attr1_slug}_{attr2_slug}_{self.latent_embedding}"
+        )
+
+    # ------------------------------------------------------------------
+    # File-path helpers (mirrors EmbeddingUnlearningProfile patterns)
+    # ------------------------------------------------------------------
+
+    def _get_baseline_embedding_path(self) -> str:
+        """Path to the original-model baseline DINOv2 embedding file."""
+        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+        fname = (
+            f"embeddings_{self.task}_original"
+            f"_{self.unlearning_algorithm}_{epochs:03d}.json"
+        )
+        return os.path.join(self.base_folder, "datasets", fname)
+
+    def _get_entity_embedding_path(self, hf_entity_name: str) -> str:
+        """Path to the per-entity unlearned DINOv2 embedding file."""
+        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+        fname = (
+            f"embeddings_{self.task}_{hf_entity_name}"
+            f"_{self.unlearning_algorithm}_{epochs:03d}.json"
+        )
+        return os.path.join(self.base_folder, "datasets", fname)
+
+    # ------------------------------------------------------------------
+    # Static helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_mean_embeddings_by_name(
+        raw: dict,
+        metadata_filtered: "List[Dict[str, Any]]",
+        task: str,
+        unlearning_algorithm: str,
+    ) -> "Dict[str, np.ndarray]":
+        """Return unit-normalised mean DINOv2 embedding per entity.
+
+        Keys are metadata names (e.g. ``"George_W_Bush"``).  Entities not found
+        in the embedding file are silently omitted.  The prompt field is used
+        for matching (not ``prompted_entity``) per I-CARE Guidelines §2.
+        """
+        from collections import defaultdict
+
+        ent_list: List[str] = [e['name'] for e in metadata_filtered]
+        # Build: metadata_name → expected prompt string
+        meta_to_prompt: Dict[str, str] = {
+            name: f"An image of {get_target_overwrite(task, unlearning_algorithm, name)[0]}"
+            for name in ent_list
+        }
+
+        buckets: Dict[str, List[List[float]]] = defaultdict(list)
+        for entry in raw['embeddings']:
+            buckets[entry['prompt']].append(entry['embedding'])
+
+        entity_embeddings: Dict[str, np.ndarray] = {}
+        for meta_name in ent_list:
+            expected_prompt = meta_to_prompt[meta_name]
+            if expected_prompt not in buckets:
+                logger.debug(
+                    "IAT: no embeddings for '%s' (prompt='%s') — skipping.",
+                    meta_name, expected_prompt,
+                )
+                continue
+            vecs = buckets[expected_prompt]
+            arr = np.array(vecs, dtype=float)
+            mean_vec = arr.mean(axis=0)
+            norm = float(np.linalg.norm(mean_vec))
+            if norm < 1e-10:
+                logger.warning("IAT: near-zero mean embedding for '%s' — skipping.", meta_name)
+                continue
+            entity_embeddings[meta_name] = mean_vec / norm
+
+        return entity_embeddings
+
+    @staticmethod
+    def _compute_B_matrix(
+        entity_embeddings: "Dict[str, np.ndarray]",
+        group_1: "Dict[str, List[str]]",
+        group_2: "Dict[str, List[str]]",
+        vals_1: "List[str]",
+        vals_2: "List[str]",
+    ) -> np.ndarray:
+        """Compute B ∈ R^(|vals_1| × |vals_2|).
+
+        B[i, j] = mean cosine similarity between embeddings of entities in
+        ``group_1[vals_1[i]]`` and embeddings of entities in ``group_2[vals_2[j]]``.
+        Entities absent from ``entity_embeddings`` are excluded.  A cell is NaN
+        when either group has no available embeddings.
+        """
+        B: np.ndarray = np.zeros((len(vals_1), len(vals_2)), dtype=float)
+        for i, v1 in enumerate(vals_1):
+            embs_1 = [
+                entity_embeddings[e]
+                for e in group_1.get(v1, [])
+                if e in entity_embeddings
+            ]
+            for j, v2 in enumerate(vals_2):
+                embs_2 = [
+                    entity_embeddings[e]
+                    for e in group_2.get(v2, [])
+                    if e in entity_embeddings
+                ]
+                if not embs_1 or not embs_2:
+                    B[i, j] = float('nan')
+                    continue
+                mat_1 = np.array(embs_1)       # (n1, dim)
+                mat_2 = np.array(embs_2)       # (n2, dim)
+                # Mean pairwise cosine similarity (unit vectors → dot product)
+                B[i, j] = float((mat_1 @ mat_2.T).mean())
+        return B
+
+    @staticmethod
+    def _permutation_test_delta_B(
+        delta_B_arr: np.ndarray,
+        n_permutations: int = 1000,
+        rng_seed: int = 42,
+    ) -> float:
+        """Sign-flip permutation test for the mean ΔB.
+
+        H0: the mean ΔB (across all unlearned entities) is zero — i.e. unlearning
+        does not systematically shift implicit associations.
+
+        The test statistic is the Frobenius norm of mean(ΔB).  Under H0, each
+        entity's ΔB(E) has a random sign; we randomly flip the sign of whole
+        entity-level matrices and compare the resulting Frobenius norm to the
+        observed one.
+
+        Parameters
+        ----------
+        delta_B_arr:
+            Shape ``(n_entities, |a1|, |a2|)``.  May contain NaN cells; NaNs are
+            propagated transparently (nanmean used for the test statistic).
+        n_permutations:
+            Number of sign-flip iterations.
+        rng_seed:
+            Fixed seed for reproducibility.
+
+        Returns
+        -------
+        float
+            p-value (including +1 continuity correction).
+        """
+        rng = np.random.default_rng(rng_seed)
+        # Use nanmean so NaN cells don't blow up the statistic.
+        observed = float(np.linalg.norm(np.nanmean(delta_B_arr, axis=0)))
+        n_entities = delta_B_arr.shape[0]
+        count_gte = 0
+        for _ in range(n_permutations):
+            signs = rng.choice(np.array([-1, 1]), size=n_entities)
+            permuted_mean = np.nanmean(
+                delta_B_arr * signs[:, np.newaxis, np.newaxis], axis=0
+            )
+            if float(np.linalg.norm(permuted_mean)) >= observed:
+                count_gte += 1
+        return (count_gte + 1) / (n_permutations + 1)
+
+    # ------------------------------------------------------------------
+    # Compute
+    # ------------------------------------------------------------------
+
+    def _compute_from_scratch(self) -> dict:  # type: ignore[override]
+        if self.latent_embedding != "dino_embedding":
+            raise NotImplementedError(
+                f"latent_embedding='{self.latent_embedding}' is not yet implemented. "
+                "Only 'dino_embedding' (DINOv2-ViT-S/14) is currently supported."
+            )
+
+        # ── 1. Load metadata and build attribute groups ─────────────────────
+        metadata_filtered: List[Dict[str, Any]] = get_metadata_filtered(self.task)
+
+        # Validate attribute keys
+        all_keys = set(metadata_filtered[0].keys()) if metadata_filtered else set()
+        for attr in (self.attribute_1, self.attribute_2):
+            if not any(attr in e for e in metadata_filtered):
+                raise ValueError(
+                    f"Attribute '{attr}' not found in metadata for task '{self.task}'. "
+                    f"Available keys: {sorted(all_keys)}"
+                )
+
+        # Collect unique values (sorted for reproducibility)
+        vals_1_set: set = set()
+        vals_2_set: set = set()
+        for e in metadata_filtered:
+            v1 = e.get(self.attribute_1)
+            v2 = e.get(self.attribute_2)
+            if v1 is not None:
+                vals_1_set.add(str(v1))
+            if v2 is not None:
+                vals_2_set.add(str(v2))
+
+        vals_1: List[str] = sorted(vals_1_set)
+        vals_2: List[str] = sorted(vals_2_set)
+
+        if not vals_1:
+            raise ValueError(
+                f"No non-null values found for attribute '{self.attribute_1}' "
+                f"in task '{self.task}'."
+            )
+        if not vals_2:
+            raise ValueError(
+                f"No non-null values found for attribute '{self.attribute_2}' "
+                f"in task '{self.task}'."
+            )
+
+        # Group entities by attribute value
+        group_1: Dict[str, List[str]] = {v: [] for v in vals_1}
+        group_2: Dict[str, List[str]] = {v: [] for v in vals_2}
+        for e in metadata_filtered:
+            v1 = e.get(self.attribute_1)
+            v2 = e.get(self.attribute_2)
+            if v1 is not None:
+                group_1[str(v1)].append(e['name'])
+            if v2 is not None:
+                group_2[str(v2)].append(e['name'])
+
+        # ── 2. Baseline B matrix ─────────────────────────────────────────────
+        baseline_path = self._get_baseline_embedding_path()
+        if not os.path.exists(baseline_path):
+            raise FileNotFoundError(
+                f"Baseline DINOv2 embedding file not found: {baseline_path}. "
+                f"Run 3_compute_embeddings.py --task {self.task} "
+                f"--method {self.unlearning_algorithm} --max-identities 100 first."
+            )
+
+        with open(baseline_path, encoding='utf-8') as f:
+            baseline_raw = json.load(f)
+
+        baseline_embs = self._load_mean_embeddings_by_name(
+            baseline_raw, metadata_filtered, self.task, self.unlearning_algorithm
+        )
+        B_original = self._compute_B_matrix(baseline_embs, group_1, group_2, vals_1, vals_2)
+
+        # ── 3. Per-entity unlearned B matrices ───────────────────────────────
+        delta_B_list: List[np.ndarray] = []
+        B_unlearned_list: List[np.ndarray] = []
+        computed_entity_names: List[str] = []
+
+        for meta in metadata_filtered:
+            meta_name: str = meta['name']
+            hf_name: str = get_target_overwrite(self.task, self.unlearning_algorithm, meta_name)[0]
+            entity_path = self._get_entity_embedding_path(hf_name)
+
+            if not os.path.exists(entity_path):
+                logger.debug(
+                    "IAT: per-entity file missing for '%s' (%s) — skipping.",
+                    meta_name, entity_path,
+                )
+                continue
+
+            with open(entity_path, encoding='utf-8') as f:
+                entity_raw = json.load(f)
+
+            entity_embs = self._load_mean_embeddings_by_name(
+                entity_raw, metadata_filtered, self.task, self.unlearning_algorithm
+            )
+            B_unlearned_E = self._compute_B_matrix(entity_embs, group_1, group_2, vals_1, vals_2)
+            delta_B_list.append(B_original - B_unlearned_E)
+            B_unlearned_list.append(B_unlearned_E)
+            computed_entity_names.append(meta_name)
+
+        if not delta_B_list:
+            raise RuntimeError(
+                f"No per-entity embedding files found for "
+                f"task='{self.task}', method='{self.unlearning_algorithm}'. "
+                f"Expected files at: {self._get_entity_embedding_path('<entity>')}"
+            )
+
+        delta_B_arr = np.stack(delta_B_list, axis=0)    # (n_entities, |a1|, |a2|)
+        B_unlearned_arr = np.stack(B_unlearned_list, axis=0)
+
+        delta_B_mean: np.ndarray = np.nanmean(delta_B_arr, axis=0)
+        delta_B_std: np.ndarray = np.nanstd(delta_B_arr, axis=0)
+        B_unlearned_mean: np.ndarray = np.nanmean(B_unlearned_arr, axis=0)
+
+        # ── 4. Statistical significance ──────────────────────────────────────
+        iat_effect_size = float(np.nanmean(np.abs(delta_B_mean)))
+        perm_pvalue = self._permutation_test_delta_B(
+            delta_B_arr,
+            n_permutations=self.n_permutations,
+        )
+
+        # ── 5. Serialise matrices as nested dicts ────────────────────────────
+        def _matrix_to_nested_dict(
+            mat: np.ndarray, rows: List[str], cols: List[str]
+        ) -> Dict[str, Dict[str, float]]:
+            return {
+                r: {
+                    c: (None if np.isnan(mat[i, j]) else float(mat[i, j]))  # type: ignore[dict-item]
+                    for j, c in enumerate(cols)
+                }
+                for i, r in enumerate(rows)
+            }
+
+        per_entity_delta: Dict[str, Dict[str, Dict[str, float]]] = {
+            name: _matrix_to_nested_dict(db, vals_1, vals_2)
+            for name, db in zip(computed_entity_names, delta_B_list)
+        }
+
+        return {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'task': self.task,
+                'unlearning_algorithm': self.unlearning_algorithm,
+                'attribute_1': self.attribute_1,
+                'attribute_2': self.attribute_2,
+                'attribute_1_values': vals_1,
+                'attribute_2_values': vals_2,
+                'latent_embedding': self.latent_embedding,
+                'n_entities_computed': len(computed_entity_names),
+                'group_sizes_attr1': {v: len(group_1[v]) for v in vals_1},
+                'group_sizes_attr2': {v: len(group_2[v]) for v in vals_2},
+                'significance_threshold': self.significance_threshold,
+            },
+            'result': {
+                'B_original': _matrix_to_nested_dict(B_original, vals_1, vals_2),
+                'B_unlearned_mean': _matrix_to_nested_dict(B_unlearned_mean, vals_1, vals_2),
+                'delta_B_mean': _matrix_to_nested_dict(delta_B_mean, vals_1, vals_2),
+                'delta_B_std': _matrix_to_nested_dict(delta_B_std, vals_1, vals_2),
+                'delta_B_per_entity': per_entity_delta,
+                'n_unlearned_entities': len(computed_entity_names),
+                'iat_effect_size': iat_effect_size,
+                'permutation_pvalue': float(perm_pvalue),
+                'significant': bool(perm_pvalue < self.significance_threshold),
+            },
+        }
+
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def plot(  # type: ignore[override]
+        cls,
+        data: dict,
+        figsize: Tuple[int, int] = (14, 4),
+        return_fig: bool = False,
+        annot_fmt: str = ".3f",
+    ) -> Optional[Tuple[Figure, plt.Axes]]:
+        """3-panel heatmap: B_original | B_unlearned_mean | ΔB_mean.
+
+        Left and middle panels share the same colour scale (viridis) so absolute
+        similarity values are visually comparable.  The right panel uses a
+        diverging scale (RdBu) centred at zero so the direction of the shift is
+        immediately legible: red = original association stronger (weakened by
+        unlearning); blue = original association weaker (strengthened by
+        unlearning).
+
+        Parameters
+        ----------
+        data:
+            Dict returned by :meth:`compute`.
+        figsize:
+            Figure size in inches.
+        return_fig:
+            If True, return ``(fig, axes)`` without showing.
+        annot_fmt:
+            Number format for cell annotations (e.g. ``".3f"``).
+        """
+        result = data['result']
+        meta = data['metadata']
+
+        vals_1: List[str] = meta['attribute_1_values']
+        vals_2: List[str] = meta['attribute_2_values']
+
+        def _to_df(nested: dict) -> pd.DataFrame:
+            return pd.DataFrame(
+                [[nested[r][c] for c in vals_2] for r in vals_1],
+                index=vals_1,
+                columns=vals_2,
+                dtype=float,
+            )
+
+        df_orig = _to_df(result['B_original'])
+        df_unl = _to_df(result['B_unlearned_mean'])
+        df_delta = _to_df(result['delta_B_mean'])
+
+        # Shared colour scale for B panels
+        vmin = float(min(df_orig.min().min(), df_unl.min().min()))
+        vmax = float(max(df_orig.max().max(), df_unl.max().max()))
+        abs_max_delta = float(max(abs(df_delta.min().min()), abs(df_delta.max().max())))
+
+        fig, axes = plt.subplots(1, 3, figsize=figsize)
+
+        # ── Left: B_original ─────────────────────────────────────────────────
+        sns.heatmap(
+            df_orig,
+            ax=axes[0],
+            vmin=vmin, vmax=vmax,
+            cmap="viridis",
+            annot=True,
+            fmt=annot_fmt,
+            linewidths=0.4,
+            cbar_kws={"label": "cosine similarity"},
+        )
+        axes[0].set_title("$B_{\\mathrm{original}}$", fontsize=11)
+        axes[0].set_xlabel(meta['attribute_2'], fontsize=9)
+        axes[0].set_ylabel(meta['attribute_1'], fontsize=9)
+
+        # ── Middle: B_unlearned_mean ─────────────────────────────────────────
+        sns.heatmap(
+            df_unl,
+            ax=axes[1],
+            vmin=vmin, vmax=vmax,
+            cmap="viridis",
+            annot=True,
+            fmt=annot_fmt,
+            linewidths=0.4,
+            cbar_kws={"label": "cosine similarity"},
+        )
+        n_ent = result['n_unlearned_entities']
+        axes[1].set_title(f"$B_{{\\mathrm{{unlearned}}}}$ (mean over {n_ent} entities)", fontsize=11)
+        axes[1].set_xlabel(meta['attribute_2'], fontsize=9)
+        axes[1].set_ylabel(meta['attribute_1'], fontsize=9)
+
+        # ── Right: ΔB_mean ────────────────────────────────────────────────────
+        sns.heatmap(
+            df_delta,
+            ax=axes[2],
+            vmin=-abs_max_delta, vmax=abs_max_delta,
+            center=0,
+            cmap="RdBu_r",
+            annot=True,
+            fmt=annot_fmt,
+            linewidths=0.4,
+            cbar_kws={"label": "ΔB (orig − unlearned)"},
+        )
+        sig_str = (
+            f"significant (p={result['permutation_pvalue']:.3f})"
+            if result['significant']
+            else f"not significant (p={result['permutation_pvalue']:.3f})"
+        )
+        axes[2].set_title(
+            f"$\\Delta B$ (mean)  —  effect={result['iat_effect_size']:.4f}  {sig_str}",
+            fontsize=9,
+        )
+        axes[2].set_xlabel(meta['attribute_2'], fontsize=9)
+        axes[2].set_ylabel(meta['attribute_1'], fontsize=9)
+
+        fig.suptitle(
+            f"IAT — task: {meta['task'].title()}  "
+            f"method: {meta['unlearning_algorithm'].upper()}  "
+            f"embedding: {meta['latent_embedding']}\n"
+            f"{meta['attribute_1']} × {meta['attribute_2']}",
+            fontsize=11,
+        )
+        plt.tight_layout(rect=[0, 0, 1, 0.93])
+
+        if return_fig:
+            return fig, axes  # type: ignore[return-value]
+        plt.show()
+        return None
 
 
 class ResultTemplateMinimumCutInterference(ResultTemplate):

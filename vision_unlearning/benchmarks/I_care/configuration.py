@@ -589,6 +589,7 @@ domain_s = [
 ]
 domain_l = [
     "Clip Embedding",
+    "DINOv2 Embedding",
 ]
 
 # Types (as they appear in the code/files)
@@ -649,6 +650,7 @@ type_s = Literal[
 
 type_l = Literal[
     "clip_embedding",
+    "dino_embedding",
 ]
 
 type_regression_algorithm = Literal[
@@ -685,6 +687,7 @@ GUI_TO_BACKEND = {
     },
     "latent_embedding": {
         "Clip Embedding": "clip_embedding",
+        "DINOv2 Embedding": "dino_embedding",
     },
 }
 
