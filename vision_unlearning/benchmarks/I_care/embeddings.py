@@ -4,6 +4,9 @@ This module provides:
   - embed_forgetting_session(): embed all images from one forgetting session (entity or baseline)
   - load_dino_model(): load DINOv2 vits14 and return (model, transform, device) triple
   - embed_image_with_dino(): embed a single image using a pre-loaded DINOv2 model
+  - compute_dino_image_similarity(): DINOv2 cosine similarity between two PIL images (for script 3)
+  - compute_mean_embeddings_by_prompt(): {prompt: mean_embedding} from an embedding file dict
+  - compute_dino_diff_for_emitter(): {prompt: dino_diff} from on/off embedding files (for 3b script)
 
 Design notes:
   - Heavy GPU imports (torch, torchvision, PIL) are deferred to function call time
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import defaultdict
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -258,3 +262,142 @@ def embed_forgetting_session_batched(
             )
 
     return records
+
+
+def compute_dino_image_similarity(
+    img_off: "Any",
+    img_on: "Any",
+    model: "Any",
+    transform: "Any",
+    device: str,
+) -> float:
+    """Compute DINOv2 cosine similarity between two PIL images (off and on).
+
+    Used in 3_compute_caused_interferences.py to compute dino_diff for each
+    (emitter, receiver, seed) triple from the raw generated images.
+
+    Args:
+        img_off: PIL Image — receiver image from original model (baseline).
+        img_on:  PIL Image — receiver image from emitter's unlearned model.
+        model:   DINOv2 model (from load_dino_model()), on device, in eval mode.
+        transform: torchvision transform pipeline (from load_dino_model()).
+        device:  Torch device string ('cuda' or 'cpu').
+
+    Returns:
+        Cosine similarity in [−1, 1]; typically in [0, 1] for natural images.
+        1.0 = identical DINOv2 representations (no interference).
+        Lower = more semantic drift = more interference.
+    """
+    import numpy as np
+    import torch
+
+    def _embed(pil_img: "Any") -> "Any":
+        tensor = transform(pil_img.convert("RGB")).unsqueeze(0).to(device)  # type: ignore[attr-defined]
+        with torch.no_grad():
+            feat = model(tensor)  # type: ignore[operator]
+        return feat.squeeze()  # type: ignore[attr-defined]
+
+    emb_off = _embed(img_off)
+    emb_on = _embed(img_on)
+    # Cosine similarity via dot product of L2-normalised vectors
+    emb_off_np = emb_off.cpu().numpy()  # type: ignore[attr-defined]
+    emb_on_np = emb_on.cpu().numpy()  # type: ignore[attr-defined]
+    norm_off = float(np.linalg.norm(emb_off_np))
+    norm_on = float(np.linalg.norm(emb_on_np))
+    if norm_off == 0.0 or norm_on == 0.0:
+        return float('nan')
+    return float(np.dot(emb_off_np, emb_on_np) / (norm_off * norm_on))
+
+
+def compute_mean_embeddings_by_prompt(
+    embedding_file: Dict[str, Any],
+) -> Dict[str, List[float]]:
+    """Return {prompt: L2-normalised mean embedding} from an embedding file dict.
+
+    Aggregates all records that share the same ``prompt`` field (across seeds),
+    computes the element-wise mean, and L2-normalises the result.
+
+    Uses ``prompt`` (not ``prompted_entity``) as the canonical key, per
+    ICARE guidelines (prompted_entity has inconsistent formatting across tasks).
+
+    Args:
+        embedding_file: Parsed JSON dict with an ``"embeddings"`` list of records.
+                        Each record must have ``"prompt"`` and ``"embedding"`` fields.
+
+    Returns:
+        Dict mapping prompt string → 384-dim L2-normalised mean embedding.
+        Prompts with all-zero mean (degenerate) are omitted.
+    """
+    import numpy as np
+
+    buckets: Dict[str, List[List[float]]] = defaultdict(list)
+    for entry in embedding_file.get("embeddings", []):
+        # Support two historical file formats:
+        #   new format: {"prompt": "An image of X", "prompted_entity": "X", ...}
+        #   old format: {"entity": "An image of X", "lora_state": "...", ...}
+        prompt_key: str = entry.get("prompt") or entry.get("entity") or ""
+        if not prompt_key:
+            logger.warning("Embedding record missing both 'prompt' and 'entity' fields; skipping.")
+            continue
+        buckets[prompt_key].append(entry["embedding"])
+
+    result: Dict[str, List[float]] = {}
+    for prompt, vecs in buckets.items():
+        arr = np.array(vecs, dtype=np.float32)
+        mean_vec = arr.mean(axis=0)
+        norm = float(np.linalg.norm(mean_vec))
+        if norm > 0:
+            result[prompt] = (mean_vec / norm).tolist()
+    return result
+
+
+def compute_dino_diff_for_emitter(
+    on_embedding_file: Dict[str, Any],
+    off_embedding_file: Dict[str, Any],
+) -> Dict[str, float]:
+    """Compute dino_diff for all receiver prompts using pre-computed embedding files.
+
+    dino_diff(emitter=E, receiver_prompt=p) =
+        cosine_similarity(mean_on_embedding[p], mean_off_embedding[p])
+
+    where mean_on_embedding comes from the per-entity embedding file (images generated
+    by E's unlearned model for all receiver prompts) and mean_off_embedding comes from
+    the baseline file (same prompts generated by the original SD).
+
+    This function is the CPU-only path used by 3b_compute_caused_interferences_dino.py
+    to backfill dino_diff in already-computed interference files without re-running
+    image generation or DINOv2 inference.
+
+    Note: this computes cosine_similarity(mean_on, mean_off) — similarity of averaged
+    embeddings — which differs slightly from mean(cosine_similarity(on_s, off_s) for s
+    in seeds), which is what 3_compute_caused_interferences.py computes from raw images.
+    The difference is negligible for analysis purposes.
+
+    Args:
+        on_embedding_file:  Parsed JSON dict for the emitter's per-entity embedding file.
+                            Contains embeddings of ALL receiver prompts run under E's
+                            unlearned model.
+        off_embedding_file: Parsed JSON dict for the baseline embedding file.
+                            Contains embeddings of ALL receiver prompts under original SD.
+
+    Returns:
+        Dict mapping prompt string → dino_diff float.
+        Prompts absent from either file are omitted (not included, not NaN).
+    """
+    import numpy as np
+
+    on_embs = compute_mean_embeddings_by_prompt(on_embedding_file)
+    off_embs = compute_mean_embeddings_by_prompt(off_embedding_file)
+
+    result: Dict[str, float] = {}
+    for prompt, on_vec in on_embs.items():
+        if prompt not in off_embs:
+            logger.warning("Prompt not found in baseline file, skipping: %s", prompt)
+            continue
+        off_vec = off_embs[prompt]
+        on_arr = np.array(on_vec, dtype=np.float32)
+        off_arr = np.array(off_vec, dtype=np.float32)
+        # Both vectors are already L2-normalised by compute_mean_embeddings_by_prompt
+        sim = float(np.dot(on_arr, off_arr))
+        result[prompt] = sim
+    return result

@@ -524,7 +524,7 @@ domain_entity = {
     ],
 }
 domain_model = ["Stable Diffusion 1.4"]
-domain_mp = ["Delta Clip", "Delta Brisque", "RMSE", "SSIM"]
+domain_mp = ["Delta Clip", "Delta Brisque", "RMSE", "SSIM", "DINO Cosine Similarity"]
 domain_me = [
     "Emitter worst interfered brisque diff",
     "Emitter worst interfered clip diff",
@@ -569,6 +569,19 @@ domain_me = [
     # retained-entity displacement (computed by "4. Compute interference per entity.py").
     # Higher is better: ratio >> 1 means unlearning was targeted (forgotten entity
     # drifted more than retained entities in DINOv2 space).
+    # DINOv2 cosine similarity between on/off images per receiver (computed by
+    # 3b_compute_caused_interferences_dino.py or 3_compute_caused_interferences.py).
+    # Higher = more similar = less semantic drift = less interference.  Analogous to ssim
+    # but in DINOv2 embedding space rather than pixel space.
+    "Emitter worst interfered dino diff",
+    "Emitter number of interfered worse than target dino diff",
+    "Emitter average dino diff",
+    "Receiver worst interfered dino diff",
+    "Receiver number of interfered worse than target dino diff",
+    "Receiver average dino diff",
+    "Emitter minus receiver worst interfered dino diff",
+    "Emitter minus receiver number of interfered worse than target dino diff",
+    "Emitter minus receiver average dino diff",
     "Embedding specificity ratio",
     # CLIP-space unlearning quality (computed by "4. Compute interference per entity.py").
     # forget_clip_diff: diagonal entry of the interference matrix — clip_diff of the
@@ -596,7 +609,7 @@ domain_l = [
 type_unlearning_algorithm = Literal["distil", "munba", "uce"]
 type_task = Literal["breeds", "scenes", "people"]
 type_model = Literal["sd1.4"]
-type_mp = Literal["brisque_diff", "clip_diff", "rmse", "ssim"]
+type_mp = Literal["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"]
 type_me = Literal[
     "Emitter worst interfered brisque diff",
     "Emitter worst interfered clip diff",
@@ -637,6 +650,15 @@ type_me = Literal[
     "Emitter minus receiver average clip diff",
     "Emitter minus receiver average rmse",
     "Emitter minus receiver average ssim",
+    "Emitter worst interfered dino diff",
+    "Emitter number of interfered worse than target dino diff",
+    "Emitter average dino diff",
+    "Receiver worst interfered dino diff",
+    "Receiver number of interfered worse than target dino diff",
+    "Receiver average dino diff",
+    "Emitter minus receiver worst interfered dino diff",
+    "Emitter minus receiver number of interfered worse than target dino diff",
+    "Emitter minus receiver average dino diff",
     "Embedding specificity ratio",
     "Forget clip diff",
     "Retain average clip diff",
@@ -678,6 +700,7 @@ GUI_TO_BACKEND = {
         "Delta Brisque": "brisque_diff",
         "RMSE": "rmse",
         "SSIM": "ssim",
+        "DINO Cosine Similarity": "dino_diff",
     },
     "similarity_metric": {
         "Clip Cosine Similarity": "clip",
@@ -699,6 +722,7 @@ mp_to_direction: Dict[type_mp, type_direction] = {  # Higher =  more interferenc
     "clip_diff": "↑",  # zero = no change. Negative = generation actually got better
     "rmse": "↓",
     "ssim": "↑",
+    "dino_diff": "↑",  # cosine similarity in [0,1]; higher = more similar = less interference (like ssim)
 }
 s_to_direction: Dict[type_s, type_direction] = {
     "clip": "↑",
