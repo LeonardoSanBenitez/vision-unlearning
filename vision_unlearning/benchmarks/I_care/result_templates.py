@@ -2206,95 +2206,216 @@ class ResultTemplateMinimumCutInterference(ResultTemplate):
     def plot(  # type: ignore[override]
         cls,
         data: dict,
-        figsize: Tuple[int, int] = (14, 5),
+        figsize: Tuple[int, int] = (20, 7),
         return_fig: bool = False,
     ) -> Optional[Tuple[Figure, plt.Axes]]:
-        """2-panel figure: bar chart of cut edges (left) + text summary (right).
+        """3-panel figure: ego-graph (left) | cut edge bar chart (centre) | text summary (right).
+
+        The ego-graph shows the source entity (e1, dark red), sink entity (e2, dark blue),
+        and the top-N nodes connected by cut edges, laid out with a spring algorithm.
+        Cut edges are rendered as bold orange arrows; edge thickness is proportional to weight.
+        P1 (emitter-side) nodes are pink; P2 nodes that appear are light blue.
 
         Parameters
         ----------
         data:
             Dict returned by :meth:`compute`.
         figsize:
-            Figure size in inches (width, height).
+            Figure size in inches (width, height).  Default 20×7.
         return_fig:
             If True, return ``(fig, axes)`` without showing.
         """
+        try:
+            import networkx as nx
+        except ImportError as exc:
+            raise ImportError(
+                "networkx is required for ResultTemplateMinimumCutInterference.plot(). "
+                "Install it with: pip install networkx"
+            ) from exc
+
+        from matplotlib.patches import Patch
+        from matplotlib.lines import Line2D
+
         result = data['result']
         meta = data['metadata']
+        e1: str = meta['entity_1']
+        e2: str = meta['entity_2']
+        cut_edges: List[Dict[str, Any]] = result['cut_edges']
+        emitter_set: set = set(result['emitter_set'])
 
-        fig, axes = plt.subplots(1, 2, figsize=figsize)
+        fig = plt.figure(figsize=figsize, constrained_layout=True)
+        # width_ratios: graph 50%, bar chart 30%, text 20%
+        gs = fig.add_gridspec(1, 3, width_ratios=[5, 3, 2], wspace=0.35)
+        ax_graph = fig.add_subplot(gs[0])
+        ax_bar = fig.add_subplot(gs[1])
+        ax_txt = fig.add_subplot(gs[2])
 
-        # ── Panel 1: horizontal bar chart of cut edges ────────────────────────
-        ax_bar = axes[0]
-        cut_edges = result['cut_edges']
+        # ── Panel 1: ego-graph ────────────────────────────────────────────────
+        # Build subgraph from top-N cut edges + e1 + e2
+        TOP_N_EGO = 15
+        ego_G: Any = nx.DiGraph()
+        ego_G.add_node(e1)
+        ego_G.add_node(e2)
+
+        top_cut = cut_edges[:TOP_N_EGO]
+        cut_edge_pairs: set = set()
+        for ce in top_cut:
+            ego_G.add_node(ce['from'])
+            ego_G.add_node(ce['to'])
+            ego_G.add_edge(ce['from'], ce['to'], weight=float(ce['weight']), is_cut=True)
+            cut_edge_pairs.add((ce['from'], ce['to']))
+
+        # Always show the direct e1→e2 edge if it has weight (even if not in top-N)
+        if result['direct_edge_weight'] > 0.0 and (e1, e2) not in cut_edge_pairs:
+            ego_G.add_edge(e1, e2, weight=result['direct_edge_weight'], is_cut=True)
+            cut_edge_pairs.add((e1, e2))
+
+        # Spring layout — k controls node spacing; seed for reproducibility
+        n_nodes = max(len(ego_G.nodes()), 1)
+        pos = nx.spring_layout(ego_G, seed=42, k=2.5 / n_nodes ** 0.5, iterations=80)
+
+        # Node colours and sizes
+        node_list = list(ego_G.nodes())
+        node_colors: List[str] = []
+        node_sizes: List[int] = []
+        for n in node_list:
+            if n == e1:
+                node_colors.append('#b22222')   # dark red — source
+                node_sizes.append(900)
+            elif n == e2:
+                node_colors.append('#1a4e8a')   # dark blue — sink
+                node_sizes.append(900)
+            elif n in emitter_set:
+                node_colors.append('#ffaaaa')   # light red — P1 intermediary
+                node_sizes.append(400)
+            else:
+                node_colors.append('#aac8e8')   # light blue — P2 node
+                node_sizes.append(350)
+
+        nx.draw_networkx_nodes(
+            ego_G, pos,
+            nodelist=node_list,
+            node_color=node_colors,
+            node_size=node_sizes,
+            ax=ax_graph,
+            linewidths=0.8,
+            edgecolors='#333333',
+        )
+
+        # Cut edges — thickness proportional to weight, bold orange
+        if cut_edge_pairs:
+            ce_list = list(cut_edge_pairs)
+            raw_w = [ego_G[u][v]['weight'] for u, v in ce_list]
+            max_w = max(raw_w) if raw_w else 1.0
+            widths = [0.8 + 4.0 * w / max_w for w in raw_w]
+            nx.draw_networkx_edges(
+                ego_G, pos,
+                edgelist=ce_list,
+                edge_color='#e07b00',
+                width=widths,
+                arrows=True,
+                arrowsize=16,
+                connectionstyle='arc3,rad=0.08',
+                ax=ax_graph,
+            )
+
+        # Labels — short names fit inside/near nodes
+        labels = {n: n.replace('_', '\n') for n in node_list}
+        nx.draw_networkx_labels(
+            ego_G, pos, labels=labels,
+            font_size=5.5, font_weight='bold', ax=ax_graph,
+        )
+
+        ax_graph.set_title(
+            f"Interference ego-graph  (top {min(TOP_N_EGO, len(cut_edges))} cut edges shown)",
+            fontsize=10,
+        )
+        ax_graph.axis('off')
+
+        legend_handles = [
+            Patch(facecolor='#b22222', edgecolor='#333333',
+                  label=f'SOURCE  {e1.replace("_", " ")}'),
+            Patch(facecolor='#1a4e8a', edgecolor='#333333',
+                  label=f'SINK  {e2.replace("_", " ")}'),
+            Patch(facecolor='#ffaaaa', edgecolor='#333333',
+                  label=f'P1 intermediary  (n={result["n_emitter"] - 1})'),
+            Patch(facecolor='#aac8e8', edgecolor='#333333', label='P2 node (visible subset)'),
+            Line2D([0], [0], color='#e07b00', linewidth=2.5, label='Cut edge (orange = bottleneck)'),
+        ]
+        ax_graph.legend(
+            handles=legend_handles, loc='upper left',
+            fontsize=6, framealpha=0.85, borderpad=0.6,
+        )
+
+        # ── Panel 2: horizontal bar chart of cut edges ────────────────────────
         if cut_edges:
             top_n = min(15, len(cut_edges))
-            bar_labels = [f"{e['from']} → {e['to']}" for e in cut_edges[:top_n]]
+            bar_labels = [
+                f"{e['from'].replace('_', ' ')[:16]} → {e['to'].replace('_', ' ')[:16]}"
+                for e in cut_edges[:top_n]
+            ]
             bar_weights = [e['weight'] for e in cut_edges[:top_n]]
-            # Direct edge (e1→e2) in dark red; other cut edges in orange
             bar_colors = [
-                '#d62728' if (e['from'] == meta['entity_1'] and e['to'] == meta['entity_2'])
-                else '#ff7f0e'
+                '#b22222' if (e['from'] == e1 and e['to'] == e2) else '#e07b00'
                 for e in cut_edges[:top_n]
             ]
             y_pos = list(range(top_n - 1, -1, -1))
             ax_bar.barh(y_pos, bar_weights, color=bar_colors, edgecolor='black', linewidth=0.4)
             ax_bar.set_yticks(y_pos)
-            ax_bar.set_yticklabels(bar_labels, fontsize=8)
-            ax_bar.set_xlabel(
-                f"Edge weight  ({meta['interference_pair']})", fontsize=9
-            )
-            ax_bar.set_title(f"Cut edges (top {top_n})", fontsize=10)
+            ax_bar.set_yticklabels(bar_labels, fontsize=7)
+            ax_bar.set_xlabel(f"Edge weight  ({meta['interference_pair']})", fontsize=9)
+            ax_bar.set_title(f"Cut edges ranked by weight (top {top_n})", fontsize=10)
             ax_bar.axvline(x=0, color='black', linewidth=0.5)
         else:
             ax_bar.text(
-                0.5, 0.5,
-                'No cut edges\n(no directed path exists)',
-                ha='center', va='center',
-                transform=ax_bar.transAxes, fontsize=11,
+                0.5, 0.5, 'No cut edges\n(no directed path or λ too large)',
+                ha='center', va='center', transform=ax_bar.transAxes, fontsize=10,
             )
             ax_bar.set_title("Cut edges", fontsize=10)
             ax_bar.axis('off')
 
-        # ── Panel 2: text summary ─────────────────────────────────────────────
-        ax_txt = axes[1]
+        # ── Panel 3: text summary ─────────────────────────────────────────────
         ax_txt.axis('off')
 
-        emitter_preview = result['emitter_set'][:8]
-        if len(result['emitter_set']) > 8:
-            emitter_str = (
-                ", ".join(emitter_preview)
-                + f"\n  … (+{len(result['emitter_set']) - 8} more)"
-            )
+        emitter_interior = [e for e in result['emitter_set'] if e != e1]
+        if not emitter_interior:
+            emitter_str = "(source only — no intermediaries)"
+        elif len(emitter_interior) <= 6:
+            emitter_str = ", ".join(emitter_interior)
         else:
-            emitter_str = ", ".join(emitter_preview) if emitter_preview else "(empty)"
+            emitter_str = (
+                ", ".join(emitter_interior[:6])
+                + f"\n  … (+{len(emitter_interior) - 6} more)"
+            )
 
         flags: List[str] = []
         if result.get('no_path'):
-            flags.append("⚠  No directed path — P1 = reachable set")
+            flags.append("[!] No directed path")
         if result.get('direct_is_min_cut'):
-            flags.append("✓  Direct edge IS the min-cut")
-        elif not result.get('no_path') and result['cut_value'] < result['direct_edge_weight'] - 1e-6:
-            flags.append("ℹ  Cheaper cut via alternative paths")
+            flags.append("[v] Direct edge IS min-cut")
+        elif not result.get('no_path'):
+            ratio = (result['cut_value'] / result['direct_edge_weight']
+                     if result['direct_edge_weight'] > 0 else float('inf'))
+            flags.append(f"[i] cut/direct ratio: {ratio:.1f}x")
 
         summary_lines = [
-            f"Task: {meta['task'].title()}",
-            f"Method: {meta['unlearning_algorithm'].upper()}",
-            f"Metric: {meta['interference_pair']}",
-            f"Graph: {meta['n_graph_nodes']} nodes, {meta['n_graph_edges']} edges",
-            f"λ threshold: {meta['lambda_value']:.4f}  (q={meta['lambda_quantile']})",
+            f"Task:    {meta['task'].title()}",
+            f"Method:  {meta['unlearning_algorithm'].upper()}",
+            f"Metric:  {meta['interference_pair']}",
+            f"Graph:   {meta['n_graph_nodes']}N / {meta['n_graph_edges']}E",
+            f"λ:       {meta['lambda_value']:.4f} (q={meta['lambda_quantile']})",
             "",
-            f"e₁ (source):  {meta['entity_1']}",
-            f"e₂ (sink):    {meta['entity_2']}",
+            f"SOURCE:  {e1.replace('_', ' ')}",
+            f"SINK:    {e2.replace('_', ' ')}",
             "",
-            f"Min-cut:      {result['cut_value']:.4f}",
-            f"Direct edge:  {result['direct_edge_weight']:.4f}",
-            f"|P1| emitter: {result['n_emitter']} / {result['n_emitter'] + result['n_sink']}",
+            f"Min-cut:    {result['cut_value']:.3f}",
+            f"Direct w:   {result['direct_edge_weight']:.3f}",
+            f"|P1|:       {result['n_emitter']} / {result['n_emitter'] + result['n_sink']}",
+            f"|cut edges|:{len(result['cut_edges'])}",
             "",
         ] + flags + [
             "",
-            "Emitter-side partition:",
+            "P1 intermediaries:",
             f"  {emitter_str}",
         ]
 
@@ -2302,22 +2423,21 @@ class ResultTemplateMinimumCutInterference(ResultTemplate):
             0.04, 0.97,
             "\n".join(summary_lines),
             transform=ax_txt.transAxes,
-            fontsize=8.5,
+            fontsize=8,
             verticalalignment='top',
             fontfamily='monospace',
-            bbox=dict(boxstyle='round', facecolor='#f7f7f7', alpha=0.85),
+            bbox=dict(boxstyle='round', facecolor='#f5f5f5', alpha=0.85),
         )
         ax_txt.set_title("Summary", fontsize=10)
 
         fig.suptitle(
-            f"Minimum Cut Interference\n"
-            f"{meta['entity_1']}  →  {meta['entity_2']}",
+            f"Minimum Cut Interference  -  "
+            f"{e1.replace('_', ' ')}  ->  {e2.replace('_', ' ')}",
             fontsize=12, fontweight='bold',
         )
-        plt.tight_layout()
 
         if return_fig:
-            return fig, axes  # type: ignore[return-value]
+            return fig, ax_graph  # type: ignore[return-value]
         plt.show()
         return None
 
