@@ -2971,6 +2971,47 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             )
             df_similarities = compute_cosine_similarity_matrix(fingerprints, labels)
 
+        elif self.similarity_metric == 'weight_overlap':
+            # Cosine similarity of trained LoRA weight-change vectors (B@A, flattened across all
+            # cross-attention modules).  Only available for scenes/distil — the checkpoint is
+            # produced by analyze_weight_overlap_full.py.
+            # Checkpoint format: {"cosine_matrix": {entity_i: {entity_j: float}}, "norms": {...}}
+            _ckpt_candidates = [
+                os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    '..', '..', '..', 'assets', 'results',
+                    f'weight_overlap_{self.task}100_checkpoint.json',
+                ),
+                os.path.join(self.base_folder, 'results',
+                             f'weight_overlap_{self.task}100_checkpoint.json'),
+            ]
+            _ckpt_path = next((p for p in _ckpt_candidates if os.path.exists(p)), None)
+            if _ckpt_path is None:
+                raise FileNotFoundError(
+                    f"weight_overlap checkpoint not found for task='{self.task}'. "
+                    f"Run analyze_weight_overlap_full.py to generate it. "
+                    f"Checked: {_ckpt_candidates}"
+                )
+            with open(_ckpt_path, encoding='utf-8') as _f:
+                _ckpt = json.load(_f)
+            _cos_matrix: Dict[str, Dict[str, float]] = _ckpt['cosine_matrix']
+            # Verify all metadata entities are present in the checkpoint
+            _missing = [e for e in labels if e not in _cos_matrix]
+            if _missing:
+                raise ValueError(
+                    f"weight_overlap checkpoint is missing {len(_missing)} entities: {_missing[:5]}"
+                )
+            df_similarities = pd.DataFrame(
+                {
+                    ei: {
+                        ej: (1.0 if ei == ej else _cos_matrix[ei][ej])
+                        for ej in labels
+                    }
+                    for ei in labels
+                },
+                index=labels,
+            ).T  # rows = emitters, columns = receivers
+
         # Return to be saved in its final form
         data = {
             'metadata': {
@@ -3196,6 +3237,7 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         figsize: Tuple[int, int] = (12, 5),
         return_fig: bool = False,
     ) -> Optional[Tuple[Figure, plt.Axes]]:
+        import math
         meta = data["metadata"]
         res = data["result"]
 
@@ -3206,30 +3248,61 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         off_2d = np.array(res["pca_off"])       # shape (N, 2)
         on_2d = np.array(res["pca_on"])         # shape (N, 2)
         entity_labels = res["entity_labels"]
-        clip_diffs = np.array(res["clip_diffs"])  # one per entity
         forgotten_idx = res["forgotten_entity_index"]
 
-        cmap = plt.get_cmap("RdBu_r")
-        # Clip colour range symmetrically
-        clim = float(np.nanpercentile(np.abs(clip_diffs[~np.isnan(clip_diffs)]), 95))
-        clim = max(clim, 1.0)
+        # Prefer Mp per-event clip_diffs (primary); fall back to Me aggregate if all-NaN.
+        # mp_clip_diffs: "when THIS entity was forgotten, how much did each receiver degrade?"
+        # clip_diffs (Me): aggregate across all forget events — used only as fallback.
+        mp_clip_diffs_raw = res.get("mp_clip_diffs")
+        if mp_clip_diffs_raw is not None:
+            mp_arr = np.array(mp_clip_diffs_raw, dtype=float)
+        else:
+            mp_arr = np.full(len(entity_labels), float("nan"))
 
-        # Retained entities: baseline circles (empty) and unlearned dots (filled)
-        mask = np.ones(len(entity_labels), dtype=bool)
-        mask[forgotten_idx] = False
+        me_arr = np.array(res["clip_diffs"], dtype=float)  # Me aggregate
+
+        has_mp = not np.all(np.isnan(mp_arr))
+        color_arr = mp_arr if has_mp else me_arr
+        colorbar_label = (
+            "Mp clip_diff (receivers when THIS entity forgotten)"
+            if has_mp
+            else "Me clip_diff (aggregate, Mp unavailable)"
+        )
+
+        cmap = plt.get_cmap("RdBu_r")
+        valid_mask = ~np.isnan(color_arr)
+        if valid_mask.any():
+            clim = float(np.nanpercentile(np.abs(color_arr[valid_mask]), 95))
+        else:
+            clim = 1.0
+        clim = max(clim, 1e-6)
+
+        # Retained entities: baseline open circles + unlearned filled dots (same colour)
+        # Showing both positions makes the embedding-level displacement visible.
+        retained_mask = np.ones(len(entity_labels), dtype=bool)
+        retained_mask[forgotten_idx] = False
+
         sc = ax.scatter(
-            off_2d[mask, 0], off_2d[mask, 1],
-            c=clip_diffs[mask], cmap=cmap, vmin=-clim, vmax=clim,
-            marker="o", s=30, alpha=0.5, linewidths=0.3, edgecolors="gray",
+            off_2d[retained_mask, 0], off_2d[retained_mask, 1],
+            c=color_arr[retained_mask], cmap=cmap, vmin=-clim, vmax=clim,
+            marker="o", s=30, alpha=0.45, linewidths=0.3, edgecolors="gray",
             label="Retained (baseline)",
         )
         ax.scatter(
-            on_2d[mask, 0], on_2d[mask, 1],
-            c=clip_diffs[mask], cmap=cmap, vmin=-clim, vmax=clim,
-            marker="o", s=30, alpha=0.8, linewidths=0.3, edgecolors="gray",
+            on_2d[retained_mask, 0], on_2d[retained_mask, 1],
+            c=color_arr[retained_mask], cmap=cmap, vmin=-clim, vmax=clim,
+            marker="o", s=30, alpha=0.85, linewidths=0.3, edgecolors="gray",
         )
 
-        # Forgotten entity: star marker + arrow
+        # Grey out retained entities with no colour data
+        no_color_mask = retained_mask & np.isnan(color_arr)
+        if no_color_mask.any():
+            ax.scatter(
+                off_2d[no_color_mask, 0], off_2d[no_color_mask, 1],
+                c="lightgrey", s=20, alpha=0.4, zorder=0,
+            )
+
+        # Forgotten entity: open baseline circle + star at unlearned position + arrow
         ax.scatter(
             off_2d[forgotten_idx, 0], off_2d[forgotten_idx, 1],
             marker="o", s=80, edgecolors="black", facecolors="none",
@@ -3240,13 +3313,12 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
             marker="*", s=200, color="black", zorder=11,
             label=f"Forgotten ({entity_labels[forgotten_idx]})",
         )
-        dx = on_2d[forgotten_idx, 0] - off_2d[forgotten_idx, 0]
-        dy = on_2d[forgotten_idx, 1] - off_2d[forgotten_idx, 1]
         ax.annotate(
             "", xy=(on_2d[forgotten_idx, 0], on_2d[forgotten_idx, 1]),
             xytext=(off_2d[forgotten_idx, 0], off_2d[forgotten_idx, 1]),
             arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
         )
+
         # Fix axis limits to the baseline (off_2d) range only, with 10% padding.
         # Without this, matplotlib autoscales to include pca_on which varies per
         # entity, causing the background dots to visually shift between figures
@@ -3256,42 +3328,47 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         ax.set_xlim(off_2d[:, 0].min() - pad_x, off_2d[:, 0].max() + pad_x)
         ax.set_ylim(off_2d[:, 1].min() - pad_y, off_2d[:, 1].max() + pad_y)
 
-        fig.colorbar(sc, ax=ax, label="clip_diff (self-interference)")
+        fig.colorbar(sc, ax=ax, label=colorbar_label)
         ax.set_title(
-            f"Embedding PCA\nMethod: {meta['unlearning_algorithm']}, "
+            f"Embedding PCA — Method: {meta['unlearning_algorithm']}\n"
             f"Forgotten: {meta['entity']}"
         )
-        ax.set_xlabel("PC1")
-        ax.set_ylabel("PC2")
+        var = res.get("pca_explained_variance_ratio", [0.0, 0.0])
+        ax.set_xlabel(f"PC1 ({var[0]:.1%} var)")
+        ax.set_ylabel(f"PC2 ({var[1]:.1%} var)")
         ax.legend(fontsize=7)
 
-        # ── Right: displacement bar chart ───────────────────────────────
+        # ── Right: displacement histogram ───────────────────────────────
+        # Shows distribution of all retained-entity L2 displacements with a
+        # vertical line for the forgotten entity — makes clear whether the
+        # forgotten entity is an outlier or typical.
         ax2 = axes[1]
         self_disp = float(res["self_displacement_magnitude"])
-        retained_disps = res["retained_displacement_magnitudes"]
-        mean_ret = float(np.mean(retained_disps))
+        retained_disps = np.array(res["retained_displacement_magnitudes"], dtype=float)
         spec_ratio = res["embedding_specificity_ratio"]
+        ratio_source = res.get("ratio_source", "not_available")
 
-        categories = ["Forgotten entity", "Mean retained"]
-        values = [self_disp, mean_ret]
-        colors = ["#d62728", "#1f77b4"]
-        bars = ax2.bar(categories, values, color=colors, alpha=0.8, edgecolor="black")
-        for bar, val in zip(bars, values):
-            ax2.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                val + max(values) * 0.01,
-                f"{val:.2f}",
-                ha="center", va="bottom", fontsize=9,
-            )
-        ax2.set_ylabel("Embedding displacement (L2 norm; bars only)")
-        ratio_source = res.get("ratio_source", "unknown")
-        ax2.set_title(
-            f"Displacement magnitude (L2) + directional specificity ratio (cosine)\n"
-            f"Specificity ratio: {spec_ratio:.3f} "
-            f"({'targeted' if spec_ratio > 1 else 'diffuse'}) "
-            f"[source: {ratio_source}]"
+        ax2.hist(
+            retained_disps, bins=20,
+            color="steelblue", alpha=0.75, edgecolor="none",
+            label="Retained entities",
         )
-        ax2.axhline(0, color="gray", linewidth=0.5)
+        ax2.axvline(
+            self_disp, color="#d62728", linestyle="--", linewidth=1.8,
+            label=f"Forgotten ({self_disp:.1f})",
+        )
+        ax2.set_xlabel("Embedding displacement (L2)")
+        ax2.set_ylabel("Count")
+        ax2.legend(fontsize=7)
+
+        if ratio_source == "ipe" and not math.isnan(spec_ratio):
+            targeted_str = "targeted" if spec_ratio > 1 else "diffuse"
+            ratio_str = f"Specificity ratio: {spec_ratio:.3f} ({targeted_str})"
+        else:
+            ratio_str = "Specificity ratio: N/A"
+        ax2.set_title(
+            f"Self-displacement vs retained distribution\n{ratio_str}"
+        )
 
         fig.suptitle(
             f"ResultTemplateEmbeddingUnlearningProfile\n"
@@ -3312,9 +3389,11 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
 
     def _compute_from_scratch(self) -> dict:
         from sklearn.decomposition import PCA
+        import math
 
         baseline_path = self._get_baseline_embedding_path()
         entity_path = self._get_entity_embedding_path()
+        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
 
         if not os.path.exists(baseline_path):
             raise FileNotFoundError(
@@ -3365,32 +3444,6 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
                 f"Available: {common_entities[:5]}..."
             )
 
-        # Load InterferencePerEntity (Me) for clip_diff colouring (optional)
-        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder)
-        clip_diff_by_entity: Dict[str, float] = {}
-        if os.path.exists(ipe_path):
-            with open(ipe_path, "r", encoding="utf-8") as f:
-                ipe_list = json.load(f)
-            epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-            # Try both epoch formats (padded and non-padded)
-            col_candidates = [
-                f"metric_{self.unlearning_algorithm}_{epochs}_emitter_minus_receiver_average_clip_diff (↑)",
-                f"metric_{self.unlearning_algorithm}_{epochs:03d}_emitter_minus_receiver_average_clip_diff (↑)",
-            ]
-            for row in ipe_list:
-                name = row.get("name", "")
-                for col_key in col_candidates:
-                    if col_key in row and row[col_key] is not None:
-                        try:
-                            val = float(row[col_key])
-                            # IPE stores names with underscores; embedding labels use spaces.
-                            # Store under both forms so lookup works regardless of format.
-                            clip_diff_by_entity[name] = val
-                            clip_diff_by_entity[name.replace("_", " ")] = val
-                        except (TypeError, ValueError):
-                            pass
-                        break
-
         # Stack embeddings in consistent order
         entity_labels = common_entities
         n = len(entity_labels)
@@ -3424,45 +3477,89 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         retained_displacements = [d for i, d in enumerate(displacements) if i != forgotten_idx]
         mean_retained = float(np.mean(retained_displacements)) if retained_displacements else 0.0
 
-        # Read embedding_specificity_ratio from InterferencePerEntity (Me) if available.
-        # Fall back to computing it inline only when the Me is missing or the
-        # column is absent (e.g. in tests or before the pipeline has been run).
-        hf_entity = self._resolve_hf_entity()
-        embedding_specificity_ratio: float = float("nan")
-        ratio_source: str = "inline"  # updated to "ipe" if successfully read from Me
+        # ── Load IPE (one pass): Me aggregate clip_diffs + embedding_specificity_ratio ──
+        # Me clip_diffs are kept as fallback colouring (used by plot() if Mp unavailable).
+        # embedding_specificity_ratio is read from IPE only — no inline fallback.
+        # If IPE is absent or missing this entity's ratio, ratio_source = "not_available".
         ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder)
+        clip_diff_by_entity: Dict[str, float] = {}
+        embedding_specificity_ratio: float = float("nan")
+        ratio_source: str = "not_available"
+
         if os.path.exists(ipe_path):
-            with open(ipe_path, "r", encoding="utf-8") as _f:
-                ipe_list = json.load(_f)
+            with open(ipe_path, "r", encoding="utf-8") as f:
+                ipe_list = json.load(f)
+
+            # Me aggregate clip_diff (emitter_minus_receiver) for fallback colouring
+            col_me_candidates = [
+                f"metric_{self.unlearning_algorithm}_{epochs}_emitter_minus_receiver_average_clip_diff (↑)",
+                f"metric_{self.unlearning_algorithm}_{epochs:03d}_emitter_minus_receiver_average_clip_diff (↑)",
+            ]
+            for row in ipe_list:
+                name = row.get("name", "")
+                for col_key in col_me_candidates:
+                    if col_key in row and row[col_key] is not None:
+                        try:
+                            val = float(row[col_key])
+                            # IPE stores names with underscores; embedding labels use spaces.
+                            # Store under both forms so lookup works regardless of format.
+                            clip_diff_by_entity[name] = val
+                            clip_diff_by_entity[name.replace("_", " ")] = val
+                        except (TypeError, ValueError):
+                            pass
+                        break
+
+            # embedding_specificity_ratio — IPE only, no inline fallback
             ipe_metric_cols = [k for row in ipe_list[:1] for k in row if k.startswith("metric_")]
+            entity_slug = self.entity.replace(" ", "_")
             try:
                 ratio_col = choose_metric_column_interference_per_entity(
                     self.unlearning_algorithm, "Embedding specificity ratio", ipe_metric_cols
                 )
                 for row in ipe_list:
-                    if row.get("name") == self.entity and ratio_col in row and row[ratio_col] is not None:
+                    row_name = row.get("name", "")
+                    # Match by normalised underscore form to handle space/underscore variants
+                    if row_name.replace(" ", "_") == entity_slug and ratio_col in row and row[ratio_col] is not None:
                         embedding_specificity_ratio = float(row[ratio_col])
                         ratio_source = "ipe"
                         break
             except ValueError:
-                pass  # Column absent; fall through to inline computation below
+                pass  # Column absent — ratio_source stays "not_available"
 
-        if np.isnan(embedding_specificity_ratio):
-            # Fallback: compute inline from the already-loaded embedding matrices.
-            # ratio_source remains "inline" to flag that this is a transitional value,
-            # not the canonical IPE-derived value.
-            cos_dist_self = self._cosine_distance(on_mat[forgotten_idx], off_mat[forgotten_idx])
-            cos_dists_others = [
-                self._cosine_distance(on_mat[i], off_mat[i])
-                for i in range(n) if i != forgotten_idx
-            ]
-            mean_cos_others = float(np.mean(cos_dists_others)) if cos_dists_others else 0.0
-            embedding_specificity_ratio = (
-                cos_dist_self / mean_cos_others if mean_cos_others > 1e-12 else float("nan")
+        # ── Load Mp file for per-event coloring (primary) ──────────────────────────
+        # The Mp file records how each receiver entity was affected when THIS specific
+        # entity was forgotten.  Keys are underscore-based receiver metadata names.
+        # entity_labels are space-based (from embedding records).
+        # Coloring by Mp shows "who got hurt when X was forgotten" — more relevant
+        # for EUP than the Me aggregate which averages across all forget events.
+        mp_clip_diffs: List[float] = [float("nan")] * n
+
+        entity_slug = self.entity.replace(" ", "_")
+        try:
+            meta = get_metadata_filtered(self.task, base_folder=self.base_folder)
+        except FileNotFoundError:
+            meta = []
+        entity_idx_in_meta: Optional[int] = next(
+            (i for i, m in enumerate(meta) if m["name"].replace(" ", "_") == entity_slug),
+            None,
+        )
+        if entity_idx_in_meta is not None:
+            mp_path = os.path.join(
+                self.base_folder, "datasets",
+                f"interferences_caused_by_{self.task}_{entity_idx_in_meta}"
+                f"_{self.unlearning_algorithm}_{epochs}.json",
             )
+            if os.path.exists(mp_path):
+                with open(mp_path, "r", encoding="utf-8") as f:
+                    mp_data: Dict[str, Any] = json.load(f)
+                # mp_data keys are underscore-based; entity_labels are space-based
+                for i, ent in enumerate(entity_labels):
+                    rx_key = ent.replace(" ", "_")
+                    if rx_key in mp_data and "clip_diff" in mp_data[rx_key]:
+                        mp_clip_diffs[i] = float(mp_data[rx_key]["clip_diff"])
 
-        # clip_diff per entity (for colouring; NaN if unavailable)
-        clip_diffs = [
+        # Me aggregate clip_diffs (for fallback; NaN where IPE column absent)
+        clip_diffs: List[float] = [
             clip_diff_by_entity.get(ent, float("nan"))
             for ent in entity_labels
         ]
@@ -3483,13 +3580,14 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
                 "forgotten_entity_index": forgotten_idx,
                 "pca_off": off_2d,
                 "pca_on": on_2d,
-                "clip_diffs": clip_diffs,
+                "clip_diffs": clip_diffs,        # Me aggregate (fallback if Mp absent)
+                "mp_clip_diffs": mp_clip_diffs,  # Mp per-event (primary colouring)
                 "self_displacement_magnitude": self_displacement,
                 "retained_displacement_magnitudes": retained_displacements,
                 "mean_retained_displacement": mean_retained,
                 "embedding_specificity_ratio": embedding_specificity_ratio,
-                "ratio_source": ratio_source,  # "ipe" = canonical; "inline" = fallback
-                "targeted": embedding_specificity_ratio > 1.0,
+                "ratio_source": ratio_source,    # "ipe" = canonical; "not_available" = IPE absent/missing
+                "targeted": (not math.isnan(embedding_specificity_ratio)) and embedding_specificity_ratio > 1.0,
                 "pca_explained_variance_ratio": pca.explained_variance_ratio_.tolist(),
             },
         }
@@ -3532,12 +3630,13 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
     distance) are stored separately so a reader can distinguish "ratio is low because
     target barely moves" from "ratio is low because retained entities move MORE".
 
-    **Important caveat on n_valid**:
-    ``n_valid`` is typically far smaller than ``n_total`` because
-    ``embedding_specificity_ratio`` requires *interference_per_pair* files for each
-    entity.  Results from a small ``n_valid`` (e.g. 19/100) are underpowered and
-    should be treated as *preliminary*.  The permutation test p-values are reported
-    with ``n_valid`` in the title for transparency.
+    **On n_valid**:
+    ``n_valid`` should equal ``n_total`` once the full pipeline has been run.
+    If ``n_valid < n_total``, some entities are missing their
+    ``embedding_specificity_ratio`` in the InterferencePerEntity (Me) — re-run
+    ``4. Compute interference per entity.py`` with ``overwrite_metrics=True``.
+    Results from a small ``n_valid`` are underpowered; permutation test p-values
+    are annotated with ``n_valid`` for transparency.
 
     **Interpretation**:
     - A method with most ratios >> 1 surgically targets each forgotten entity
@@ -3599,12 +3698,18 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
         ax.bar(x, sorted_ratios, color=colors, alpha=0.8, edgecolor="none")
         ax.axhline(1.0, color="black", linewidth=1.0, linestyle="--", label="ratio = 1")
         ax.set_xticks(x)
-        ax.set_xticklabels(sorted_names, rotation=90, fontsize=5)
         n_valid = res.get("n_valid", res["n_entities"])
         n_total = res["n_entities"]
+        if n_total > 30:
+            # Too many entities to label readably — hide tick labels, add note to title.
+            ax.set_xticklabels([])
+            label_note = " (labels hidden, n>30)"
+        else:
+            ax.set_xticklabels(sorted_names, rotation=90, fontsize=8)
+            label_note = ""
         ax.set_ylabel("Directional specificity ratio (cosine)")
         ax.set_title(
-            f"Specificity ratio per entity\n"
+            f"Specificity ratio per entity{label_note}\n"
             f"Method: {meta['unlearning_algorithm']}, Task: {meta['task'].title()}\n"
             f"Mean={res['mean_ratio']:.3f} (n_valid={n_valid}/{n_total}), "
             f"{res['fraction_above_1']:.0%} > 1 among valid"
@@ -3758,9 +3863,10 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
                 "concealment_reference": "Sharma et al., arXiv 2409.05668",
                 "pinpoint_reference": "Holistic Unlearning Benchmark (ICCV 2025)",
                 "note_n_valid": (
-                    "n_valid may be far smaller than n_entities because "
-                    "embedding_specificity_ratio requires interference_per_pair files "
-                    "per entity. Results based on small n_valid are preliminary."
+                    "n_valid should equal n_entities once the full pipeline has been run. "
+                    "If n_valid < n_entities, some entities are missing embedding_specificity_ratio "
+                    "in the InterferencePerEntity (Me). Re-run '4. Compute interference per entity.py' "
+                    "with overwrite_metrics=True to add missing values."
                 ),
                 "note_components": (
                     "The ratio numerator (self cosine distance) and denominator "

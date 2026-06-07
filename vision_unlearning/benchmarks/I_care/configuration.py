@@ -668,6 +668,7 @@ type_s = Literal[
     "jacc",
     "dino",
     "act",
+    "weight_overlap",  # cosine similarity of trained LoRA weight changes (B@A); scenes/distil only
 ]
 
 type_l = Literal[
@@ -729,6 +730,7 @@ s_to_direction: Dict[type_s, type_direction] = {
     "jacc": "↑",
     "dino": "↑",
     "act": "↑",  # higher cosine = more similar activation pattern
+    "weight_overlap": "↑",  # higher cosine = more shared LoRA weight direction = more interference expected
 }
 # me_to_direction can... be infered?
 

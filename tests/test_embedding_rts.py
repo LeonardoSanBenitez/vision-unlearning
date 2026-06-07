@@ -258,13 +258,22 @@ class TestEmbeddingUnlearningProfileCompute:
         assert "embedding_specificity_ratio" in result
 
     def test_specificity_ratio_greater_than_one(self, tmp_path: Any) -> None:
-        """With large shift on forgotten entity, specificity ratio > 1."""
+        """With large shift on forgotten entity and an IPE file providing the ratio, ratio > 1."""
         task = "people"
         method = "distil"
         epochs = 400
 
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
+
+        # The inline fallback was removed: ratio only comes from IPE now.
+        # Write an IPE file with a ratio > 1 for the forgotten entity.
+        col_ratio = f"metric_{method}_{epochs}_embedding_specificity_ratio (↑)"
+        ipe_rows = [{"name": ent, col_ratio: 2.5 if ent == FORGOTTEN_ENTITY else 0.8}
+                    for ent in ENTITIES]
+        ipe_path = str(tmp_path / f"interference_per_entity_{task}.json")
+        with open(ipe_path, "w", encoding="utf-8") as f:
+            json.dump(ipe_rows, f)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         original_epochs = rt_mod.unlearning_algorithm_to_epochs
@@ -282,11 +291,16 @@ class TestEmbeddingUnlearningProfileCompute:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
 
         ratio = data["result"]["embedding_specificity_ratio"]
-        assert ratio > 1.0, f"Expected ratio > 1 for strongly-shifted entity, got {ratio}"
+        assert ratio > 1.0, f"Expected ratio > 1 (from IPE), got {ratio}"
         assert data["result"]["targeted"] is True
+        assert data["result"]["ratio_source"] == "ipe"
 
-    def test_ratio_source_inline_when_no_ipe(self, tmp_path: Any) -> None:
-        """When no IPE file is present, ratio_source must be 'inline'."""
+    def test_ratio_source_not_available_when_no_ipe(self, tmp_path: Any) -> None:
+        """When no IPE file is present, ratio_source must be 'not_available' and ratio NaN.
+
+        The inline fallback was removed: it used a different denominator than the IPE value
+        and gave a misleading label.  With no IPE, the ratio is genuinely unavailable.
+        """
         task = "people"
         method = "distil"
         epochs = 400
@@ -310,8 +324,14 @@ class TestEmbeddingUnlearningProfileCompute:
         finally:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
 
-        assert data["result"]["ratio_source"] == "inline", (
-            "ratio_source must be 'inline' when IPE file is absent"
+        assert data["result"]["ratio_source"] == "not_available", (
+            "ratio_source must be 'not_available' when IPE file is absent (inline fallback removed)"
+        )
+        assert math.isnan(data["result"]["embedding_specificity_ratio"]), (
+            "embedding_specificity_ratio must be NaN when IPE is absent"
+        )
+        assert data["result"]["targeted"] is False, (
+            "targeted must be False when ratio is NaN"
         )
 
     def test_ratio_source_ipe_when_ipe_present(self, tmp_path: Any) -> None:
@@ -389,6 +409,84 @@ class TestEmbeddingUnlearningProfileCompute:
                 rt._compute_from_scratch()
         finally:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
+
+    def test_mp_clip_diffs_loaded_when_mp_file_present(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When an Mp file exists for this entity, mp_clip_diffs should have non-NaN values."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+
+        _write_baseline_file(tmp_path, task, method, epochs)
+        _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
+
+        # Write a fake Mp file for entity index 0 (Alice = index 0 in ENTITIES)
+        mp_data = {ent.replace(" ", "_"): {"clip_diff": float(-1.0 - i), "brisque_diff": 0.0,
+                                            "rmse": 0.0, "ssim": 0.0}
+                   for i, ent in enumerate(ENTITIES) if ent != FORGOTTEN_ENTITY}
+        mp_path = str(tmp_path / "datasets" / f"interferences_caused_by_{task}_0_{method}_{epochs}.json")
+        os.makedirs(os.path.dirname(mp_path), exist_ok=True)
+        with open(mp_path, "w", encoding="utf-8") as f:
+            json.dump(mp_data, f)
+
+        monkeypatch.setattr(
+            _rt_mod, "unlearning_algorithm_to_epochs",
+            {"people": {"distil": epochs, "uce": 0, "munba": 200}},
+        )
+
+        # Patch get_metadata_filtered to return ENTITIES in order (Alice = index 0)
+        fake_meta = [{"name": ent.replace(" ", "_")} for ent in ENTITIES]
+        with patch("vision_unlearning.benchmarks.I_care.result_templates.get_metadata_filtered",
+                   return_value=fake_meta):
+            rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                task=task,
+                unlearning_algorithm=method,
+                entity=FORGOTTEN_ENTITY,
+                base_folder=str(tmp_path),
+                save_outputs=False,
+            )
+            with patch.object(rt, "_resolve_hf_entity", return_value=FORGOTTEN_ENTITY):
+                data = rt._compute_from_scratch()
+
+        mp_diffs = data["result"]["mp_clip_diffs"]
+        n_valid = sum(1 for v in mp_diffs if not math.isnan(v))
+        assert n_valid > 0, "Expected at least one non-NaN mp_clip_diff when Mp file is present"
+
+    def test_mp_clip_diffs_all_nan_when_mp_file_missing(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the Mp file does not exist, mp_clip_diffs must be all-NaN (not an error)."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+
+        _write_baseline_file(tmp_path, task, method, epochs)
+        _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
+        # No Mp file written
+
+        monkeypatch.setattr(
+            _rt_mod, "unlearning_algorithm_to_epochs",
+            {"people": {"distil": epochs, "uce": 0, "munba": 200}},
+        )
+
+        fake_meta = [{"name": ent.replace(" ", "_")} for ent in ENTITIES]
+        with patch("vision_unlearning.benchmarks.I_care.result_templates.get_metadata_filtered",
+                   return_value=fake_meta):
+            rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                task=task,
+                unlearning_algorithm=method,
+                entity=FORGOTTEN_ENTITY,
+                base_folder=str(tmp_path),
+                save_outputs=False,
+            )
+            with patch.object(rt, "_resolve_hf_entity", return_value=FORGOTTEN_ENTITY):
+                data = rt._compute_from_scratch()
+
+        mp_diffs = data["result"]["mp_clip_diffs"]
+        assert all(math.isnan(v) for v in mp_diffs), (
+            "All mp_clip_diffs must be NaN when the Mp file is missing"
+        )
 
     def test_mismatched_entity_sets_raises(self, tmp_path: Any) -> None:
         """If the entity file is missing an entity that the baseline has, raise ValueError.
@@ -759,6 +857,35 @@ class TestEmbeddingForgettingEfficiencyCompute:
         assert "pinpoint_reference" in meta
         assert "2409.05668" in meta["concealment_reference"]
         assert "ICCV 2025" in meta["pinpoint_reference"]
+
+
+class TestEmbeddingForgettingEfficiencyNValid:
+    def test_n_valid_equals_n_total_when_all_ratios_present(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """n_valid must equal n_entities when all entities have a non-NaN ratio."""
+        task = "people"
+        method = "distil"
+        epochs = 400
+        # All ENTITIES have a valid ratio (no missing values)
+        _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
+
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
+                            {"people": {"distil": epochs, "uce": 0, "munba": 200}})
+        rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
+            task=task,
+            unlearning_algorithm=method,
+            base_folder=str(tmp_path),
+            save_outputs=False,
+            n_permutations=50,
+        )
+        data = rt._compute_from_scratch()
+        result = data["result"]
+        assert result["n_valid"] == result["n_entities"], (
+            f"n_valid ({result['n_valid']}) must equal n_entities ({result['n_entities']}) "
+            "when all ratios are present"
+        )
 
 
 class TestEmbeddingForgettingEfficiencyPlot:
