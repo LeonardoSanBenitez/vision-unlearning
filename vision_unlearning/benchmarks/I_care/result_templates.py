@@ -842,7 +842,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
             forget_col = choose_metric_column_interference_per_entity(
                 self.unlearning_algorithm, 'Forget clip diff', me_metric_cols
             )
-            emitter_forget_map = df_me.set_index('name')[forget_col].to_dict()
+            emitter_forget_map = {str(k): float(v) for k, v in df_me.set_index('name')[forget_col].to_dict().items()}
 
         # Compute per-entity baseline CLIP text-image score (required for include_baseline_quality=True)
         # This is clip_off(entity_i) = mean CLIP(image_off(i), prompt_i) across seeds.
@@ -930,7 +930,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                 rows_list.append(row_dict)
         
         df_prepared = pd.DataFrame(rows_list, columns=columns)
-        df_prepared.index = [
+        df_prepared.index = [  # type: ignore[assignment]
             f'{e}_to_{r}'
             for e in labels for r in labels
             if not (exclude_diagonal and e == r)
@@ -1564,7 +1564,7 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
         ent_list: List[str] = [e['name'] for e in metadata_filtered]
         # Build: metadata_name → expected prompt string
         meta_to_prompt: Dict[str, str] = {
-            name: f"An image of {get_target_overwrite(task, unlearning_algorithm, name)[0]}"
+            name: f"An image of {get_target_overwrite(task, unlearning_algorithm, name)[0]}"  # type: ignore[arg-type]
             for name in ent_list
         }
 
@@ -1805,7 +1805,7 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
         ) -> Dict[str, Dict[str, float]]:
             return {
                 r: {
-                    c: (None if np.isnan(mat[i, j]) else float(mat[i, j]))  # type: ignore[dict-item]
+                    c: (None if np.isnan(mat[i, j]) else float(mat[i, j]))  # type: ignore[dict-item,misc]
                     for j, c in enumerate(cols)
                 }
                 for i, r in enumerate(rows)
@@ -1964,7 +1964,7 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
             f"{meta['attribute_1']} × {meta['attribute_2']}",
             fontsize=11,
         )
-        plt.tight_layout(rect=[0, 0, 1, 0.93])
+        plt.tight_layout(rect=(0, 0, 1, 0.93))
 
         if return_fig:
             return fig, axes  # type: ignore[return-value]
