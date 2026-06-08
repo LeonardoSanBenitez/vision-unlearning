@@ -68,7 +68,8 @@ test: run-interactive-docker
 	# E741: ambiguous variable names (l, O, I) in research code
 	# W391: blank line at end of file — cosmetic only
 	# E117,E501: over-indent and long lines — cosmetic only
-	$(call exec_docker, poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501 ./vision_unlearning)
+	# W503,W504: line break before/after binary operator (PEP8 style choice — codebase uses W503 style)
+	$(call exec_docker, poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 ./vision_unlearning)
 
 	echo '\n\n-------\nPytest checks\n-------'
 	$(call exec_docker, poetry run --quiet pytest ./tests)
