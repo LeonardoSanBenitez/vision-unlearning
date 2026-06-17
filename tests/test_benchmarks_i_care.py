@@ -685,3 +685,176 @@ class TestInterferencePerEntityUploadIfRecomputed:
         monkeypatch.delenv("HF_TOKEN", raising=False)
         with pytest.raises(AssertionError, match="HF_TOKEN"):
             ipe.compute()
+
+
+# ---------------------------------------------------------------------------
+# ResultTemplateMetricSimilarityAlignmentOne (MSAOne)
+# Single-emitter slice of MetricSimilarityAlignment.
+# ---------------------------------------------------------------------------
+
+def _records_from_matrix(labels: List[str], values: Dict[str, Dict[str, float]]) -> List[Dict[str, Any]]:
+    """Build the list-of-records form returned by the matrix RTs."""
+    records: List[Dict[str, Any]] = []
+    for emitter in labels:
+        row: Dict[str, Any] = {"emitter": emitter}
+        for receiver in labels:
+            row[receiver] = values[emitter][receiver]
+        records.append(row)
+    return records
+
+
+# 4 receivers around emitter "Ada"; other rows are filler (only row Ada is read).
+# Names must be >=3 chars (get_target_overwrite assertion, exercised by plot()).
+_MSAONE_LABELS = ["Ada", "Bob", "Cleo", "Dora", "Evan"]
+_FILLER = {a: {b: 0.0 for b in _MSAONE_LABELS} for a in _MSAONE_LABELS}
+_INTERF_VALUES = {**_FILLER, "Ada": {"Ada": 0.0, "Bob": 0.1, "Cleo": 0.4, "Dora": 0.2, "Evan": 0.3}}
+_SIM_VALUES = {**_FILLER, "Ada": {"Ada": 1.0, "Bob": 0.9, "Cleo": 0.95, "Dora": 0.5, "Evan": 0.6}}
+
+
+def _patch_msaone_matrices(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        _rt_mod, "get_metadata_filtered",
+        lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
+    )
+    monkeypatch.setattr(
+        _rt_mod.ResultTemplateInterferenceMatrix, "compute",
+        lambda self: {"result": _records_from_matrix(_MSAONE_LABELS, _INTERF_VALUES)},
+    )
+    monkeypatch.setattr(
+        _rt_mod.ResultTemplateSimilarityMatrix, "compute",
+        lambda self: {"result": _records_from_matrix(_MSAONE_LABELS, _SIM_VALUES)},
+    )
+
+
+class TestMSAOneRegistry:
+    def test_in_rt_name_to_class(self) -> None:
+        assert "MetricSimilarityAlignmentOne" in vb.rt_name_to_class
+
+    def test_class_is_correct(self) -> None:
+        assert vb.rt_name_to_class["MetricSimilarityAlignmentOne"] is \
+            _rt_mod.ResultTemplateMetricSimilarityAlignmentOne
+
+
+class TestMSAOneResolveEntity:
+    def test_entity_to_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            _rt_mod, "get_metadata_filtered",
+            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
+        )
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity="Cleo",
+        )
+        rt._resolve_entity()
+        assert rt.entity == "Cleo"
+        assert rt.entity_index == 2
+
+    def test_index_to_entity(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            _rt_mod, "get_metadata_filtered",
+            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
+        )
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity_index=3,
+        )
+        rt._resolve_entity()
+        assert rt.entity == "Dora"
+        assert rt.entity_index == 3
+
+    def test_mismatch_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            _rt_mod, "get_metadata_filtered",
+            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
+        )
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity="Ada", entity_index=1,
+        )
+        with pytest.raises(ValueError, match="does not match"):
+            rt._resolve_entity()
+
+    def test_neither_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            _rt_mod, "get_metadata_filtered",
+            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
+        )
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino",
+        )
+        with pytest.raises(ValueError, match="Either entity or entity_index"):
+            rt._resolve_entity()
+
+
+class TestMSAOneCompute:
+    def test_basic_shape(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        r = data["result"]
+        # 4 receivers (B, C, D, E), emitter A excluded
+        assert len(r["x"]) == 4
+        assert len(r["y"]) == 4
+        assert set(r["receiver_names"]) == {"Bob", "Cleo", "Dora", "Evan"}
+        # x = interference row A in receiver order; y = similarity row A
+        order = r["receiver_names"]
+        assert dict(zip(order, r["x"])) == {"Bob": 0.1, "Cleo": 0.4, "Dora": 0.2, "Evan": 0.3}
+        assert dict(zip(order, r["y"])) == {"Bob": 0.9, "Cleo": 0.95, "Dora": 0.5, "Evan": 0.6}
+
+    def test_most_least_direction_worst_biggest(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """rmse: direction '↓' → worst = biggest. Most interfered = C(0.4), E(0.3)."""
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        r = rt._compute_from_scratch()["result"]
+        assert r["is_worst_biggest"] is True
+        assert r["labeled_most"] == ["Cleo", "Evan"]
+        # least interfered, least-first: B(0.1), D(0.2)
+        assert r["labeled_least"] == ["Bob", "Dora"]
+
+    def test_most_least_direction_worst_smallest(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """clip_diff: direction '↑' → worst = smallest. Most interfered = B(0.1), D(0.2)."""
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="clip_diff",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        r = rt._compute_from_scratch()["result"]
+        assert r["is_worst_biggest"] is False
+        assert r["labeled_most"] == ["Bob", "Dora"]
+        assert r["labeled_least"] == ["Cleo", "Evan"]
+
+    def test_serialize_includes_entity(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            _rt_mod, "get_metadata_filtered",
+            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
+        )
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            model="sd1.4", task="people", unlearning_algorithm="uce",
+            interference_pair="rmse", similarity_metric="dino", entity="Cleo",
+        )
+        assert rt._serialize_parameters() == "sd1.4_people_uce_rmse_dino_Cleo"
+
+
+class TestMSAOnePlot:
+    def test_plot_returns_fig(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        out = rt.plot(data, return_fig=True)
+        assert out is not None
+        fig, ax = out
+        assert isinstance(fig, Figure)

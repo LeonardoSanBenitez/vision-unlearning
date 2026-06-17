@@ -718,19 +718,47 @@ GUI_TO_BACKEND = {
 
 type_direction = Literal["↑", "↓"]
 
-mp_to_direction: Dict[type_mp, type_direction] = {  # Higher =  more interference
+# =============================================================================
+# DIRECTION CONVENTION  (read carefully — these dicts were historically MIS-commented)
+# -----------------------------------------------------------------------------
+# The arrow points toward the metric's HEALTHY / LESS-interference direction
+# (i.e. the direction of *better* image quality / *more* preserved knowledge).
+# The arrow does NOT point toward "more interference".
+#
+#     "↑"  ->  HIGHER value = LESS interference (better).  MORE interference = LOWER value.
+#     "↓"  ->  LOWER  value = LESS interference (better).  MORE interference = HIGHER value.
+#
+# This is exactly how the code consumes it everywhere (result_templates.py:768, 2839):
+#     is_worst_biggest = mp_to_direction[mp] != '↑'
+#     # worst == most interference.  For '↑' metrics worst = SMALLEST value;
+#     #                              for '↓' metrics worst = BIGGEST value.
+# =============================================================================
+mp_to_direction: Dict[type_mp, type_direction] = {
+    # clip_diff = clip_on - clip_off.  off = original/baseline model, on = unlearned model.
+    # Damaging a receiver lowers clip_on => clip_diff goes NEGATIVE.
+    # ==> MORE interference = MORE NEGATIVE (lower) clip_diff.  Arrow "↑" = healthy/higher.
+    "clip_diff": "↑",
+    # brisque_diff = brisque_on - brisque_off.  BRISQUE: lower = better quality, so damage
+    # raises brisque_on => positive diff.  ==> MORE interference = HIGHER (more positive).
     "brisque_diff": "↓",
-    "clip_diff": "↑",  # zero = no change. Negative = generation actually got better
+    # rmse between off/on images.  Identical images => 0.  ==> MORE interference = HIGHER rmse.
     "rmse": "↓",
+    # ssim between off/on images, in [0,1].  Identical => 1.  ==> MORE interference = LOWER ssim.
     "ssim": "↑",
-    "dino_diff": "↑",  # cosine similarity in [0,1]; higher = more similar = less interference (like ssim)
+    # dino_diff = DINOv2 cosine similarity of off/on images, in [0,1].  Identical => 1.
+    # ==> MORE interference = LOWER dino_diff (same polarity as ssim).
+    "dino_diff": "↑",
 }
+# Similarity metrics: arrow "↑" = HIGHER value means MORE similar (all current s metrics
+# are similarities, so all are "↑").  Higher similarity is hypothesised to predict more
+# interference, but that is a hypothesis about the s<->m_p relationship, NOT the polarity
+# of s itself.
 s_to_direction: Dict[type_s, type_direction] = {
-    "clip": "↑",
-    "jacc": "↑",
-    "dino": "↑",
-    "act": "↑",  # higher cosine = more similar activation pattern
-    "weight_overlap": "↑",  # higher cosine = more shared LoRA weight direction = more interference expected
+    "clip": "↑",            # CLIP text/image similarity; higher = more similar
+    "jacc": "↑",            # Jaccard attribute overlap; higher = more similar
+    "dino": "↑",            # DINOv2 cosine similarity; higher = more similar
+    "act": "↑",             # higher cosine = more similar UNet cross-attention pattern
+    "weight_overlap": "↑",  # higher cosine = more shared LoRA weight direction
 }
 # me_to_direction can... be infered?
 
@@ -738,7 +766,7 @@ s_to_direction: Dict[type_s, type_direction] = {
 task_to_attributes_of_interest = {
     "breeds": [
         "grooming_frequency_category_binary",  # (a continuous attribute describing how often brushing is required; discretized into two bins based on quartiles)
-        "supergroup",  # (categorical, with values such as retrievers and terriers)
+        "group",  # (categorical, with values such as retrievers and terriers). NB: was "supergroup", a name that does not exist as a column in interference_per_entity_breeds.json; corrected to "group" on 2026-06-16.
     ],
     "scenes": [
         "sports",
@@ -758,7 +786,7 @@ task_to_attributes_of_interest = {
 unlearning_algorithm_to_epochs = {
     'breeds': {
         'distil': 100,
-        'munba': 100,
+        'munba': 50,
         'uce': 0,
     },
     'scenes': {

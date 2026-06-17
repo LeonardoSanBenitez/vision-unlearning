@@ -467,19 +467,35 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
     interference_pair: type_mp
     similarity_metric: type_s
     significance_threshold: float = 0.05
+    colouring_attribute: Optional[str] = None
 
     def _serialize_parameters(self) -> str:
-        return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}_{self.similarity_metric}"
+        s = f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}_{self.similarity_metric}"
+        if self.colouring_attribute is not None:
+            s += f"_{self.colouring_attribute}"
+        return s
 
     @classmethod
     def plot(cls, data: dict, figsize: Tuple[int, int] = (6, 5), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
+        colors = data['result'].get('colors')
+        colouring_attribute = data['metadata'].get('colouring_attribute', None)
         fig, ax = plt.subplots(figsize=figsize)
 
-        sns.scatterplot(
-            x=data['result']['x'],
-            y=data['result']['y'],
-            ax=ax
-        )
+        if colors is not None:
+            sns.scatterplot(
+                x=data['result']['x'],
+                y=data['result']['y'],
+                hue=colors,
+                ax=ax,
+                alpha=0.4,
+            )
+        else:
+            sns.scatterplot(
+                x=data['result']['x'],
+                y=data['result']['y'],
+                ax=ax,
+                alpha=0.4,
+            )
 
         sns.regplot(
             x=data['result']['x'],
@@ -495,7 +511,8 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
             f"Task: {data['metadata']['task'].title()}\n"
             f"Method: {data['metadata']['unlearning_algorithm'].title()}\n"
             f"Pearson correlation: {data['result']['pearson_statistic']:.3f} (p-value: {data['result']['pearson_pvalue']:.3f})\n"
-            f"Spearman correlation: {data['result']['spearman_statistic']:.3f} (p-value: {data['result']['spearman_pvalue']:.3f})",
+            f"Spearman correlation: {data['result']['spearman_statistic']:.3f} (p-value: {data['result']['spearman_pvalue']:.3f})"
+            f"\nColoring attribute: {colouring_attribute}" if colouring_attribute is not None else "",
             fontsize=10
         )
 
@@ -516,11 +533,205 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
             interference_pair = self.interference_pair
         ).compute()['result'])
         df1.set_index('emitter', inplace=True)
-
+        
         df2 = pd.DataFrame(ResultTemplateSimilarityMatrix(
             model = self.model,
             task = self.task,
             similarity_metric = self.similarity_metric
+        ).compute()['result'])
+        df2.set_index('emitter', inplace=True)
+        
+        if df1.shape != df2.shape:
+            raise ValueError("DataFrames must have the same shape.")
+        if not np.all(df1.index == df1.columns):
+            raise ValueError("DataFrames must be square with matching indices and columns.")
+        if not np.all(df1.index == df2.index):
+            raise ValueError("DataFrames must have the same index and columns.")
+        if not np.all(df1.columns == df2.columns):
+            raise ValueError("DataFrames must have the same index and columns.")
+        labels = df1.index.to_list()
+        
+        
+        if self.colouring_attribute:
+            metadata_filtered = get_metadata_filtered(self.task)
+        
+        # Prepare data
+        # Each cell ij becomes a row {'c1': df1_ij, 'c2': df2_ij}
+        # index are the labelsi_to_labelj
+        df_prepared = pd.DataFrame(columns=['c1', 'c2'])
+        for label_i in labels:
+            for label_j in labels:
+                if exclude_diagonal and (label_i == label_j):
+                    continue
+                value1 = df1.loc[label_i, label_j]
+                value2 = df2.loc[label_i, label_j]
+                if self.colouring_attribute:
+                    color = next(filter(lambda e: e['name']==label_i , metadata_filtered))[self.colouring_attribute]
+                else:
+                    color = 0
+                df_prepared = pd.concat([df_prepared, pd.DataFrame({'c1': [value1], 'c2': [value2], 'color': color}, index=[f'{label_i}_to_{label_j}'])])
+        assert df_prepared.shape[0] == (df1.shape[0] * df1.shape[1] - (df1.shape[0] if exclude_diagonal else 0))
+        assert pd.api.types.is_numeric_dtype(df_prepared['c1']), f"{self.interference_pair} must be numeric"
+        assert pd.api.types.is_numeric_dtype(df_prepared['c2']), f"{self.similarity_metric} must be numeric"
+    
+        # Significance tests
+        df_prepared.dropna(inplace=True)
+        x = df_prepared['c1'].astype(float).to_list()
+        y = df_prepared['c2'].astype(float).to_list()
+        pearson_res = pearsonr(x, y)
+        spearman_res = spearmanr(x, y)
+        
+        data = {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'task': self.task,
+                'unlearning_algorithm': self.unlearning_algorithm,
+                'interference_pair': self.interference_pair,
+                'similarity_metric': self.similarity_metric,
+                'interference_pair_direction': mp_to_direction[self.interference_pair],
+                'similarity_metric_direction': s_to_direction[self.similarity_metric],
+                'significance_threshold': self.significance_threshold,
+                'colouring_attribute': self.colouring_attribute,
+            },
+            'result': {
+                'x': x,
+                'y': y,
+                'pearson_statistic': pearson_res.statistic,
+                'pearson_pvalue': pearson_res.pvalue,
+                'spearman_statistic': spearman_res.statistic,
+                'spearman_pvalue': spearman_res.pvalue,
+                'significant': bool(pearson_res.pvalue < self.significance_threshold or spearman_res.pvalue < self.significance_threshold),
+            }
+        }
+        if self.colouring_attribute:
+            data['result']['colors'] = df_prepared['color'].to_list()
+        return data
+
+
+
+class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
+    """
+    Variation of MetricSimilarityAlignment in which only one emitter entity is displayed
+    
+    So there will be 99 points in the scatter plot
+
+    The name of each receiver entity should be displayed on top for the point, for the 5 most and least interfered receiver entities
+
+    in all other aspects this should be similar to ResultTemplateMetricSimilarityAlignment
+    """
+    model: type_model = "sd1.4"
+    task: type_task = 'people'
+    unlearning_algorithm: type_unlearning_algorithm
+    interference_pair: type_mp
+    similarity_metric: type_s
+    significance_threshold: float = 0.05
+    entity: Optional[str] = None  # Either entity or entity_index should be provided, but not both. Entity has priority over entity_index. Same logic as ResultTemplateInterferenceVisualSummary
+    entity_index: Optional[int] = None
+    display_name_top_n: int = 5
+
+    def _resolve_entity(self) -> None:
+        '''
+        Ensures both entity and entity_index are filled and mutually consistent.
+        Modifies in place. Same logic as ResultTemplateInterferenceVisualSummary.
+        '''
+        metadata_filtered = get_metadata_filtered(self.task)
+        if not self.entity:
+            if self.entity_index is None:
+                raise ValueError("Either entity or entity_index must be provided.")
+            self.entity = metadata_filtered[self.entity_index]['name']
+        else:
+            expected_entity_index = next((i for i, item in enumerate(metadata_filtered) if item['name'] == self.entity), None)
+            if expected_entity_index is None:
+                raise ValueError(f"Entity '{self.entity}' not found in metadata.")
+            if self.entity_index is None:
+                self.entity_index = expected_entity_index
+            else:
+                if self.entity_index != expected_entity_index:
+                    raise ValueError(f"Provided entity_index {self.entity_index} does not match the index of the provided entity '{self.entity}' in metadata, which is {expected_entity_index}.")
+        assert type(self.entity) == str, f"Expected entity to be a string, got {type(self.entity)}"
+        assert len(self.entity) > 0, "Entity name cannot be empty"
+        assert type(self.entity_index) == int, f"Expected index to be an integer, got {type(self.entity_index)}"
+        assert 0 <= self.entity_index < len(metadata_filtered), f"Index {self.entity_index} is out of bounds for metadata of length {len(metadata_filtered)}"
+
+    def _serialize_parameters(self) -> str:
+        if self.entity is None:
+            self._resolve_entity()
+        return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}_{self.similarity_metric}_{self.entity}"
+
+    @classmethod
+    def plot(cls, data: dict, figsize: Tuple[int, int] = (7, 6), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
+        result = data['result']
+        meta = data['metadata']
+        x = result['x']
+        y = result['y']
+        names = result['receiver_names']
+        labeled_most = result['labeled_most']
+        labeled_least = result['labeled_least']
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Base cloud of all receivers
+        sns.scatterplot(x=x, y=y, ax=ax, alpha=0.35, color='grey')
+        sns.regplot(x=x, y=y, scatter=False, ax=ax, color='steelblue', line_kws={'linewidth': 1.5})
+
+        # Highlight + annotate the most/least interfered receivers
+        name_to_xy = {n: (x[i], y[i]) for i, n in enumerate(names)}
+        for group, colour in ((labeled_most, 'crimson'), (labeled_least, 'seagreen')):
+            for n in group:
+                xi, yi = name_to_xy[n]
+                ax.scatter([xi], [yi], color=colour, s=28, zorder=5, edgecolor='black', linewidth=0.4)
+                ax.annotate(
+                    get_target_overwrite(meta['task'], meta['unlearning_algorithm'], n)[0],
+                    xy=(xi, yi),
+                    xytext=(3, 4),
+                    textcoords='offset points',
+                    fontsize=6,
+                    color=colour,
+                    alpha=0.9,
+                )
+
+        ax.set_xlabel(f"Interference $m_p$: {meta['interference_pair'].replace('_', ' ').title()} ({meta['interference_pair_direction']})", fontsize=8)
+        ax.set_ylabel(f"Similarity $s$: {meta['similarity_metric'].replace('_', ' ').title()} ({meta['similarity_metric_direction']})", fontsize=8)
+
+        # Legend proxies for the two highlighted groups
+        most_label = f"{len(labeled_most)} most interfered"
+        least_label = f"{len(labeled_least)} least interfered"
+        ax.scatter([], [], color='crimson', s=28, edgecolor='black', linewidth=0.4, label=most_label)
+        ax.scatter([], [], color='seagreen', s=28, edgecolor='black', linewidth=0.4, label=least_label)
+        ax.legend(fontsize=7, loc='best')
+
+        emitter_pretty = get_target_overwrite(meta['task'], meta['unlearning_algorithm'], meta['entity'])[0]
+        ax.set_title(
+            f"Emitter: {emitter_pretty}  |  Task: {meta['task'].title()}  Method: {meta['unlearning_algorithm'].title()}\n"
+            f"Pearson correlation: {result['pearson_statistic']:.3f} (p-value: {result['pearson_pvalue']:.3f})\n"
+            f"Spearman correlation: {result['spearman_statistic']:.3f} (p-value: {result['spearman_pvalue']:.3f})",
+            fontsize=9,
+        )
+
+        plt.tight_layout(pad=0.5)
+        if return_fig:
+            return fig, ax
+        plt.show()
+        return None
+
+    def _compute_from_scratch(self) -> dict:
+        self._resolve_entity()
+        assert self.entity is not None
+        assert self.entity_index is not None
+
+        df1 = pd.DataFrame(ResultTemplateInterferenceMatrix(
+            model=self.model,
+            task=self.task,
+            unlearning_algorithm=self.unlearning_algorithm,
+            interference_pair=self.interference_pair,
+        ).compute()['result'])
+        df1.set_index('emitter', inplace=True)
+
+        df2 = pd.DataFrame(ResultTemplateSimilarityMatrix(
+            model=self.model,
+            task=self.task,
+            similarity_metric=self.similarity_metric,
         ).compute()['result'])
         df2.set_index('emitter', inplace=True)
 
@@ -532,27 +743,34 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
             raise ValueError("DataFrames must have the same index and columns.")
         if not np.all(df1.columns == df2.columns):
             raise ValueError("DataFrames must have the same index and columns.")
-        labels = df1.index.to_list()
+        if self.entity not in df1.index:
+            raise ValueError(f"Emitter '{self.entity}' not present in the interference matrix index.")
 
-        # Prepare data
-        # Each cell ij becomes a row {'c1': df1_ij, 'c2': df2_ij}
-        # index are the labelsi_to_labelj
-        df_prepared = pd.DataFrame(columns=['c1', 'c2'])
-        for label_i in labels:
-            for label_j in labels:
-                if exclude_diagonal and (label_i == label_j):
-                    continue
-                value1 = df1.loc[label_i, label_j]
-                value2 = df2.loc[label_i, label_j]
-                df_prepared = pd.concat([df_prepared, pd.DataFrame({'c1': [value1], 'c2': [value2]}, index=[f'{label_i}_to_{label_j}'])])
-        assert df_prepared.shape[0] == (df1.shape[0] * df1.shape[1] - (df1.shape[0] if exclude_diagonal else 0))
-        assert pd.api.types.is_numeric_dtype(df_prepared['c1']), f"{self.interference_pair} must be numeric"
-        assert pd.api.types.is_numeric_dtype(df_prepared['c2']), f"{self.similarity_metric} must be numeric"
+        # Extract the single-emitter row; receivers = all entities except the emitter itself.
+        row_interf = df1.loc[self.entity]
+        row_sim = df2.loc[self.entity]
+        receivers = [r for r in df1.columns if r != self.entity]
 
-        # Significance tests
-        df_prepared.dropna(inplace=True)
-        x = df_prepared['c1'].astype(float).to_list()
-        y = df_prepared['c2'].astype(float).to_list()
+        records: List[Tuple[str, float, float]] = []
+        for r in receivers:
+            v_interf = row_interf[r]
+            v_sim = row_sim[r]
+            if pd.isna(v_interf) or pd.isna(v_sim):
+                continue
+            records.append((r, float(v_interf), float(v_sim)))
+
+        receiver_names = [r for r, _, _ in records]
+        x = [xi for _, xi, _ in records]   # interference m_p
+        y = [yi for _, _, yi in records]   # similarity s
+
+        # Rank receivers by interference, using the metric direction (same as IVS).
+        # is_worst_biggest True  -> larger value == more interference (worst)
+        is_worst_biggest = mp_to_direction[self.interference_pair] != '↑'
+        ranked_worst_first = sorted(records, key=lambda t: t[1], reverse=is_worst_biggest)
+        n = self.display_name_top_n
+        labeled_most = [r for r, _, _ in ranked_worst_first[:n]]
+        labeled_least = [r for r, _, _ in ranked_worst_first[-n:]][::-1]
+
         pearson_res = pearsonr(x, y)
         spearman_res = spearmanr(x, y)
 
@@ -567,16 +785,23 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
                 'interference_pair_direction': mp_to_direction[self.interference_pair],
                 'similarity_metric_direction': s_to_direction[self.similarity_metric],
                 'significance_threshold': self.significance_threshold,
+                'entity': self.entity,
+                'entity_index': self.entity_index,
+                'display_name_top_n': self.display_name_top_n,
             },
             'result': {
                 'x': x,
                 'y': y,
+                'receiver_names': receiver_names,
+                'labeled_most': labeled_most,
+                'labeled_least': labeled_least,
+                'is_worst_biggest': is_worst_biggest,
                 'pearson_statistic': pearson_res.statistic,
                 'pearson_pvalue': pearson_res.pvalue,
                 'spearman_statistic': spearman_res.statistic,
                 'spearman_pvalue': spearman_res.pvalue,
                 'significant': bool(pearson_res.pvalue < self.significance_threshold or spearman_res.pvalue < self.significance_threshold),
-            }
+            },
         }
         return data
 
@@ -1204,14 +1429,10 @@ class ResultTemplateSignificantRelationshipCategorical(ResultTemplate):
 
     Formalized in `ap:rt_relationship`.
 
-    **Arguments:** `m`, `t`, `u`, `m_e`, `a`, optional `filterAttributeValue`.
+    **Arguments:** `m`, `t`, `u`, `m_e`, `a`.
     **Result:** ANOVA p-value, Kruskal-Wallis p-value, average value of `m_e` grouped
     by each value of `a`, grouped boxplot.
-    **Interpretation:** qualitative; similar to
-    *SignificantRelationshipNumerical*. The optional argument
-    *filterAttributeValue* restricts which emitter *entities* are included, allowing
-    the analysis of interference flow distribution, such as whether politicians cause
-    more interference to other politicians than artists cause to other artists.
+    **Interpretation:** qualitative; similar to *SignificantRelationshipNumerical*.
 
     **ANOVA**
         Use when you want to test if **group means differ** across **3+ independent groups** under parametric assumptions.
@@ -1245,13 +1466,12 @@ class ResultTemplateSignificantRelationshipCategorical(ResultTemplate):
     unlearning_algorithm: type_unlearning_algorithm
     interference_entity: type_me
     attribute: str
-    attribute_value: Optional[str|int] = None
     min_samples_per_category: int = 5
     significance_threshold: float = 0.05
 
 
     def _get_data_path_remote(self) -> str:
-        return os.path.join("results", self.__class__.__name__.replace('ResultTemplate', ''), f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_entity}_{self.attribute}_{self.attribute_value}.json")
+        return os.path.join("results", self.__class__.__name__.replace('ResultTemplate', ''), f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_entity}_{self.attribute}.json")
 
 
     @classmethod
@@ -1342,7 +1562,6 @@ class ResultTemplateSignificantRelationshipCategorical(ResultTemplate):
                 'unlearning_algorithm': self.unlearning_algorithm,
                 'interference_entity': self.interference_entity,
                 'attribute': self.attribute,
-                'attribute_value': self.attribute_value,
                 'interference_entity_direction': chosen_metric_col.split(' ')[1][1],
                 'chosen_metric_col': chosen_metric_col,
                 'significance_threshold': self.significance_threshold,
@@ -1356,6 +1575,220 @@ class ResultTemplateSignificantRelationshipCategorical(ResultTemplate):
                 'kruskal_pvalue': kruskal_res.pvalue,
                 'significant': bool(anova_res.pvalue < self.significance_threshold or kruskal_res.pvalue < self.significance_threshold),
             }
+        }
+        return data
+
+
+class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate):
+    """
+    Statistical significance of the average pairwise interference `m_p` flowing
+    from a fixed **source group** (entities whose attribute `a` equals a chosen
+    value `v`) to each target group, when the target entities (receivers) are
+    grouped by the values of `a`.
+
+    Unlike `SignificantRelationshipCategorical`, which works on Me (MetricInterferencePerEntity)
+    that has already marginalized over the counterparty, this RT consumes per-pair
+    Mp directly — allowing directional ("flow") statements such as:
+    "sport scenes interfere significantly more with other sport scenes than with
+    non-sport scenes."
+
+    Formalized in `ap:rt_directional`.
+
+    **Arguments:** `m`, `t`, `u`, `m_p`, `a`, `v`.
+    **Result:** ANOVA p-value, Kruskal-Wallis p-value, average m_p received from
+    the source group by each value of `a`, grouped boxplot.
+    **Interpretation:** qualitative; a significant result with a more extreme mean
+    in the `a(r) = v` group is read as "group `v` interferes preferentially with
+    its own kind."
+
+    Unit of analysis: each **receiver** entity (n = number of receivers per group),
+    NOT the (emitter, receiver) pair. Using pairs would be pseudoreplication because
+    pairs sharing a receiver are not independent.
+
+    If any per-pair file for a source emitter is missing, an error is raised
+    immediately. Missing data is treated as a computation problem, not silently
+    ignored.
+    """
+    model: type_model = "sd1.4"
+    task: type_task = 'people'
+    unlearning_algorithm: type_unlearning_algorithm
+    interference_pair: type_mp
+    attribute: str
+    source_attribute_value: str
+    exclude_diagonal: bool = True
+    min_samples_per_category: int = 5
+    significance_threshold: float = 0.05
+
+    def _get_data_path_remote(self) -> str:
+        # Sanitize source_attribute_value so slashes and spaces don't break the path.
+        safe_v = self.source_attribute_value.replace("/", "-").replace(" ", "_")
+        return os.path.join(
+            "results",
+            self.__class__.__name__.replace('ResultTemplate', ''),
+            f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}_{self.attribute}_{safe_v}.json",
+        )
+
+    @classmethod
+    def plot(cls, data: dict, figsize: Tuple[int, int] = (6, 5), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
+        fig, ax = plt.subplots(figsize=figsize)
+
+        method_name_pretty = data['metadata']['unlearning_algorithm'].title()
+        mp_dir = data['metadata']['interference_pair_direction']
+        mp_name_pretty = f"{data['metadata']['interference_pair']} ({mp_dir})"
+        attribute_name_pretty = data['metadata']['attribute'].replace('_', ' ').title()
+        source_v = data['metadata']['source_attribute_value']
+
+        sns.boxplot(
+            x=data['result']['x'],
+            y=data['result']['y'],
+            ax=ax,
+            showfliers=False,
+        )
+        sns.stripplot(
+            x=data['result']['x'],
+            y=data['result']['y'],
+            ax=ax,
+            color='black',
+            alpha=0.5,
+        )
+        ax.tick_params(axis='x', labelrotation=45)
+        ax.set_xlabel(attribute_name_pretty, fontsize=8)
+        ax.set_ylabel(f"Mean {mp_name_pretty} from source group '{source_v}'", fontsize=8)
+
+        ax.set_title(
+            f"Directional interference — source: {attribute_name_pretty}='{source_v}'\n"
+            f"Metric: {mp_name_pretty}  Method: {method_name_pretty}\n"
+            f"ANOVA p-value: {data['result']['anova_pvalue']:.03}\n"
+            f"Kruskal-Wallis p-value: {data['result']['kruskal_pvalue']:.03}",
+            fontsize=9,
+        )
+
+        plt.tight_layout(pad=0.5)
+
+        if return_fig:
+            return fig, ax
+        plt.show()
+        return None
+
+    def _compute_from_scratch(self) -> dict:
+        # Load the metadata so we have entity names + attribute values in one place.
+        metadata_filtered = get_metadata_filtered(self.task)
+        labels: List[str] = [e['name'] for e in metadata_filtered]
+        entity_to_index: Dict[str, int] = {e['name']: i for i, e in enumerate(metadata_filtered)}
+
+        # Build attribute lookup: entity name → attribute value (raw, may be None).
+        entity_to_attr: Dict[str, Any] = {}
+        for e in metadata_filtered:
+            entity_to_attr[e['name']] = e.get(self.attribute)
+
+        # Identify the source set G_v = {entities whose attribute == source_attribute_value}.
+        # We compare as strings to handle bool/int attribute values gracefully.
+        source_names: List[str] = [
+            name for name, val in entity_to_attr.items()
+            if val is not None and str(val) == str(self.source_attribute_value)
+        ]
+        if len(source_names) == 0:
+            raise ValueError(
+                f"No entities found with attribute '{self.attribute}' == '{self.source_attribute_value}' "
+                f"in task '{self.task}'. "
+                f"Available values: {sorted({str(v) for v in entity_to_attr.values() if v is not None})}"
+            )
+
+        # Verify that every source emitter's per-pair file exists before loading anything.
+        # Missing data is a computation error, not a graceful skip.
+        num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+        for name in source_names:
+            idx = entity_to_index[name]
+            path = get_interference_per_pair_path(self.task, idx, self.unlearning_algorithm, num_train_epochs, self.base_folder)
+            if not os.path.exists(path):
+                raise FileNotFoundError(
+                    f"Per-pair interference file missing for source entity '{name}' "
+                    f"(index={idx}, task={self.task}, method={self.unlearning_algorithm}, "
+                    f"epochs={num_train_epochs}): {path}. "
+                    "All source emitter files must be computed before running this RT."
+                )
+
+        # Accumulate per-pair Mp values by receiver.
+        # phi_v_accum[receiver] = list of mp(e -> receiver) for each e in G_v (excluding diagonal).
+        phi_v_accum: Dict[str, List[float]] = {name: [] for name in labels}
+        for source_name in source_names:
+            source_idx = entity_to_index[source_name]
+            interference_per_pair = get_interference_per_pair(self.task, source_idx, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder)
+            for receiver_name in labels:
+                if self.exclude_diagonal and receiver_name == source_name:
+                    continue
+                phi_v_accum[receiver_name].append(interference_per_pair[receiver_name][self.interference_pair])
+
+        # Compute the per-receiver mean phi_v(r).
+        # A receiver with an empty accumulator happens only when source_names has exactly one
+        # entity AND exclude_diagonal=True AND receiver_name == source_name. In that case the
+        # receiver is the source entity itself and carries no signal — skip it.
+        receiver_means: Dict[str, float] = {}
+        for receiver_name, values in phi_v_accum.items():
+            if len(values) == 0:
+                logger.debug(f"Receiver '{receiver_name}' has no source contributions (diagonal excluded); skipping.")
+                continue
+            receiver_means[receiver_name] = float(np.mean(values))
+
+        # Build (x, y) lists grouped by the receiver's attribute value.
+        # Receivers with a missing/None attribute are skipped with a warning.
+        x: List[str] = []
+        y: List[float] = []
+        for receiver_name, mean_val in receiver_means.items():
+            attr_val = entity_to_attr.get(receiver_name)
+            if attr_val is None or (isinstance(attr_val, float) and np.isnan(attr_val)):
+                logger.warning(f"Receiver '{receiver_name}' has no value for attribute '{self.attribute}'; skipping.")
+                continue
+            x.append(str(attr_val))
+            y.append(mean_val)
+
+        # Validate that each target group has enough samples for a valid test.
+        categories: List[str] = list(dict.fromkeys(x))  # preserve first-seen order
+        metric_per_category: List[List[float]] = [
+            [y[i] for i, attr in enumerate(x) if attr == cat]
+            for cat in categories
+        ]
+        if any(len(vals) < self.min_samples_per_category for vals in metric_per_category):
+            too_small = [cat for cat, vals in zip(categories, metric_per_category) if len(vals) < self.min_samples_per_category]
+            raise InsufficientSamplesError(
+                f"Target categories {too_small} have fewer than {self.min_samples_per_category} "
+                f"receivers for attribute '{self.attribute}'. "
+                "Reduce min_samples_per_category or choose a coarser attribute."
+            )
+        if len(categories) < 2:
+            raise InsufficientSamplesError(
+                f"Only one target category found for attribute '{self.attribute}'. "
+                "At least two categories are required for a group comparison."
+            )
+
+        anova_res = f_oneway(*metric_per_category)
+        kruskal_res = kruskal(*metric_per_category)
+
+        data: dict = {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'task': self.task,
+                'unlearning_algorithm': self.unlearning_algorithm,
+                'interference_pair': self.interference_pair,
+                'attribute': self.attribute,
+                'source_attribute_value': self.source_attribute_value,
+                'interference_pair_direction': mp_to_direction[self.interference_pair],
+                'exclude_diagonal': self.exclude_diagonal,
+                'significance_threshold': self.significance_threshold,
+            },
+            'result': {
+                'x': x,
+                'y': y,
+                'anova_statistic': float(anova_res.statistic),
+                'anova_pvalue': float(anova_res.pvalue),
+                'kruskal_statistic': float(kruskal_res.statistic),
+                'kruskal_pvalue': float(kruskal_res.pvalue),
+                'significant': bool(
+                    anova_res.pvalue < self.significance_threshold
+                    or kruskal_res.pvalue < self.significance_threshold
+                ),
+            },
         }
         return data
 
@@ -3900,10 +4333,12 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
 rt_name_to_class = {
     "MetricMetricAlignment": ResultTemplateMetricMetricAlignment,
     "MetricSimilarityAlignment": ResultTemplateMetricSimilarityAlignment,
+    "MetricSimilarityAlignmentOne": ResultTemplateMetricSimilarityAlignmentOne,
     "InterferenceMatrix": ResultTemplateInterferenceMatrix,
     "SimilarityMatrix": ResultTemplateSimilarityMatrix,
     "SignificantRelationshipNumerical": ResultTemplateSignificantRelationshipNumerical,
     "SignificantRelationshipCategorical": ResultTemplateSignificantRelationshipCategorical,
+    "SignificantRelationshipCategoricalDirectional": ResultTemplateSignificantRelationshipCategoricalDirectional,
     "CountSignificantRelationship": ResultTemplateCountSignificantRelationship,
     "ImplicitAssociationTest": ResultTemplateImplicitAssociationTest,
     "MinimumCutInterference": ResultTemplateMinimumCutInterference,
@@ -3918,10 +4353,12 @@ rt_name_to_class = {
 rt_name_to_params = {
     "MetricMetricAlignment": ["model", "task", "unlearning_algorithm", "interference_entity_1", "interference_entity_2"],
     "MetricSimilarityAlignment": ["model", "task", "unlearning_algorithm", "interference_pair", "similarity_metric"],
+    "MetricSimilarityAlignmentOne": ["model", "task", "unlearning_algorithm", "interference_pair", "similarity_metric", "entity"],
     "InterferenceMatrix": ["model", "task", "unlearning_algorithm", "interference_pair"],
     "SimilarityMatrix": ["model", "task", "similarity_metric"],
     "SignificantRelationshipNumerical": ["model", "task", "unlearning_algorithm", "interference_entity", "attribute"],
-    "SignificantRelationshipCategorical": ["model", "task", "unlearning_algorithm", "interference_entity", "attribute", "attribute_value"],
+    "SignificantRelationshipCategorical": ["model", "task", "unlearning_algorithm", "interference_entity", "attribute"],
+    "SignificantRelationshipCategoricalDirectional": ["model", "task", "unlearning_algorithm", "interference_pair", "attribute", "source_attribute_value"],
     "CountSignificantRelationship": ["model", "task", "unlearning_algorithm", "interference_entity_list", "attribute_list"],
     "ImplicitAssociationTest": ["model", "task", "unlearning_algorithm", "attribute_1", "attribute_2", "latent_embedding"],
     "MinimumCutInterference": ["model", "task", "unlearning_algorithm", "interference_pair", "entity_1", "entity_2"],

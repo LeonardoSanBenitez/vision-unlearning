@@ -369,6 +369,28 @@ class TestPlotFromFakeData:
         )
         assert isinstance(fig, Figure)
 
+    def test_significant_relationship_categorical_directional_plot(self) -> None:
+        data = {
+            "metadata": {
+                "task": "scenes",
+                "unlearning_algorithm": "distil",
+                "interference_pair": "clip_diff",
+                "interference_pair_direction": "↑",
+                "attribute": "sports",
+                "source_attribute_value": "True",
+            },
+            "result": {
+                "x": ["True", "True", "False", "False", "False"],
+                "y": [-2.0, -2.5, -0.5, -0.3, -0.8],
+                "anova_pvalue": 0.02,
+                "kruskal_pvalue": 0.03,
+            },
+        }
+        fig, ax = vb.ResultTemplateSignificantRelationshipCategoricalDirectional.plot(
+            data, return_fig=True
+        )
+        assert isinstance(fig, Figure)
+
     def test_interference_matrix_plot(self) -> None:
         labels = ["a", "b", "c"]
         result = []
@@ -737,6 +759,59 @@ class TestComputeFromScratchMocked:
         data = rt._compute_from_scratch()
         assert "anova_pvalue" in data["result"]
         assert "kruskal_pvalue" in data["result"]
+
+    def test_significant_relationship_categorical_directional_compute(
+        self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
+    ) -> None:
+        # 12 entities: 6 "sport", 6 "nonSport". Source = "sport".
+        # Each source emitter causes a clip_diff that is more negative for sport receivers.
+        labels = [f"e{i}" for i in range(12)]
+        meta = [
+            {"name": name, "sports": "sport" if i < 6 else "nonSport"}
+            for i, name in enumerate(labels)
+        ]
+        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+
+        # Per-pair files: sport emitters cause more negative clip_diff to sport receivers.
+        def fake_pair(task: str, index: int, method: str, epochs: int, **k: Any) -> Dict[str, Any]:
+            # Source is entity index 0..5 (sport). Sport receivers (0..5) get -3.0, others -1.0.
+            result = {}
+            for j, lab in enumerate(labels):
+                val = -3.0 if j < 6 else -1.0
+                result[lab] = {"clip_diff": val}
+            return result
+
+        monkeypatch.setattr(vb, "get_interference_per_pair", fake_pair)
+        monkeypatch.setattr(_rt_mod, "get_interference_per_pair", fake_pair)
+        # Make all source emitter paths appear to exist.
+        monkeypatch.setattr(vb, "get_interference_per_pair_path", lambda *a, **k: __file__)
+        monkeypatch.setattr(_rt_mod, "get_interference_per_pair_path", lambda *a, **k: __file__)
+
+        rt = vb.ResultTemplateSignificantRelationshipCategoricalDirectional(
+            task="scenes",
+            unlearning_algorithm="distil",
+            interference_pair="clip_diff",
+            attribute="sports",
+            source_attribute_value="sport",
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+
+        assert "anova_pvalue" in data["result"]
+        assert "kruskal_pvalue" in data["result"]
+        assert "significant" in data["result"]
+        # With the fake data, sport receivers should have lower (more negative) mean.
+        sport_means = [data["result"]["y"][i] for i, x in enumerate(data["result"]["x"]) if x == "sport"]
+        nonsport_means = [data["result"]["y"][i] for i, x in enumerate(data["result"]["x"]) if x == "nonSport"]
+        assert len(sport_means) == 6
+        assert len(nonsport_means) == 6
+        # Sport receivers get the -3.0 value, non-sport get -1.0
+        # (diagonal entries where receiver==emitter get -1.0 for self, but since exclude_diagonal=True,
+        # the self-pair is excluded — a sport receiver accumulates contributions from the other 5 sport emitters)
+        assert all(m < -1.5 for m in sport_means), f"Expected sport means < -1.5, got {sport_means}"
+        assert all(m > -2.0 for m in nonsport_means), f"Expected non-sport means > -2.0, got {nonsport_means}"
 
     def test_metric_similarity_alignment_multi_compute_runs(
         self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
