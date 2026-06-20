@@ -858,3 +858,231 @@ class TestMSAOnePlot:
         assert out is not None
         fig, ax = out
         assert isinstance(fig, Figure)
+
+
+# ---------------------------------------------------------------------------
+# MSAOne — labeled_most_similar / labeled_least_similar (new fields)
+# ---------------------------------------------------------------------------
+
+class TestMSAOneSimilarityLabels:
+    """Verify that _compute_from_scratch populates the similarity label fields."""
+
+    def test_similarity_labels_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """labeled_most_similar and labeled_least_similar must be in result."""
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        r = rt._compute_from_scratch()["result"]
+        assert "labeled_most_similar" in r
+        assert "labeled_least_similar" in r
+
+    def test_similarity_labels_correct_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        _SIM_VALUES for Ada row: Bob=0.9, Cleo=0.95, Dora=0.5, Evan=0.6.
+        Most similar (top-2): Cleo(0.95), Bob(0.9).
+        Least similar (bottom-2): Dora(0.5), Evan(0.6) — reversed from worst-first.
+        """
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="rmse",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        r = rt._compute_from_scratch()["result"]
+        assert r["labeled_most_similar"] == ["Cleo", "Bob"]
+        # least-similar: bottom-2 from sorted-by-sim-descending = Dora(0.5), Evan(0.6)
+        # reversed → Evan, Dora (but [::-1] on [-2:] of descending list)
+        # sorted descending: Cleo=0.95, Bob=0.9, Evan=0.6, Dora=0.5
+        # [-2:] = [Evan, Dora]; [::-1] = [Dora, Evan]
+        assert r["labeled_least_similar"] == ["Dora", "Evan"]
+
+    def test_similarity_labels_length(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Each similarity label list must have exactly display_name_top_n entries."""
+        _patch_msaone_matrices(monkeypatch)
+        for n in (1, 2):
+            rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+                unlearning_algorithm="uce", interference_pair="rmse",
+                similarity_metric="dino", entity="Ada", display_name_top_n=n,
+                save_outputs=False,
+            )
+            r = rt._compute_from_scratch()["result"]
+            assert len(r["labeled_most_similar"])  == n
+            assert len(r["labeled_least_similar"]) == n
+
+
+# ---------------------------------------------------------------------------
+# ResultTemplateSimilarityVisualSummary — registry + compute + plot
+# ---------------------------------------------------------------------------
+
+_SVS_LABELS = [f"Entity{i}" for i in range(9)]  # 9 entities; entity0 is the emitter
+_SVS_SIM: Dict[str, Dict[str, float]] = {
+    a: {b: (0.9 - 0.1 * abs(int(a[-1]) - int(b[-1]))) for b in _SVS_LABELS}
+    for a in _SVS_LABELS
+}
+
+
+def _patch_svs(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Patch all external dependencies for SimilarityVisualSummary tests."""
+    import vision_unlearning.benchmarks.I_care.result_templates as _rt
+
+    fake_metadata = [{"name": n} for n in _SVS_LABELS]
+    monkeypatch.setattr(_rt, "get_metadata_filtered", lambda *a, **kw: fake_metadata)
+    monkeypatch.setattr(_rt, "get_target_overwrite", lambda task, method, name: (name, name))
+    monkeypatch.setattr(_rt, "unlearning_algorithm_to_epochs", {"people": {"distil": 400}})
+    monkeypatch.setattr(_rt, "s_to_direction", {"dino": "↑", "jacc": "↑", "clip": "↑", "act": "↑"})
+    monkeypatch.setattr(
+        _rt.ResultTemplateSimilarityMatrix,
+        "compute",
+        lambda self: {
+            "result": [
+                {"emitter": a, **{b: _SVS_SIM[a][b] for b in _SVS_LABELS}}
+                for a in _SVS_LABELS
+            ]
+        },
+    )
+    monkeypatch.setattr(_rt, "_encode_image_file", lambda *a, **kw: "base64fake")
+    monkeypatch.setattr(
+        _rt, "get_off_image_path", lambda *a, **kw: str(tmp_path / "off.png")
+    )
+    monkeypatch.setattr(
+        _rt, "get_generated_dataset_folder", lambda *a, **kw: str(tmp_path / "on")
+    )
+    monkeypatch.setattr(
+        _rt, "get_generated_dataset_file", lambda state, seed, prompt: f"{state}_{seed}.png"
+    )
+
+    # _decode_image and plt.imread must not crash with our fake base64
+    monkeypatch.setattr(
+        _rt, "_decode_image",
+        lambda b64: __import__('io').BytesIO(__import__('base64').b64decode(
+            __import__('base64').b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+        )),
+    )
+
+
+def _make_tiny_png_b64() -> str:
+    """Return a minimal 1×1 white PNG as base64 string for image mocking."""
+    import base64
+    import struct
+    import zlib
+
+    def png_chunk(name: bytes, data: bytes) -> bytes:
+        c = struct.pack(">I", len(data)) + name + data
+        return c + struct.pack(">I", zlib.crc32(name + data) & 0xFFFFFFFF)
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    idat = zlib.compress(b"\x00\xff\xff\xff")
+    png = b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", ihdr) + png_chunk(b"IDAT", idat) + png_chunk(b"IEND", b"")
+    return base64.b64encode(png).decode()
+
+
+class TestSimilarityVisualSummaryRegistry:
+    def test_in_rt_name_to_class(self) -> None:
+        assert "SimilarityVisualSummary" in vb.rt_name_to_class
+
+    def test_class_is_correct(self) -> None:
+        assert vb.rt_name_to_class["SimilarityVisualSummary"] is \
+            _rt_mod.ResultTemplateSimilarityVisualSummary
+
+    def test_in_rt_name_to_params(self) -> None:
+        assert "SimilarityVisualSummary" in vb.rt_name_to_params
+
+    def test_params_include_similarity_metric(self) -> None:
+        assert "similarity_metric" in vb.rt_name_to_params["SimilarityVisualSummary"]
+
+
+class TestSimilarityVisualSummaryCompute:
+    def test_basic_result_keys(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """_compute_from_scratch returns mandatory result keys."""
+        _patch_svs(monkeypatch, tmp_path)
+        rt = _rt_mod.ResultTemplateSimilarityVisualSummary(
+            task="people", unlearning_algorithm="distil",
+            similarity_metric="dino", entity="Entity0", save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        r = data["result"]
+        assert "displayed_entities" in r
+        assert "most_similar" in r
+        assert "least_similar" in r
+        assert "similarity_values" in r
+        assert "images" in r
+
+    def test_displayed_entities_length(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """displayed_entities must have 9 entries: target + 4 most + 4 least."""
+        _patch_svs(monkeypatch, tmp_path)
+        rt = _rt_mod.ResultTemplateSimilarityVisualSummary(
+            task="people", unlearning_algorithm="distil",
+            similarity_metric="dino", entity="Entity0", save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        assert len(data["result"]["displayed_entities"]) == 9
+
+    def test_target_is_first_entity(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        _patch_svs(monkeypatch, tmp_path)
+        rt = _rt_mod.ResultTemplateSimilarityVisualSummary(
+            task="people", unlearning_algorithm="distil",
+            similarity_metric="dino", entity="Entity0", save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        assert data["result"]["displayed_entities"][0] == "Entity0"
+
+    def test_most_and_least_do_not_overlap(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        _patch_svs(monkeypatch, tmp_path)
+        rt = _rt_mod.ResultTemplateSimilarityVisualSummary(
+            task="people", unlearning_algorithm="distil",
+            similarity_metric="dino", entity="Entity0", save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        r = data["result"]
+        assert len(r["most_similar"]) == 4
+        assert len(r["least_similar"]) == 4
+        assert set(r["most_similar"]).isdisjoint(set(r["least_similar"]))
+
+    def test_images_have_on_off_keys(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        _patch_svs(monkeypatch, tmp_path)
+        rt = _rt_mod.ResultTemplateSimilarityVisualSummary(
+            task="people", unlearning_algorithm="distil",
+            similarity_metric="dino", entity="Entity0", save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        assert "off" in data["result"]["images"]
+        assert "on"  in data["result"]["images"]
+
+
+class TestSimilarityVisualSummaryPlot:
+    def test_plot_returns_fig(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        _patch_svs(monkeypatch, tmp_path)
+        import vision_unlearning.benchmarks.I_care.result_templates as _rt
+        tiny_b64 = _make_tiny_png_b64()
+        monkeypatch.setattr(_rt, "_encode_image_file", lambda *a, **kw: tiny_b64)
+
+        import io, base64
+        monkeypatch.setattr(
+            _rt, "_decode_image",
+            lambda b64: io.BytesIO(base64.b64decode(b64)),
+        )
+
+        rt = _rt_mod.ResultTemplateSimilarityVisualSummary(
+            task="people", unlearning_algorithm="distil",
+            similarity_metric="dino", entity="Entity0", save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        out = rt.plot(data, return_fig=True)
+        assert out is not None
+        fig, ax = out
+        assert isinstance(fig, Figure)

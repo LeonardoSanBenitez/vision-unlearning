@@ -94,6 +94,23 @@ from vision_unlearning.benchmarks.I_care.utils import (
 
 logger = get_logger('I_care')
 
+_ARTICLE_RE = re.compile(r'^[Aa]n? ')
+
+
+def _short_entity_display(raw_name: str, max_chars: int = 24) -> str:
+    """Remove leading article ('a ', 'an ') and truncate to *max_chars* for plot column titles.
+
+    Examples::
+
+        _short_entity_display('a bouvier des flandres dog')  # 'bouvier des flandres dog'
+        _short_entity_display('An ice skating rink')         # 'ice skating rink'
+        _short_entity_display('George W. Bush')              # 'George W. Bush'
+    """
+    name = _ARTICLE_RE.sub('', raw_name)
+    if len(name) > max_chars:
+        name = name[:max_chars - 1] + '…'
+    return name
+
 
 class ResultTemplate(BaseModel):
     recompute_if_exists: bool = False
@@ -668,6 +685,8 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
         names = result['receiver_names']
         labeled_most = result['labeled_most']
         labeled_least = result['labeled_least']
+        labeled_most_similar = result['labeled_most_similar']
+        labeled_least_similar = result['labeled_least_similar']
 
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -675,30 +694,44 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
         sns.scatterplot(x=x, y=y, ax=ax, alpha=0.35, color='grey')
         sns.regplot(x=x, y=y, scatter=False, ax=ax, color='steelblue', line_kws={'linewidth': 1.5})
 
-        # Highlight + annotate the most/least interfered receivers
+        # Four labelled groups. Priority for colour (first match wins when an entity appears
+        # in multiple groups): most-interfered > least-interfered > most-similar > least-similar.
+        n_top = len(labeled_most)
+        _group_defs: List[Tuple[List[str], str, str]] = [
+            (labeled_most,          'crimson',      f"{n_top} most-interfered"),
+            (labeled_least,         'seagreen',     f"{n_top} least-interfered"),
+            (labeled_most_similar,  'darkorange',   f"{n_top} most-similar"),
+            (labeled_least_similar, 'mediumpurple', f"{n_top} least-similar"),
+        ]
         name_to_xy = {n: (x[i], y[i]) for i, n in enumerate(names)}
-        for group, colour in ((labeled_most, 'crimson'), (labeled_least, 'seagreen')):
-            for n in group:
-                xi, yi = name_to_xy[n]
-                ax.scatter([xi], [yi], color=colour, s=28, zorder=5, edgecolor='black', linewidth=0.4)
-                ax.annotate(
-                    get_target_overwrite(meta['task'], meta['unlearning_algorithm'], n)[0],
-                    xy=(xi, yi),
-                    xytext=(3, 4),
-                    textcoords='offset points',
-                    fontsize=6,
-                    color=colour,
-                    alpha=0.9,
-                )
+        entity_color: Dict[str, str] = {}
+        for group, colour, _ in _group_defs:
+            for ent in group:
+                if ent not in entity_color:
+                    entity_color[ent] = colour
+        for ent, colour in entity_color.items():
+            xi, yi = name_to_xy[ent]
+            ax.scatter([xi], [yi], color=colour, s=28, zorder=5, edgecolor='black', linewidth=0.4)
+            label_text = _short_entity_display(
+                get_target_overwrite(meta['task'], meta['unlearning_algorithm'], ent)[0],
+                max_chars=20,
+            )
+            ax.annotate(
+                label_text,
+                xy=(xi, yi),
+                xytext=(3, 4),
+                textcoords='offset points',
+                fontsize=6,
+                color=colour,
+                alpha=0.9,
+            )
 
         ax.set_xlabel(f"Interference $m_p$: {meta['interference_pair'].replace('_', ' ').title()} ({meta['interference_pair_direction']})", fontsize=8)
         ax.set_ylabel(f"Similarity $s$: {meta['similarity_metric'].replace('_', ' ').title()} ({meta['similarity_metric_direction']})", fontsize=8)
 
-        # Legend proxies for the two highlighted groups
-        most_label = f"{len(labeled_most)} most interfered"
-        least_label = f"{len(labeled_least)} least interfered"
-        ax.scatter([], [], color='crimson', s=28, edgecolor='black', linewidth=0.4, label=most_label)
-        ax.scatter([], [], color='seagreen', s=28, edgecolor='black', linewidth=0.4, label=least_label)
+        # Legend for all four groups
+        for _, colour, label in _group_defs:
+            ax.scatter([], [], color=colour, s=28, edgecolor='black', linewidth=0.4, label=label)
         ax.legend(fontsize=7, loc='best')
 
         emitter_pretty = get_target_overwrite(meta['task'], meta['unlearning_algorithm'], meta['entity'])[0]
@@ -771,6 +804,12 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
         labeled_most = [r for r, _, _ in ranked_worst_first[:n]]
         labeled_least = [r for r, _, _ in ranked_worst_first[-n:]][::-1]
 
+        # Rank receivers by similarity (y-axis).
+        # All similarity metrics have direction '↑': higher value = more similar.
+        ranked_most_sim_first = sorted(records, key=lambda t: t[2], reverse=True)
+        labeled_most_similar = [r for r, _, _ in ranked_most_sim_first[:n]]
+        labeled_least_similar = [r for r, _, _ in ranked_most_sim_first[-n:]][::-1]
+
         pearson_res = pearsonr(x, y)
         spearman_res = spearmanr(x, y)
 
@@ -795,6 +834,8 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
                 'receiver_names': receiver_names,
                 'labeled_most': labeled_most,
                 'labeled_least': labeled_least,
+                'labeled_most_similar': labeled_most_similar,
+                'labeled_least_similar': labeled_least_similar,
                 'is_worst_biggest': is_worst_biggest,
                 'pearson_statistic': pearson_res.statistic,
                 'pearson_pvalue': pearson_res.pvalue,
@@ -1348,13 +1389,15 @@ class ResultTemplateSignificantRelationshipNumerical(ResultTemplate):
         ax.set_ylabel(metric_name_pretty, fontsize=8)
 
         ax.set_title(
-            f"Task: {data['metadata']['task'].title()}\n"
-            f"Metric: {metric_name_pretty}\n"
+            f"Task: {data['metadata']['task'].title()}  "
             f"Method: {method_name_pretty}\n"
+            f"Metric: {metric_name_pretty}  "
             f"Attribute: {attribute_name_pretty}\n"
-            f"Pearson p-value: {data['result']['pearson_pvalue']:.03}\n"
-            f"Spearman p-value: {data['result']['spearman_pvalue']:.03}",
-            fontsize=10
+            f"Pearson r={data['result']['pearson_statistic']:.3f} "
+            f"(p={data['result']['pearson_pvalue']:.2e})  "
+            f"Spearman r={data['result']['spearman_statistic']:.3f} "
+            f"(p={data['result']['spearman_pvalue']:.2e})",
+            fontsize=9,
         )
 
         plt.tight_layout(pad=0.5)
@@ -2881,167 +2924,79 @@ class ResultTemplateUnlearningVisualSummary(ResultTemplate):
     unlearning_algorithm: type_unlearning_algorithm
 
 
-class ResultTemplateInterferenceVisualSummary(ResultTemplate):
+class ResultTemplateVisualSummaryBase(ResultTemplate):
     """
-    Compared generated images for 9 identities: target, 4 worst (excluding target), 4 best
+    Abstract base for visual summary result templates that render a 2×9 image grid
+    (Original / Unlearned rows) for one emitter entity (target, column 0) and 8
+    receiver entities selected and ordered by a ranking criterion.
+
+    Shared infrastructure: entity resolution, image loading, and the canonical
+    2×9 plot grid.  Subclasses define which ranking criterion drives column
+    selection (interference for IVS; similarity for SimilarityVS).
     """
     model: type_model = "sd1.4"
     task: type_task = 'people'
     unlearning_algorithm: type_unlearning_algorithm
-    interference_pair: type_mp
-    entity: Optional[str] = None  # Either entity or entity_index should be provided, but not both. Entity has priority over entity_index.
+    entity: Optional[str] = None
     entity_index: Optional[int] = None
     seed: int = 42
     images_max_dim: int = 124
 
-    def _resolve_entity(self):
-        '''
-        Ensures both entity andentity_index are filled.
-        Modifies in place
-        At the end, both are set and consistent with each other
-        '''
+    def _resolve_entity(self) -> None:
+        """
+        Ensures both entity and entity_index are filled and mutually consistent.
+        Modifies in place.
+        """
         metadata_filtered = get_metadata_filtered(self.task)
         if not self.entity:
             if self.entity_index is None:
                 raise ValueError("Either entity or entity_index must be provided.")
             self.entity = metadata_filtered[self.entity_index]['name']
         else:
-            expected_entity_index = next((i for i, item in enumerate(metadata_filtered) if item['name'] == self.entity), None)
+            expected_entity_index = next(
+                (i for i, item in enumerate(metadata_filtered) if item['name'] == self.entity),
+                None,
+            )
             if expected_entity_index is None:
                 raise ValueError(f"Entity '{self.entity}' not found in metadata.")
-
             if self.entity_index is None:
                 self.entity_index = expected_entity_index
             else:
                 if self.entity_index != expected_entity_index:
-                    raise ValueError(f"Provided entity_index {self.entity_index} does not match the index of the provided entity '{self.entity}' in metadata, which is {expected_entity_index}.")
+                    raise ValueError(
+                        f"Provided entity_index {self.entity_index} does not match the index "
+                        f"of the provided entity '{self.entity}' in metadata, "
+                        f"which is {expected_entity_index}."
+                    )
         assert type(self.entity) == str, f"Expected entity to be a string, got {type(self.entity)}"
         assert len(self.entity) > 0, "Entity name cannot be empty"
         assert type(self.entity_index) == int, f"Expected index to be an integer, got {type(self.entity_index)}"
-        assert 0 <= self.entity_index < len(metadata_filtered), f"Index {self.entity_index} is out of bounds for metadata of length {len(metadata_filtered)}"
+        assert 0 <= self.entity_index < len(metadata_filtered), (
+            f"Index {self.entity_index} is out of bounds for metadata of length {len(metadata_filtered)}"
+        )
 
-    def _serialize_parameters(self) -> str:
-        if self.entity is None:
-            self._resolve_entity()
-        return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}_{self.entity}_{self.seed}"
+    def _load_images(
+        self, displayed_entities: List[str], num_train_epochs: int
+    ) -> Dict[str, Dict[str, str]]:
+        """
+        Load and base64-encode on/off images for *displayed_entities*.
 
-
-    @classmethod
-    def plot(cls, data: dict, figsize: Optional[Tuple[int, int]] = (18, 4), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
-        task = data['metadata']['task']
-        unlearning_algorithm = data['metadata']['unlearning_algorithm']
-        interference_pair = data['metadata']['interference_pair']
-
-        entity = data['metadata']['entity']
-        displayed_entities = data['result']['displayed_entities']
-        is_worst_biggest = data['result']['is_worst_biggest']
-        num_train_epochs = data['result']['num_train_epochs']
-        seed = data['metadata']['seed']
-        interference_values = data['result']['interference_values']
-
-        fig, axes = plt.subplots(2, 9, figsize=figsize)
-        plt.subplots_adjust(wspace=0.01, hspace=0.01, top=0.88)
-
-        # Images
-        for row, state in enumerate(['off', 'on']):  # off = base model (row 0), on = unlearned (row 1)
-            for col, name in enumerate(displayed_entities):
-                ax = axes[row, col]
-                ax.axis('off')
-                ax.imshow(plt.imread(_decode_image(data['result']['images'][state][name])))
-
-                if row == 0:
-                    ax.set_title(get_target_overwrite(task, unlearning_algorithm, name)[0] + f'\n{interference_values[name]:.2f}', rotation=0, fontsize=9, pad=2, loc='center')
-
-        # vertical row labels (written upwards)
-        # compute vertical center of a row using one axis
-        def row_center(ax):
-            pos = ax.get_position()
-            return (pos.y0 + pos.y1) / 2
-
-        # compute x position for the left vertical label automatically from the leftmost axis position
-        left_pos = axes[0, 0].get_position()
-        left_x = left_pos.x0 - 0.01  # small offset to place label left of images
-        fig.text(left_x, row_center(axes[0, 0]), 'Original', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
-        fig.text(left_x, row_center(axes[1, 0]), 'Unlearned', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
-
-        # group labels: compute center positions for the three groups using axes positions
-        # groups: target (col 0), worst (cols 1-4), best (cols 5-8)
-        def col_center(fig, ax_left, ax_right):
-            pos_left = ax_left.get_position()
-            pos_right = ax_right.get_position()
-            return (pos_left.x0 + pos_right.x1) / 2
-
-        # place group labels slightly above the figure (use y>1 to match requested style)
-        fig.text(col_center(fig, axes[0, 0], axes[0, 0]), 0.98, "Target", ha="center", va="bottom", fontsize=12, weight="bold")
-        fig.text(col_center(fig, axes[0, 1], axes[0, 4]), 0.98, f"Worst interfered ({interference_pair} {'↑' if is_worst_biggest else '↓'})", ha="center", va="bottom", fontsize=12, weight="bold")
-        fig.text(col_center(fig, axes[0, 5], axes[0, 8]), 0.98, f"Least interfered ({interference_pair} {'↓' if is_worst_biggest else '↑'})", ha="center", va="bottom", fontsize=12, weight="bold")
-
-        # Draw 2 vertical bars separating these 3 groups
-        top_y = 1.0
-        bottom_y = axes[1, 0].get_position().y0 - 0.005
-
-        # x for boundary between Target (col 0) and Worst (col 1)
-        pos_a = axes[0, 0].get_position()
-        pos_b = axes[0, 1].get_position()
-        x_boundary_1 = (pos_a.x1 + pos_b.x0) / 2
-
-        # x for boundary between Worst (col 1-4) and Best (col 5-8)
-        pos_c = axes[0, 4].get_position()
-        pos_d = axes[0, 5].get_position()
-        x_boundary_2 = (pos_c.x1 + pos_d.x0) / 2
-
-        # draw bars
-        for x in (x_boundary_1, x_boundary_2):
-            line = Line2D([x, x], [bottom_y, top_y], transform=fig.transFigure, color='gray', linewidth=1.5, zorder=20)
-            fig.add_artist(line)
-
-        #if save_path:
-        #    plt.savefig(save_path)
-        if return_fig:
-            return fig, ax
-        plt.show()
-        return None
-
-
-    def _compute_from_scratch(self):
-        self._resolve_entity()
-        # _resolve_entity() guarantees both entity and entity_index are set
-        assert self.entity is not None
-        assert self.entity_index is not None
-        num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        is_worst_biggest = mp_to_direction[self.interference_pair] != '↑'
-
-        interference_per_pair = get_interference_per_pair(self.task, self.entity_index, self.unlearning_algorithm, num_train_epochs)
-        all_names = list(interference_per_pair.keys())
-        metric_list = [(name, interference_per_pair[name][self.interference_pair]) for name in all_names]  # list of (name, metric)
-
-        if is_worst_biggest:
-            metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1], reverse=True)  # worst first (largest)
-            metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1])  # best first (smallest)
-        else:
-            metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1])  # worst first (smallest)
-            metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1], reverse=True)  # best first (largest)
-        worst = [n for n, _ in metric_sorted_worst_first if n != self.entity][:4]  # take 4 worst excluding target
-        best = [n for n, _ in metric_sorted_best_first if n != self.entity and n not in worst][:4]  # take 4 best excluding target and avoiding duplicates
-        assert len(worst) == 4, f"Expected 4 worst interfered, got {len(worst)}"
-        assert len(best) == 4, f"Expected 4 best interfered, got {len(best)}"
-
-        displayed_entities: List[str] = [self.entity, *worst, *best]
-        interference_values = {name: interference_per_pair[name][self.interference_pair] for name in displayed_entities}
-
-        # Embed images in the json itself.
-        # For 'off' images: prefer the method-agnostic baseline folder if it exists,
-        # falling back to the legacy entity folder (which contains mixed on/off).
-        # For 'on' images: always read from the method-specific entity folder.
+        Off (original) images come from the method-agnostic baseline folder via
+        get_off_image_path.  On (unlearned) images come from the emitter's
+        unlearned-model folder.
+        """
+        assert self.entity is not None, "_resolve_entity() must be called before _load_images()"
+        emitter_target = get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0]
         images: Dict[str, Dict[str, str]] = {'off': {}, 'on': {}}
         for state in ['off', 'on']:
             for name in displayed_entities:
-                prompt = f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}"
+                prompt = (
+                    f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}"
+                )
                 if state == 'off':
-                    # Use get_off_image_path: prefers baseline folder, falls back to entity folder.
                     img_path = get_off_image_path(
                         self.task,
-                        get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0],
+                        emitter_target,
                         self.unlearning_algorithm,
                         num_train_epochs,
                         self.seed,
@@ -3052,15 +3007,149 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplate):
                         self.task,
                         self.unlearning_algorithm,
                         num_train_epochs,
-                        get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0],
+                        emitter_target,
                     )
                     img_path = os.path.join(
                         entity_folder,
                         get_generated_dataset_file(state, self.seed, prompt),  # type: ignore
                     )
                 images[state][name] = _encode_image_file(img_path, max_dim=self.images_max_dim)
+        return images
 
-        data = {
+    @classmethod
+    def _plot_grid(
+        cls,
+        data: dict,
+        col_values: Dict[str, float],
+        worst_group_label: str,
+        best_group_label: str,
+        figsize: Optional[Tuple[int, int]] = (18, 4),
+        return_fig: bool = False,
+    ) -> Optional[Tuple[Figure, Any]]:
+        """
+        Render the canonical 2×9 image grid (Original / Unlearned rows).
+
+        Args:
+            col_values: entity_name → numeric value displayed below each column title.
+            worst_group_label: header for columns 1–4 (e.g. 'Worst interfered (clip_diff ↓)').
+            best_group_label:  header for columns 5–8 (e.g. 'Least interfered (clip_diff ↑)').
+        """
+        task = data['metadata']['task']
+        unlearning_algorithm = data['metadata']['unlearning_algorithm']
+        displayed_entities = data['result']['displayed_entities']
+
+        fig, axes = plt.subplots(2, 9, figsize=figsize)
+        plt.subplots_adjust(wspace=0.01, hspace=0.01, top=0.88)
+
+        for row, state in enumerate(['off', 'on']):
+            for col, name in enumerate(displayed_entities):
+                ax = axes[row, col]
+                ax.axis('off')
+                ax.imshow(plt.imread(_decode_image(data['result']['images'][state][name])))
+                if row == 0:
+                    raw_name = get_target_overwrite(task, unlearning_algorithm, name)[0]
+                    ax.set_title(
+                        f'{_short_entity_display(raw_name)}\n{col_values[name]:.2f}',
+                        rotation=0, fontsize=8, pad=2, loc='center',
+                    )
+
+        def _row_center(a: Any) -> float:
+            pos = a.get_position()
+            return float((pos.y0 + pos.y1) / 2)
+
+        def _col_center(al: Any, ar: Any) -> float:
+            return float((al.get_position().x0 + ar.get_position().x1) / 2)
+
+        left_x = float(axes[0, 0].get_position().x0) - 0.01
+        fig.text(left_x, _row_center(axes[0, 0]), 'Original',  rotation=90, va='center', ha='center', fontsize=12, weight="bold")
+        fig.text(left_x, _row_center(axes[1, 0]), 'Unlearned', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
+
+        fig.text(_col_center(axes[0, 0], axes[0, 0]), 0.98, "Target",          ha="center", va="bottom", fontsize=12, weight="bold")
+        fig.text(_col_center(axes[0, 1], axes[0, 4]), 0.98, worst_group_label, ha="center", va="bottom", fontsize=12, weight="bold")
+        fig.text(_col_center(axes[0, 5], axes[0, 8]), 0.98, best_group_label,  ha="center", va="bottom", fontsize=12, weight="bold")
+
+        top_y = 1.0
+        bottom_y = float(axes[1, 0].get_position().y0) - 0.005
+        x_boundary_1 = (axes[0, 0].get_position().x1 + axes[0, 1].get_position().x0) / 2
+        x_boundary_2 = (axes[0, 4].get_position().x1 + axes[0, 5].get_position().x0) / 2
+        for xb in (x_boundary_1, x_boundary_2):
+            fig.add_artist(Line2D([xb, xb], [bottom_y, top_y], transform=fig.transFigure, color='gray', linewidth=1.5, zorder=20))
+
+        if return_fig:
+            return fig, axes[0, 0]
+        plt.show()
+        return None
+
+
+class ResultTemplateInterferenceVisualSummary(ResultTemplateVisualSummaryBase):
+    """
+    Compared generated images for 9 identities: target, 4 worst (excluding target), 4 best.
+
+    Columns 1–4: 4 most-interfered receivers (worst outcome for the interference metric).
+    Columns 5–8: 4 least-interfered receivers (best outcome).
+    """
+    interference_pair: type_mp
+
+    def _serialize_parameters(self) -> str:
+        if self.entity is None:
+            self._resolve_entity()
+        return (
+            f"{self.model}_{self.task}_{self.unlearning_algorithm}"
+            f"_{self.interference_pair}_{self.entity}_{self.seed}"
+        )
+
+    @classmethod
+    def plot(
+        cls,
+        data: dict,
+        figsize: Optional[Tuple[int, int]] = (18, 4),
+        return_fig: bool = False,
+    ) -> Optional[Tuple[Figure, Any]]:
+        interference_pair = data['metadata']['interference_pair']
+        is_worst_biggest = data['result']['is_worst_biggest']
+        worst_label = f"Worst interfered ({interference_pair} {'↑' if is_worst_biggest else '↓'})"
+        best_label  = f"Least interfered ({interference_pair} {'↓' if is_worst_biggest else '↑'})"
+        return cls._plot_grid(
+            data=data,
+            col_values=data['result']['interference_values'],
+            worst_group_label=worst_label,
+            best_group_label=best_label,
+            figsize=figsize,
+            return_fig=return_fig,
+        )
+
+    def _compute_from_scratch(self) -> dict:
+        self._resolve_entity()
+        assert self.entity is not None
+        assert self.entity_index is not None
+        num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+        is_worst_biggest = mp_to_direction[self.interference_pair] != '↑'
+
+        interference_per_pair = get_interference_per_pair(
+            self.task, self.entity_index, self.unlearning_algorithm, num_train_epochs
+        )
+        all_names = list(interference_per_pair.keys())
+        metric_list = [(name, interference_per_pair[name][self.interference_pair]) for name in all_names]
+
+        if is_worst_biggest:
+            metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1], reverse=True)
+            metric_sorted_best_first  = sorted(metric_list, key=lambda x: x[1])
+        else:
+            metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1])
+            metric_sorted_best_first  = sorted(metric_list, key=lambda x: x[1], reverse=True)
+        worst = [n for n, _ in metric_sorted_worst_first if n != self.entity][:4]
+        best  = [n for n, _ in metric_sorted_best_first  if n != self.entity and n not in worst][:4]
+        assert len(worst) == 4, f"Expected 4 worst interfered, got {len(worst)}"
+        assert len(best)  == 4, f"Expected 4 best interfered, got {len(best)}"
+
+        displayed_entities: List[str] = [self.entity, *worst, *best]
+        interference_values = {
+            name: interference_per_pair[name][self.interference_pair]
+            for name in displayed_entities
+        }
+        images = self._load_images(displayed_entities, num_train_epochs)
+
+        return {
             'metadata': {
                 'RT': self.__class__.__name__,
                 'model': self.model,
@@ -3081,7 +3170,108 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplate):
                 'images': images,
             },
         }
-        return data
+
+
+class ResultTemplateSimilarityVisualSummary(ResultTemplateVisualSummaryBase):
+    """
+    Visual summary analogous to ResultTemplateInterferenceVisualSummary, but receiver
+    entities are ranked by *similarity* to the emitter rather than by interference.
+
+    Columns 1–4: 4 most-similar receivers (highest similarity score to the emitter).
+    Columns 5–8: 4 least-similar receivers (lowest similarity score).
+
+    The image rows still show Original (off, baseline model) and Unlearned (on, the
+    model after unlearning the emitter), so IVS and SimilarityVS can be compared
+    side-by-side for the same emitter.
+    """
+    similarity_metric: type_s
+
+    def _serialize_parameters(self) -> str:
+        if self.entity is None:
+            self._resolve_entity()
+        return (
+            f"{self.model}_{self.task}_{self.unlearning_algorithm}"
+            f"_{self.similarity_metric}_{self.entity}_{self.seed}"
+        )
+
+    @classmethod
+    def plot(
+        cls,
+        data: dict,
+        figsize: Optional[Tuple[int, int]] = (18, 4),
+        return_fig: bool = False,
+    ) -> Optional[Tuple[Figure, Any]]:
+        sim_metric = data['metadata']['similarity_metric']
+        direction  = data['metadata']['similarity_metric_direction']
+        worst_label = f"Most similar ({sim_metric} {direction})"
+        best_label  = f"Least similar ({sim_metric} {'↓' if direction == '↑' else '↑'})"
+        return cls._plot_grid(
+            data=data,
+            col_values=data['result']['similarity_values'],
+            worst_group_label=worst_label,
+            best_group_label=best_label,
+            figsize=figsize,
+            return_fig=return_fig,
+        )
+
+    def _compute_from_scratch(self) -> dict:
+        self._resolve_entity()
+        assert self.entity is not None
+        assert self.entity_index is not None
+        num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+
+        df_sim = pd.DataFrame(ResultTemplateSimilarityMatrix(
+            model=self.model,
+            task=self.task,
+            similarity_metric=self.similarity_metric,
+        ).compute()['result'])
+        df_sim.set_index('emitter', inplace=True)
+        if self.entity not in df_sim.index:
+            raise ValueError(f"Emitter '{self.entity}' not present in the similarity matrix index.")
+
+        row_sim = df_sim.loc[self.entity]
+        # All similarity metrics use direction '↑': higher = more similar.
+        sim_list: List[Tuple[str, float]] = [
+            (name, float(row_sim[name]))
+            for name in df_sim.columns
+            if name != self.entity and not pd.isna(row_sim[name])
+        ]
+        sorted_most_first = sorted(sim_list, key=lambda t: t[1], reverse=True)
+        most_similar: List[str]  = [n for n, _ in sorted_most_first[:4]]
+        least_similar: List[str] = [
+            n for n, _ in reversed(sorted_most_first) if n not in most_similar
+        ][:4]
+        assert len(most_similar)  == 4, f"Expected 4 most similar, got {len(most_similar)}"
+        assert len(least_similar) == 4, f"Expected 4 least similar, got {len(least_similar)}"
+
+        displayed_entities: List[str] = [self.entity, *most_similar, *least_similar]
+        similarity_values: Dict[str, float] = {
+            name: float(row_sim[name]) if not pd.isna(row_sim[name]) else 1.0
+            for name in displayed_entities
+        }
+        images = self._load_images(displayed_entities, num_train_epochs)
+
+        return {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'task': self.task,
+                'unlearning_algorithm': self.unlearning_algorithm,
+                'similarity_metric': self.similarity_metric,
+                'similarity_metric_direction': s_to_direction[self.similarity_metric],
+                'entity': self.entity,
+                'entity_index': self.entity_index,
+                'seed': self.seed,
+            },
+            'result': {
+                'displayed_entities': displayed_entities,
+                'most_similar': most_similar,
+                'least_similar': least_similar,
+                'num_train_epochs': num_train_epochs,
+                'similarity_values': similarity_values,
+                'images': images,
+            },
+        }
 
 
 
@@ -4344,6 +4534,7 @@ rt_name_to_class = {
     "MinimumCutInterference": ResultTemplateMinimumCutInterference,
     "UnlearningVisualSummary": ResultTemplateUnlearningVisualSummary,
     "InterferenceVisualSummary": ResultTemplateInterferenceVisualSummary,
+    "SimilarityVisualSummary": ResultTemplateSimilarityVisualSummary,
     "MethodComparisonByMetricEntity": ResultTemplateMethodComparisonByMetricEntity,
     "EmbeddingUnlearningProfile": ResultTemplateEmbeddingUnlearningProfile,
     "EmbeddingForgettingEfficiency": ResultTemplateEmbeddingForgettingEfficiency,
@@ -4364,6 +4555,7 @@ rt_name_to_params = {
     "MinimumCutInterference": ["model", "task", "unlearning_algorithm", "interference_pair", "entity_1", "entity_2"],
     "UnlearningVisualSummary": ["model", "task", "unlearning_algorithm"],
     "InterferenceVisualSummary": ["model", "task", "unlearning_algorithm", "interference_pair", "entity"],
+    "SimilarityVisualSummary": ["model", "task", "unlearning_algorithm", "similarity_metric", "entity"],
     "MethodComparisonByMetricEntity": ["model", "task", "interference_entity", "unlearning_algorithm_list"],
     "EmbeddingUnlearningProfile": ["model", "task", "unlearning_algorithm", "entity"],
     "EmbeddingForgettingEfficiency": ["model", "task", "unlearning_algorithm"],
