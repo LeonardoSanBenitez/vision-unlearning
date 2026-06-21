@@ -755,11 +755,11 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
         ax.set_xlabel(f"Interference $m_p$: {meta['interference_pair'].replace('_', ' ').title()} ({meta['interference_pair_direction']})", fontsize=8)
         ax.set_ylabel(f"Similarity $s$: {meta['similarity_metric'].replace('_', ' ').title()} ({meta['similarity_metric_direction']})", fontsize=8)
 
-        # Legend: two coloured interference groups + a grey marker explaining the named-but-grey
-        # most-/least-similar receivers.
+        # Legend: only the two coloured interference groups. The most-/least-similar receivers have
+        # no distinct visual encoding (grey, like the rest of the cloud), so they must NOT appear in
+        # the legend — a legend entry implies a distinct visual channel.
         for _, colour, label in _interf_group_defs:
             ax.scatter([], [], color=colour, s=28, edgecolor='black', linewidth=0.4, label=label)
-        ax.scatter([], [], color='grey', s=28, alpha=0.6, label=f"{n_top} most-/least-similar (named only)")
         ax.legend(fontsize=7, loc='best')
 
         emitter_pretty = get_target_overwrite(meta['task'], meta['unlearning_algorithm'], meta['entity'])[0]
@@ -870,6 +870,331 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
                 'spearman_statistic': spearman_res.statistic,
                 'spearman_pvalue': spearman_res.pvalue,
                 'significant': bool(pearson_res.pvalue < self.significance_threshold or spearman_res.pvalue < self.significance_threshold),
+            },
+        }
+        return data
+
+
+class ResultTemplateInterferenceBySimilarityRank(ResultTemplate):
+    """
+    For a single unlearning session (one emitter), plot every receiver's interference against its
+    rank in similarity to the emitter (rank 1 = most similar).
+
+    There are N-1 receivers (99 for a 100-entity task), each occupying a unique similarity rank, so
+    there is exactly ONE data point per rank. No averaging across receivers is possible and no
+    confidence interval is drawn — this is the single-session counterpart of a cross-emitter rank
+    curve. The point of the figure is to show whether interference concentrates at the most-similar
+    receivers (a steep response at low ranks) or is spread out (a flat cloud).
+
+    Parameters mirror ResultTemplateMetricSimilarityAlignmentOne: the session is fully identified by
+    (model, task, unlearning_algorithm, interference_pair, similarity_metric, entity/entity_index).
+    """
+    model: type_model = "sd1.4"
+    task: type_task = 'people'
+    unlearning_algorithm: type_unlearning_algorithm
+    interference_pair: type_mp
+    similarity_metric: type_s
+    entity: Optional[str] = None  # Either entity or entity_index; entity has priority. Same logic as MSAOne.
+    entity_index: Optional[int] = None
+
+    def _resolve_entity(self) -> None:
+        '''
+        Ensures both entity and entity_index are filled and mutually consistent.
+        Modifies in place. Same logic as ResultTemplateMetricSimilarityAlignmentOne.
+        '''
+        metadata_filtered = get_metadata_filtered(self.task)
+        if not self.entity:
+            if self.entity_index is None:
+                raise ValueError("Either entity or entity_index must be provided.")
+            self.entity = metadata_filtered[self.entity_index]['name']
+        else:
+            expected_entity_index = next((i for i, item in enumerate(metadata_filtered) if item['name'] == self.entity), None)
+            if expected_entity_index is None:
+                raise ValueError(f"Entity '{self.entity}' not found in metadata.")
+            if self.entity_index is None:
+                self.entity_index = expected_entity_index
+            else:
+                if self.entity_index != expected_entity_index:
+                    raise ValueError(f"Provided entity_index {self.entity_index} does not match the index of the provided entity '{self.entity}' in metadata, which is {expected_entity_index}.")
+        assert type(self.entity) == str, f"Expected entity to be a string, got {type(self.entity)}"
+        assert len(self.entity) > 0, "Entity name cannot be empty"
+        assert type(self.entity_index) == int, f"Expected index to be an integer, got {type(self.entity_index)}"
+        assert 0 <= self.entity_index < len(metadata_filtered), f"Index {self.entity_index} is out of bounds for metadata of length {len(metadata_filtered)}"
+
+    def _serialize_parameters(self) -> str:
+        if self.entity is None:
+            self._resolve_entity()
+        return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{self.interference_pair}_{self.similarity_metric}_{self.entity}"
+
+    @classmethod
+    def plot(cls, data: dict, figsize: Tuple[int, int] = (7, 5), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
+        result = data['result']
+        meta = data['metadata']
+        ranks = result['rank']
+        y = result['interference']
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # One point per receiver; a faint connecting line (over the rank-ordered points) only guides
+        # the eye — it is NOT a smoothing/averaging of anything.
+        ax.plot(ranks, y, color='grey', linewidth=0.6, alpha=0.4, zorder=1)
+        ax.scatter(ranks, y, color='#4c72b0', s=14, alpha=0.7, zorder=2)
+        # Highlight the most-similar receiver (rank 1).
+        ax.scatter([ranks[0]], [y[0]], color='crimson', s=45, edgecolor='black', linewidth=0.4, zorder=5)
+
+        ax.set_xlabel(f"Similarity rank ({meta['similarity_metric']})", fontsize=9)
+        ax.set_ylabel(f"{meta['interference_pair']} ({meta['interference_pair_direction']})", fontsize=9)
+
+        emitter_pretty = get_target_overwrite(meta['task'], meta['unlearning_algorithm'], meta['entity'])[0]
+        ax.set_title(
+            f"Emitter: {emitter_pretty}  |  Task: {meta['task'].title()}  Method: {meta['unlearning_algorithm'].title()}\n"
+            f"Interference: {meta['interference_pair']}  Similarity: {meta['similarity_metric']}  |  "
+            f"Spearman correlation: {result['spearman_statistic']:.3f} (p-value: {result['spearman_pvalue']:.3f})",
+            fontsize=9,
+        )
+
+        plt.tight_layout(pad=0.5)
+        if return_fig:
+            return fig, ax
+        plt.show()
+        return None
+
+    def _compute_from_scratch(self) -> dict:
+        self._resolve_entity()
+        assert self.entity is not None
+        assert self.entity_index is not None
+
+        df1 = pd.DataFrame(ResultTemplateInterferenceMatrix(
+            model=self.model,
+            task=self.task,
+            unlearning_algorithm=self.unlearning_algorithm,
+            interference_pair=self.interference_pair,
+        ).compute()['result'])
+        df1.set_index('emitter', inplace=True)
+
+        df2 = pd.DataFrame(ResultTemplateSimilarityMatrix(
+            model=self.model,
+            task=self.task,
+            similarity_metric=self.similarity_metric,
+        ).compute()['result'])
+        df2.set_index('emitter', inplace=True)
+
+        if df1.shape != df2.shape:
+            raise ValueError("DataFrames must have the same shape.")
+        if not np.all(df1.index == df2.index):
+            raise ValueError("DataFrames must have the same index.")
+        if self.entity not in df1.index:
+            raise ValueError(f"Emitter '{self.entity}' not present in the interference matrix index.")
+
+        row_interf = df1.loc[self.entity]
+        row_sim = df2.loc[self.entity]
+        receivers = [r for r in df1.columns if r != self.entity]
+
+        records: List[Tuple[str, float, float]] = []
+        for r in receivers:
+            v_interf = row_interf[r]
+            v_sim = row_sim[r]
+            if pd.isna(v_interf) or pd.isna(v_sim):
+                continue
+            records.append((r, float(v_interf), float(v_sim)))
+
+        # Rank receivers by similarity, descending: rank 1 = most similar. All similarity metrics
+        # have direction '↑' (higher = more similar).
+        ranked_by_sim = sorted(records, key=lambda t: t[2], reverse=True)
+        rank = list(range(1, len(ranked_by_sim) + 1))
+        receiver_names = [r for r, _, _ in ranked_by_sim]
+        interference = [interf for _, interf, _ in ranked_by_sim]
+        similarity = [sim for _, _, sim in ranked_by_sim]
+
+        # Cold descriptive statistic for the title: Spearman of similarity vs interference (rank is a
+        # monotone function of similarity, so this equals Spearman(rank, interference) up to sign).
+        spearman_res = spearmanr(similarity, interference)
+
+        data = {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'task': self.task,
+                'unlearning_algorithm': self.unlearning_algorithm,
+                'interference_pair': self.interference_pair,
+                'similarity_metric': self.similarity_metric,
+                'interference_pair_direction': mp_to_direction[self.interference_pair],
+                'similarity_metric_direction': s_to_direction[self.similarity_metric],
+                'entity': self.entity,
+                'entity_index': self.entity_index,
+            },
+            'result': {
+                'rank': rank,
+                'receiver_names': receiver_names,
+                'interference': interference,
+                'similarity': similarity,
+                'spearman_statistic': spearman_res.statistic,
+                'spearman_pvalue': spearman_res.pvalue,
+            },
+        }
+        return data
+
+
+class ResultTemplateMostSimilarMostInterferedGrid(ResultTemplate):
+    """
+    Across many unlearning sessions, answer one question: is the single most-similar receiver also
+    among the most-interfered receivers?
+
+    The output is a (method × task) grid of COUNTS. For one cell (a fixed task and unlearning
+    method), we sweep every combination of:
+      - emitter           : each entity of the task acts in turn as the unlearned concept,
+      - interference_pair : each interference metric m_p (clip_diff, brisque_diff, rmse, ssim, dino_diff),
+      - similarity_metric : each similarity metric s (clip, jacc, dino, act),
+    and for each combination we take the emitter's single most-similar receiver and ask whether it is
+    among the emitter's top-`top_k` most-interfered receivers (interference direction handled per
+    `mp_to_direction`: worst == biggest for '↓' metrics, worst == smallest for '↑' metrics). The cell
+    value is how many of those combinations answer "yes".
+
+    With 100 emitters, 5 interference metrics and 4 similarity metrics, the nominal maximum per cell
+    is 100 × 5 × 4 = 2000. The actual denominator can be smaller when a matrix is missing entries
+    (e.g. a method with fewer trained entities, or NaN receivers); the true denominator is recorded
+    per cell so the count is interpretable.
+
+    This Result Template consumes the already-computed InterferenceMatrix and SimilarityMatrix RTs;
+    it does not recompute any interference or similarity value.
+    """
+    model: type_model = "sd1.4"
+    tasks: List[type_task] = ["people", "breeds", "scenes"]
+    unlearning_algorithms: List[type_unlearning_algorithm] = ["distil", "uce", "munba"]
+    interference_pairs: List[type_mp] = ["clip_diff", "brisque_diff", "rmse", "ssim", "dino_diff"]
+    similarity_metrics: List[type_s] = ["clip", "jacc", "dino", "act"]
+    top_k: int = 1
+
+    def _serialize_parameters(self) -> str:
+        tasks = ','.join(self.tasks)
+        methods = ','.join(self.unlearning_algorithms)
+        mps = ','.join(self.interference_pairs)
+        sims = ','.join(self.similarity_metrics)
+        return f"{self.model}_top{self.top_k}_tasks={tasks}_methods={methods}_mps={mps}_sims={sims}"
+
+    @classmethod
+    def plot(cls, data: dict, figsize: Tuple[int, int] = (8, 6), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
+        result = data['result']
+        meta = data['metadata']
+        tasks = result['tasks']
+        methods = result['methods']
+        counts = np.array(result['counts'], dtype=float)
+        denominators = np.array(result['denominators'], dtype=float)
+        top_k = meta['top_k']
+        max_per_cell = result['max_per_cell']
+
+        fig, ax = plt.subplots(figsize=figsize)
+        image = ax.imshow(counts, cmap='viridis', aspect='auto')
+        ax.set_xticks(range(len(tasks)))
+        ax.set_xticklabels([t.title() for t in tasks])
+        ax.set_yticks(range(len(methods)))
+        ax.set_yticklabels([m.title() for m in methods])
+        ax.set_xlabel("Task", fontsize=9)
+        ax.set_ylabel("Unlearning method", fontsize=9)
+
+        for i in range(len(methods)):
+            for j in range(len(tasks)):
+                count = int(counts[i, j])
+                denom = int(denominators[i, j])
+                # text colour for contrast against the viridis cell
+                norm = counts[i, j] / counts.max() if counts.max() > 0 else 0.0
+                colour = 'white' if norm < 0.6 else 'black'
+                ax.text(j, i, f"{count}\n/{denom}", ha='center', va='center',
+                        color=colour, fontsize=10)
+
+        fig.colorbar(image, ax=ax, label='Count')
+        ax.set_title(
+            f"Single most-similar receiver is among the top-{top_k} most-interfered\n"
+            f"Cell = count over emitters × {len(meta['interference_pairs'])} interference metrics "
+            f"× {len(meta['similarity_metrics'])} similarity metrics "
+            f"(nominal maximum {max_per_cell}; per-cell denominator shown below each count)",
+            fontsize=9,
+        )
+        plt.tight_layout(pad=0.5)
+        if return_fig:
+            return fig, ax
+        plt.show()
+        return None
+
+    def _compute_from_scratch(self) -> dict:
+        methods = self.unlearning_algorithms
+        tasks = self.tasks
+        counts: List[List[int]] = [[0 for _ in tasks] for _ in methods]
+        denominators: List[List[int]] = [[0 for _ in tasks] for _ in methods]
+
+        for col, task in enumerate(tasks):
+            # similarity matrices are method-agnostic: load once per task.
+            similarity_by_metric: Dict[str, pd.DataFrame] = {}
+            for sim in self.similarity_metrics:
+                df_sim = pd.DataFrame(ResultTemplateSimilarityMatrix(
+                    model=self.model, task=task, similarity_metric=sim,
+                ).compute()['result'])
+                df_sim.set_index('emitter', inplace=True)
+                similarity_by_metric[sim] = df_sim
+
+            for row, method in enumerate(methods):
+                cell_count = 0
+                cell_denominator = 0
+                for mp in self.interference_pairs:
+                    df_interf = pd.DataFrame(ResultTemplateInterferenceMatrix(
+                        model=self.model, task=task,
+                        unlearning_algorithm=method, interference_pair=mp,
+                    ).compute()['result'])
+                    df_interf.set_index('emitter', inplace=True)
+                    is_worst_biggest = mp_to_direction[mp] != '↑'
+
+                    for sim in self.similarity_metrics:
+                        df_sim = similarity_by_metric[sim]
+                        # emitters present in both matrices
+                        emitters = [e for e in df_interf.index if e in df_sim.index]
+                        for emitter in emitters:
+                            row_interf = df_interf.loc[emitter]
+                            row_sim = df_sim.loc[emitter]
+                            # valid receivers: present in both, not the emitter, no NaN in either
+                            receivers = [
+                                r for r in df_interf.columns
+                                if r != emitter and r in df_sim.index
+                                and not pd.isna(row_interf[r]) and not pd.isna(row_sim[r])
+                            ]
+                            if len(receivers) < self.top_k:
+                                continue
+                            # single most-similar receiver (similarity direction is always '↑')
+                            most_similar = max(receivers, key=lambda r: float(row_sim[r]))
+                            # top-k most-interfered receivers
+                            ranked_worst_first = sorted(
+                                receivers, key=lambda r: float(row_interf[r]),
+                                reverse=is_worst_biggest,
+                            )
+                            top_k_interfered = set(ranked_worst_first[:self.top_k])
+                            cell_denominator += 1
+                            if most_similar in top_k_interfered:
+                                cell_count += 1
+                counts[row][col] = cell_count
+                denominators[row][col] = cell_denominator
+
+        # nominal maximum per cell, assuming a full 100-entity task with all metrics present
+        sample_entities = len(get_metadata_filtered(tasks[0])) if tasks else 0
+        max_per_cell = sample_entities * len(self.interference_pairs) * len(self.similarity_metrics)
+
+        data = {
+            'metadata': {
+                'RT': self.__class__.__name__,
+                'model': self.model,
+                'tasks': tasks,
+                'unlearning_algorithms': methods,
+                'interference_pairs': self.interference_pairs,
+                'similarity_metrics': self.similarity_metrics,
+                'top_k': self.top_k,
+            },
+            'result': {
+                'tasks': tasks,
+                'methods': methods,
+                'counts': counts,
+                'denominators': denominators,
+                'max_per_cell': max_per_cell,
+                'top_k': self.top_k,
+                'interference_pairs': self.interference_pairs,
+                'similarity_metrics': self.similarity_metrics,
             },
         }
         return data
@@ -4552,6 +4877,8 @@ rt_name_to_class = {
     "MetricMetricAlignment": ResultTemplateMetricMetricAlignment,
     "MetricSimilarityAlignment": ResultTemplateMetricSimilarityAlignment,
     "MetricSimilarityAlignmentOne": ResultTemplateMetricSimilarityAlignmentOne,
+    "InterferenceBySimilarityRank": ResultTemplateInterferenceBySimilarityRank,
+    "MostSimilarMostInterferedGrid": ResultTemplateMostSimilarMostInterferedGrid,
     "InterferenceMatrix": ResultTemplateInterferenceMatrix,
     "SimilarityMatrix": ResultTemplateSimilarityMatrix,
     "SignificantRelationshipNumerical": ResultTemplateSignificantRelationshipNumerical,
@@ -4573,6 +4900,8 @@ rt_name_to_params = {
     "MetricMetricAlignment": ["model", "task", "unlearning_algorithm", "interference_entity_1", "interference_entity_2"],
     "MetricSimilarityAlignment": ["model", "task", "unlearning_algorithm", "interference_pair", "similarity_metric"],
     "MetricSimilarityAlignmentOne": ["model", "task", "unlearning_algorithm", "interference_pair", "similarity_metric", "entity"],
+    "InterferenceBySimilarityRank": ["model", "task", "unlearning_algorithm", "interference_pair", "similarity_metric", "entity"],
+    "MostSimilarMostInterferedGrid": ["model", "tasks", "unlearning_algorithms", "interference_pairs", "similarity_metrics", "top_k"],
     "InterferenceMatrix": ["model", "task", "unlearning_algorithm", "interference_pair"],
     "SimilarityMatrix": ["model", "task", "similarity_metric"],
     "SignificantRelationshipNumerical": ["model", "task", "unlearning_algorithm", "interference_entity", "attribute"],

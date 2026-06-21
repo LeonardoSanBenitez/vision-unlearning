@@ -1008,18 +1008,205 @@ class TestMSAOnePlotColouring:
         assert counts == {"crimson": 2, "seagreen": 2, "grey": 3}
         plt.close(fig)
 
-    def test_legend_has_no_coloured_similarity_groups(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_legend_lists_only_interference_groups(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """
-        Legend must list only the two interference groups plus a single grey
-        'named only' entry — never the old coloured 'most-similar'/'least-similar' groups.
+        Legend must list ONLY the two coloured interference groups. The most-/least-similar
+        receivers have no distinct visual encoding (grey), so they must not appear in the legend.
         """
         fig, ax = self._plot(monkeypatch)
         labels = [t.get_text() for t in ax.get_legend().get_texts()]
-        assert labels == [
-            "2 most-interfered",
-            "2 least-interfered",
-            "2 most-/least-similar (named only)",
+        assert labels == ["2 most-interfered", "2 least-interfered"]
+        plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# ResultTemplateInterferenceBySimilarityRank — single-session interference-vs-similarity-rank.
+# Reuses the MSAOne 4-receiver fixture (emitter Ada). Ada similarity row:
+#   Bob=0.9, Cleo=0.95, Dora=0.5, Evan=0.6  -> ranked by similarity descending:
+#   rank 1 Cleo(0.95), rank 2 Bob(0.90), rank 3 Evan(0.60), rank 4 Dora(0.50)
+# Ada interference row: Bob=0.1, Cleo=0.4, Dora=0.2, Evan=0.3
+# ---------------------------------------------------------------------------
+
+class TestInterferenceBySimilarityRankRegistry:
+    def test_in_rt_name_to_class(self) -> None:
+        assert "InterferenceBySimilarityRank" in vb.rt_name_to_class
+
+    def test_class_is_correct(self) -> None:
+        assert vb.rt_name_to_class["InterferenceBySimilarityRank"] is \
+            _rt_mod.ResultTemplateInterferenceBySimilarityRank
+
+    def test_in_rt_name_to_params(self) -> None:
+        assert "InterferenceBySimilarityRank" in vb.rt_name_to_params
+        assert vb.rt_name_to_params["InterferenceBySimilarityRank"] == [
+            "model", "task", "unlearning_algorithm", "interference_pair",
+            "similarity_metric", "entity",
         ]
+
+
+class TestInterferenceBySimilarityRankCompute:
+    def _rt(self) -> Any:
+        return _rt_mod.ResultTemplateInterferenceBySimilarityRank(
+            unlearning_algorithm="uce", interference_pair="clip_diff",
+            similarity_metric="dino", entity="Ada", save_outputs=False,
+        )
+
+    def test_one_point_per_receiver(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_msaone_matrices(monkeypatch)
+        r = self._rt()._compute_from_scratch()["result"]
+        # 4 receivers (emitter Ada excluded), each at a unique rank 1..4
+        assert r["rank"] == [1, 2, 3, 4]
+        assert len(r["interference"]) == 4
+        assert len(r["receiver_names"]) == 4
+
+    def test_ranked_by_similarity_descending(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_msaone_matrices(monkeypatch)
+        r = self._rt()._compute_from_scratch()["result"]
+        assert r["receiver_names"] == ["Cleo", "Bob", "Evan", "Dora"]
+        # similarity must be non-increasing along the rank axis
+        assert r["similarity"] == sorted(r["similarity"], reverse=True)
+        # interference is reported in the same (similarity-ranked) order
+        assert r["interference"] == [0.4, 0.1, 0.3, 0.2]
+
+    def test_spearman_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_msaone_matrices(monkeypatch)
+        r = self._rt()._compute_from_scratch()["result"]
+        assert "spearman_statistic" in r
+        assert "spearman_pvalue" in r
+
+
+class TestInterferenceBySimilarityRankPlot:
+    def test_plot_returns_fig(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateInterferenceBySimilarityRank(
+            unlearning_algorithm="uce", interference_pair="clip_diff",
+            similarity_metric="dino", entity="Ada", save_outputs=False,
+        )
+        out = rt.plot(rt._compute_from_scratch(), return_fig=True)
+        assert out is not None
+        fig, ax = out
+        assert isinstance(fig, Figure)
+        # x axis = similarity rank, y axis = interference metric with direction arrow
+        assert "Similarity rank" in ax.get_xlabel()
+        assert "clip_diff" in ax.get_ylabel()
+        plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# ResultTemplateMostSimilarMostInterferedGrid — count grid across sessions.
+# Tiny 3-entity fixture (A, B, C), one task / method / interference_pair / similarity_metric.
+#
+# Similarity (dino):            Interference (clip_diff, direction '↑' -> worst = SMALLEST):
+#   A: B=0.9 C=0.1                A: B=-5.0 C=-1.0   -> most-interfered = B
+#   B: A=0.9 C=0.5                B: A=-1.0 C=-3.0   -> most-interfered = C
+#   C: A=0.1 B=0.5                C: A=-2.0 B=-1.0   -> most-interfered = A
+#
+# Most-similar receiver per emitter: A->B, B->A, C->B.
+# top-1 matches (most-similar == most-interfered): only emitter A (B==B). count = 1 of 3.
+# ---------------------------------------------------------------------------
+
+_GRID_LABELS = ["A", "B", "C"]
+_GRID_INTERF = {
+    "A": {"A": 0.0, "B": -5.0, "C": -1.0},
+    "B": {"A": -1.0, "B": 0.0, "C": -3.0},
+    "C": {"A": -2.0, "B": -1.0, "C": 0.0},
+}
+_GRID_SIM = {
+    "A": {"A": 1.0, "B": 0.9, "C": 0.1},
+    "B": {"A": 0.9, "B": 1.0, "C": 0.5},
+    "C": {"A": 0.1, "B": 0.5, "C": 1.0},
+}
+
+
+def _patch_grid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        _rt_mod, "get_metadata_filtered",
+        lambda task, **kw: [{"name": e} for e in _GRID_LABELS],
+    )
+    monkeypatch.setattr(
+        _rt_mod.ResultTemplateInterferenceMatrix, "compute",
+        lambda self: {"result": _records_from_matrix(_GRID_LABELS, _GRID_INTERF)},
+    )
+    monkeypatch.setattr(
+        _rt_mod.ResultTemplateSimilarityMatrix, "compute",
+        lambda self: {"result": _records_from_matrix(_GRID_LABELS, _GRID_SIM)},
+    )
+
+
+class TestMostSimilarMostInterferedGridRegistry:
+    def test_in_rt_name_to_class(self) -> None:
+        assert "MostSimilarMostInterferedGrid" in vb.rt_name_to_class
+
+    def test_class_is_correct(self) -> None:
+        assert vb.rt_name_to_class["MostSimilarMostInterferedGrid"] is \
+            _rt_mod.ResultTemplateMostSimilarMostInterferedGrid
+
+    def test_in_rt_name_to_params(self) -> None:
+        assert vb.rt_name_to_params["MostSimilarMostInterferedGrid"] == [
+            "model", "tasks", "unlearning_algorithms",
+            "interference_pairs", "similarity_metrics", "top_k",
+        ]
+
+
+class TestMostSimilarMostInterferedGridCompute:
+    @staticmethod
+    def _rt(top_k: int, tasks: List[str], methods: List[str]) -> Any:
+        return _rt_mod.ResultTemplateMostSimilarMostInterferedGrid(
+            tasks=tasks, unlearning_algorithms=methods,
+            interference_pairs=["clip_diff"], similarity_metrics=["dino"],
+            top_k=top_k, save_outputs=False,
+        )
+
+    def test_top1_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_grid(monkeypatch)
+        r = self._rt(1, ["people"], ["uce"])._compute_from_scratch()["result"]
+        assert r["counts"] == [[1]]
+        assert r["denominators"] == [[3]]
+
+    def test_topk_covers_all_receivers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With top_k == number of receivers, the most-similar is always among the top-k."""
+        _patch_grid(monkeypatch)
+        r = self._rt(2, ["people"], ["uce"])._compute_from_scratch()["result"]
+        assert r["counts"] == [[3]]
+        assert r["denominators"] == [[3]]
+
+    def test_grid_shape_methods_by_tasks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_grid(monkeypatch)
+        r = self._rt(1, ["people", "breeds"], ["uce", "distil"])._compute_from_scratch()["result"]
+        # rows = methods, cols = tasks
+        assert len(r["counts"]) == 2
+        assert all(len(row) == 2 for row in r["counts"])
+        assert r["max_per_cell"] == 3 * 1 * 1  # 3 entities x 1 mp x 1 sim
+
+    def test_direction_handling_worst_biggest(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """For an '↓' metric (rmse), worst = BIGGEST; the count must flip accordingly."""
+        _patch_grid(monkeypatch)
+        rt = _rt_mod.ResultTemplateMostSimilarMostInterferedGrid(
+            tasks=["people"], unlearning_algorithms=["uce"],
+            interference_pairs=["rmse"], similarity_metrics=["dino"],
+            top_k=1, save_outputs=False,
+        )
+        # rmse direction '↓' -> worst = biggest value.
+        # A receivers B=-5,C=-1 -> biggest=-1=C; most-similar=B -> no match
+        # B receivers A=-1,C=-3 -> biggest=-1=A; most-similar=A -> match
+        # C receivers A=-2,B=-1 -> biggest=-1=B; most-similar=B -> match
+        r = rt._compute_from_scratch()["result"]
+        assert r["counts"] == [[2]]
+
+
+class TestMostSimilarMostInterferedGridPlot:
+    def test_plot_returns_fig(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_grid(monkeypatch)
+        rt = _rt_mod.ResultTemplateMostSimilarMostInterferedGrid(
+            tasks=["people", "breeds"], unlearning_algorithms=["uce", "distil"],
+            interference_pairs=["clip_diff"], similarity_metrics=["dino"],
+            top_k=1, save_outputs=False,
+        )
+        out = rt.plot(rt._compute_from_scratch(), return_fig=True)
+        assert out is not None
+        fig, ax = out
+        assert isinstance(fig, Figure)
+        assert ax.get_xlabel() == "Task"
+        assert ax.get_ylabel() == "Unlearning method"
         plt.close(fig)
 
 
