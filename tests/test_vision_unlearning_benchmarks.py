@@ -339,7 +339,9 @@ class TestPlotFromFakeData:
             "result": {
                 "x": [0.1, 0.5, 0.9, 1.2],
                 "y": [2.0, 2.5, 3.0, 3.5],
+                "pearson_statistic": 0.98,
                 "pearson_pvalue": 0.01,
+                "spearman_statistic": 0.95,
                 "spearman_pvalue": 0.02,
             },
         }

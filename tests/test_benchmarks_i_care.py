@@ -914,6 +914,116 @@ class TestMSAOneSimilarityLabels:
 
 
 # ---------------------------------------------------------------------------
+# MSAOne plot — colour encodes interference only; most/least-similar are named in grey.
+# A larger 7-receiver fixture is used so that the most/least-similar sets are
+# distinct from the most/least-interfered sets (the small 4-receiver fixture
+# above cannot separate them when display_name_top_n=2).
+#
+# Ada row (emitter Ada, 7 receivers Bob..Hugo), interference_pair=clip_diff
+# (direction '↑' -> worst = SMALLEST), similarity = dino (higher = more similar):
+#
+#   receiver  interference(x)  similarity(y)  expected label colour
+#   Bob       0.0              0.30           crimson   (most-interfered)
+#   Cleo      0.1              0.20           crimson   (most-interfered; also
+#                                                        least-similar -> interference wins)
+#   Dora      0.5              0.95           grey      (most-similar only)
+#   Evan      0.6              0.90           grey      (most-similar only)
+#   Finn      0.7              0.10           grey      (least-similar only)
+#   Gwen      0.9              0.40           seagreen  (least-interfered)
+#   Hugo      1.0              0.50           seagreen  (least-interfered)
+# ---------------------------------------------------------------------------
+
+_MSAONE7_LABELS = ["Ada", "Bob", "Cleo", "Dora", "Evan", "Finn", "Gwen", "Hugo"]
+_FILLER7 = {a: {b: 0.0 for b in _MSAONE7_LABELS} for a in _MSAONE7_LABELS}
+_INTERF7 = {**_FILLER7, "Ada": {
+    "Ada": 0.0, "Bob": 0.0, "Cleo": 0.1, "Dora": 0.5,
+    "Evan": 0.6, "Finn": 0.7, "Gwen": 0.9, "Hugo": 1.0,
+}}
+_SIM7 = {**_FILLER7, "Ada": {
+    "Ada": 1.0, "Bob": 0.3, "Cleo": 0.2, "Dora": 0.95,
+    "Evan": 0.9, "Finn": 0.1, "Gwen": 0.4, "Hugo": 0.5,
+}}
+
+
+def _patch_msaone7(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        _rt_mod, "get_metadata_filtered",
+        lambda task, **kw: [{"name": e} for e in _MSAONE7_LABELS],
+    )
+    monkeypatch.setattr(
+        _rt_mod.ResultTemplateInterferenceMatrix, "compute",
+        lambda self: {"result": _records_from_matrix(_MSAONE7_LABELS, _INTERF7)},
+    )
+    monkeypatch.setattr(
+        _rt_mod.ResultTemplateSimilarityMatrix, "compute",
+        lambda self: {"result": _records_from_matrix(_MSAONE7_LABELS, _SIM7)},
+    )
+
+
+class TestMSAOnePlotColouring:
+    """The plot must encode interference by colour and name the similar entities in grey."""
+
+    @staticmethod
+    def _plot(monkeypatch: pytest.MonkeyPatch) -> Any:
+        _patch_msaone7(monkeypatch)
+        rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
+            unlearning_algorithm="uce", interference_pair="clip_diff",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        out = rt.plot(data, return_fig=True)
+        assert out is not None
+        return out
+
+    def test_label_colour_by_position(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Every annotation must carry the colour dictated by the interference groups, with the
+        most/least-similar (but not interfered) receivers named in grey. The annotation xy
+        equals the receiver's (interference, similarity) pair, so we map position -> colour.
+        """
+        fig, ax = self._plot(monkeypatch)
+        expected = {
+            (0.0, 0.30): "crimson",   # Bob  — most-interfered
+            (0.1, 0.20): "crimson",   # Cleo — most-interfered (priority over least-similar)
+            (0.5, 0.95): "grey",      # Dora — most-similar only
+            (0.6, 0.90): "grey",      # Evan — most-similar only
+            (0.7, 0.10): "grey",      # Finn — least-similar only
+            (0.9, 0.40): "seagreen",  # Gwen — least-interfered
+            (1.0, 0.50): "seagreen",  # Hugo — least-interfered
+        }
+        got = {
+            (round(float(t.xy[0]), 3), round(float(t.xy[1]), 3)): t.get_color()
+            for t in ax.texts
+        }
+        assert got == expected
+        plt.close(fig)
+
+    def test_colour_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Two crimson, two seagreen, three grey labels — and no other label colours."""
+        fig, ax = self._plot(monkeypatch)
+        counts: Dict[str, int] = {}
+        for t in ax.texts:
+            counts[t.get_color()] = counts.get(t.get_color(), 0) + 1
+        assert counts == {"crimson": 2, "seagreen": 2, "grey": 3}
+        plt.close(fig)
+
+    def test_legend_has_no_coloured_similarity_groups(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Legend must list only the two interference groups plus a single grey
+        'named only' entry — never the old coloured 'most-similar'/'least-similar' groups.
+        """
+        fig, ax = self._plot(monkeypatch)
+        labels = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert labels == [
+            "2 most-interfered",
+            "2 least-interfered",
+            "2 most-/least-similar (named only)",
+        ]
+        plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # ResultTemplateSimilarityVisualSummary — registry + compute + plot
 # ---------------------------------------------------------------------------
 

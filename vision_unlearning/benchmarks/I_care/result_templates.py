@@ -694,21 +694,26 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
         sns.scatterplot(x=x, y=y, ax=ax, alpha=0.35, color='grey')
         sns.regplot(x=x, y=y, scatter=False, ax=ax, color='steelblue', line_kws={'linewidth': 1.5})
 
-        # Four labelled groups. Priority for colour (first match wins when an entity appears
-        # in multiple groups): most-interfered > least-interfered > most-similar > least-similar.
+        # Colour encodes interference only. The 5 most- and 5 least-interfered receivers get
+        # distinct coloured dots and coloured name labels (priority: most-interfered wins when an
+        # entity is in both groups). The most- and least-similar receivers are NOT given a special
+        # colour — they keep the same grey as the rest of the cloud and are only annotated with
+        # their name (in grey). This keeps colour-overload down: too many colours were confusing.
         n_top = len(labeled_most)
-        _group_defs: List[Tuple[List[str], str, str]] = [
-            (labeled_most,          'crimson',      f"{n_top} most-interfered"),
-            (labeled_least,         'seagreen',     f"{n_top} least-interfered"),
-            (labeled_most_similar,  'darkorange',   f"{n_top} most-similar"),
-            (labeled_least_similar, 'mediumpurple', f"{n_top} least-similar"),
+        _interf_group_defs: List[Tuple[List[str], str, str]] = [
+            (labeled_most, 'crimson', f"{n_top} most-interfered"),
+            (labeled_least, 'seagreen', f"{n_top} least-interfered"),
         ]
         name_to_xy = {n: (x[i], y[i]) for i, n in enumerate(names)}
+
+        # Assign interference colours first (priority: most-interfered > least-interfered).
         entity_color: Dict[str, str] = {}
-        for group, colour, _ in _group_defs:
+        for group, colour, _ in _interf_group_defs:
             for ent in group:
                 if ent not in entity_color:
                     entity_color[ent] = colour
+
+        # Draw coloured interference points + coloured name labels.
         for ent, colour in entity_color.items():
             xi, yi = name_to_xy[ent]
             ax.scatter([xi], [yi], color=colour, s=28, zorder=5, edgecolor='black', linewidth=0.4)
@@ -726,12 +731,35 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
                 alpha=0.9,
             )
 
+        # Annotate the most-/least-similar receivers with their name only, in grey, keeping the
+        # underlying grey cloud point (no special colour). Skip any that are already coloured by
+        # the interference groups above (their coloured label takes precedence).
+        for ent in [*labeled_most_similar, *labeled_least_similar]:
+            if ent in entity_color:
+                continue
+            xi, yi = name_to_xy[ent]
+            label_text = _short_entity_display(
+                get_target_overwrite(meta['task'], meta['unlearning_algorithm'], ent)[0],
+                max_chars=20,
+            )
+            ax.annotate(
+                label_text,
+                xy=(xi, yi),
+                xytext=(3, 4),
+                textcoords='offset points',
+                fontsize=6,
+                color='grey',
+                alpha=0.9,
+            )
+
         ax.set_xlabel(f"Interference $m_p$: {meta['interference_pair'].replace('_', ' ').title()} ({meta['interference_pair_direction']})", fontsize=8)
         ax.set_ylabel(f"Similarity $s$: {meta['similarity_metric'].replace('_', ' ').title()} ({meta['similarity_metric_direction']})", fontsize=8)
 
-        # Legend for all four groups
-        for _, colour, label in _group_defs:
+        # Legend: two coloured interference groups + a grey marker explaining the named-but-grey
+        # most-/least-similar receivers.
+        for _, colour, label in _interf_group_defs:
             ax.scatter([], [], color=colour, s=28, edgecolor='black', linewidth=0.4, label=label)
+        ax.scatter([], [], color='grey', s=28, alpha=0.6, label=f"{n_top} most-/least-similar (named only)")
         ax.legend(fontsize=7, loc='best')
 
         emitter_pretty = get_target_overwrite(meta['task'], meta['unlearning_algorithm'], meta['entity'])[0]
