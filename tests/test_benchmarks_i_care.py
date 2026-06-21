@@ -1047,7 +1047,8 @@ class TestInterferenceBySimilarityRankCompute:
     def _rt(self) -> Any:
         return _rt_mod.ResultTemplateInterferenceBySimilarityRank(
             unlearning_algorithm="uce", interference_pair="clip_diff",
-            similarity_metric="dino", entity="Ada", save_outputs=False,
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
         )
 
     def test_one_point_per_receiver(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1067,6 +1068,13 @@ class TestInterferenceBySimilarityRankCompute:
         # interference is reported in the same (similarity-ranked) order
         assert r["interference"] == [0.4, 0.1, 0.3, 0.2]
 
+    def test_most_least_interfered_labels(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """clip_diff direction '↑' -> worst = smallest. Ada interference: Bob=0.1, Dora=0.2, Evan=0.3, Cleo=0.4."""
+        _patch_msaone_matrices(monkeypatch)
+        r = self._rt()._compute_from_scratch()["result"]
+        assert r["labeled_most"] == ["Bob", "Dora"]
+        assert r["labeled_least"] == ["Cleo", "Evan"]
+
     def test_spearman_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_msaone_matrices(monkeypatch)
         r = self._rt()._compute_from_scratch()["result"]
@@ -1079,7 +1087,8 @@ class TestInterferenceBySimilarityRankPlot:
         _patch_msaone_matrices(monkeypatch)
         rt = _rt_mod.ResultTemplateInterferenceBySimilarityRank(
             unlearning_algorithm="uce", interference_pair="clip_diff",
-            similarity_metric="dino", entity="Ada", save_outputs=False,
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
         )
         out = rt.plot(rt._compute_from_scratch(), return_fig=True)
         assert out is not None
@@ -1088,6 +1097,35 @@ class TestInterferenceBySimilarityRankPlot:
         # x axis = similarity rank, y axis = interference metric with direction arrow
         assert "Similarity rank" in ax.get_xlabel()
         assert "clip_diff" in ax.get_ylabel()
+        plt.close(fig)
+
+    def test_legend_names_most_and_least_interfered(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Legend must name the most- and least-interfered receivers (2 + 2 with top_n=2)."""
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateInterferenceBySimilarityRank(
+            unlearning_algorithm="uce", interference_pair="clip_diff",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        fig, ax = rt.plot(rt._compute_from_scratch(), return_fig=True)
+        legend = ax.get_legend()
+        labels = {t.get_text() for t in legend.get_texts()}
+        # most-interfered Bob, Dora ; least-interfered Cleo, Evan (names passed through _short_entity_display)
+        assert {"Bob", "Dora", "Cleo", "Evan"} <= labels
+        plt.close(fig)
+
+    def test_title_uses_display_method_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Internal method name 'distil' must be shown as its display name 'FADE'."""
+        _patch_msaone_matrices(monkeypatch)
+        rt = _rt_mod.ResultTemplateInterferenceBySimilarityRank(
+            unlearning_algorithm="distil", interference_pair="clip_diff",
+            similarity_metric="dino", entity="Ada", display_name_top_n=2,
+            save_outputs=False,
+        )
+        fig, ax = rt.plot(rt._compute_from_scratch(), return_fig=True)
+        title = ax.get_title()
+        assert "FADE" in title
+        assert "distil" not in title
         plt.close(fig)
 
 
@@ -1207,6 +1245,13 @@ class TestMostSimilarMostInterferedGridPlot:
         assert isinstance(fig, Figure)
         assert ax.get_xlabel() == "Task"
         assert ax.get_ylabel() == "Unlearning method"
+        # y-tick labels use display method names (uce -> UCE, distil -> FADE)
+        ytick_labels = [t.get_text() for t in ax.get_yticklabels()]
+        assert ytick_labels == ["UCE", "FADE"]
+        # sober title: no combinatorics / denominator explanation
+        title = ax.get_title()
+        assert "nominal maximum" not in title
+        assert "Cell =" not in title
         plt.close(fig)
 
 

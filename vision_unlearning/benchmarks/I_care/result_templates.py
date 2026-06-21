@@ -112,6 +112,17 @@ def _short_entity_display(raw_name: str, max_chars: int = 24) -> str:
     return name
 
 
+# Backend (software) unlearning-algorithm name -> display name used in plots. The mapping is the
+# inverse of GUI_TO_BACKEND['unlearning_algorithm'] (the same software<->display mapping forgety uses,
+# e.g. distil -> FADE). All plots must show the display name, never the internal software name.
+_UNLEARNING_ALGORITHM_DISPLAY = {v: k for k, v in GUI_TO_BACKEND['unlearning_algorithm'].items()}
+
+
+def _display_unlearning_algorithm(method: str) -> str:
+    """Map an internal unlearning-algorithm name (e.g. 'distil') to its plot display name (e.g. 'FADE')."""
+    return _UNLEARNING_ALGORITHM_DISPLAY.get(method, method)
+
+
 class ResultTemplate(BaseModel):
     recompute_if_exists: bool = False
     save_outputs: bool = True
@@ -896,6 +907,7 @@ class ResultTemplateInterferenceBySimilarityRank(ResultTemplate):
     similarity_metric: type_s
     entity: Optional[str] = None  # Either entity or entity_index; entity has priority. Same logic as MSAOne.
     entity_index: Optional[int] = None
+    display_name_top_n: int = 5
 
     def _resolve_entity(self) -> None:
         '''
@@ -932,26 +944,42 @@ class ResultTemplateInterferenceBySimilarityRank(ResultTemplate):
         meta = data['metadata']
         ranks = result['rank']
         y = result['interference']
+        names = result['receiver_names']
+        labeled_most = result['labeled_most']
+        labeled_least = result['labeled_least']
+        name_to_pos = {n: i for i, n in enumerate(names)}
 
         fig, ax = plt.subplots(figsize=figsize)
 
         # One point per receiver; a faint connecting line (over the rank-ordered points) only guides
         # the eye — it is NOT a smoothing/averaging of anything.
         ax.plot(ranks, y, color='grey', linewidth=0.6, alpha=0.4, zorder=1)
-        ax.scatter(ranks, y, color='#4c72b0', s=14, alpha=0.7, zorder=2)
-        # Highlight the most-similar receiver (rank 1).
-        ax.scatter([ranks[0]], [y[0]], color='crimson', s=45, edgecolor='black', linewidth=0.4, zorder=5)
+        ax.scatter(ranks, y, color='lightgrey', s=14, zorder=2)
+
+        # Highlight the most- and least-interfered receivers and name them in the legend.
+        for group, colour in ((labeled_most, 'crimson'), (labeled_least, 'seagreen')):
+            for ent in group:
+                pos = name_to_pos[ent]
+                label = _short_entity_display(
+                    get_target_overwrite(meta['task'], meta['unlearning_algorithm'], ent)[0],
+                    max_chars=24,
+                )
+                ax.scatter([ranks[pos]], [y[pos]], color=colour, s=40, edgecolor='black',
+                           linewidth=0.4, zorder=5, label=label)
 
         ax.set_xlabel(f"Similarity rank ({meta['similarity_metric']})", fontsize=9)
         ax.set_ylabel(f"{meta['interference_pair']} ({meta['interference_pair_direction']})", fontsize=9)
 
+        n_top = len(labeled_most)
         emitter_pretty = get_target_overwrite(meta['task'], meta['unlearning_algorithm'], meta['entity'])[0]
+        method_pretty = _display_unlearning_algorithm(meta['unlearning_algorithm'])
         ax.set_title(
-            f"Emitter: {emitter_pretty}  |  Task: {meta['task'].title()}  Method: {meta['unlearning_algorithm'].title()}\n"
+            f"Emitter: {emitter_pretty}  |  Task: {meta['task'].title()}  Method: {method_pretty}\n"
             f"Interference: {meta['interference_pair']}  Similarity: {meta['similarity_metric']}  |  "
             f"Spearman correlation: {result['spearman_statistic']:.3f} (p-value: {result['spearman_pvalue']:.3f})",
             fontsize=9,
         )
+        ax.legend(loc='lower right', fontsize=6, title=f"{n_top} most-interfered (red) / {n_top} least-interfered (green)", title_fontsize=6)
 
         plt.tight_layout(pad=0.5)
         if return_fig:
@@ -1006,6 +1034,13 @@ class ResultTemplateInterferenceBySimilarityRank(ResultTemplate):
         interference = [interf for _, interf, _ in ranked_by_sim]
         similarity = [sim for _, _, sim in ranked_by_sim]
 
+        # Most- and least-interfered receivers, using the metric direction (same logic as MSAOne / IVS).
+        is_worst_biggest = mp_to_direction[self.interference_pair] != '↑'
+        ranked_worst_first = sorted(records, key=lambda t: t[1], reverse=is_worst_biggest)
+        n = self.display_name_top_n
+        labeled_most = [r for r, _, _ in ranked_worst_first[:n]]
+        labeled_least = [r for r, _, _ in ranked_worst_first[-n:]][::-1]
+
         # Cold descriptive statistic for the title: Spearman of similarity vs interference (rank is a
         # monotone function of similarity, so this equals Spearman(rank, interference) up to sign).
         spearman_res = spearmanr(similarity, interference)
@@ -1022,12 +1057,15 @@ class ResultTemplateInterferenceBySimilarityRank(ResultTemplate):
                 'similarity_metric_direction': s_to_direction[self.similarity_metric],
                 'entity': self.entity,
                 'entity_index': self.entity_index,
+                'display_name_top_n': self.display_name_top_n,
             },
             'result': {
                 'rank': rank,
                 'receiver_names': receiver_names,
                 'interference': interference,
                 'similarity': similarity,
+                'labeled_most': labeled_most,
+                'labeled_least': labeled_least,
                 'spearman_statistic': spearman_res.statistic,
                 'spearman_pvalue': spearman_res.pvalue,
             },
@@ -1081,14 +1119,15 @@ class ResultTemplateMostSimilarMostInterferedGrid(ResultTemplate):
         counts = np.array(result['counts'], dtype=float)
         denominators = np.array(result['denominators'], dtype=float)
         top_k = meta['top_k']
-        max_per_cell = result['max_per_cell']
+        # result['max_per_cell'] is intentionally NOT used in the title: the per-cell denominator is
+        # shown inside each cell and the combinatorics belong in the caption, not the figure title.
 
         fig, ax = plt.subplots(figsize=figsize)
         image = ax.imshow(counts, cmap='viridis', aspect='auto')
         ax.set_xticks(range(len(tasks)))
         ax.set_xticklabels([t.title() for t in tasks])
         ax.set_yticks(range(len(methods)))
-        ax.set_yticklabels([m.title() for m in methods])
+        ax.set_yticklabels([_display_unlearning_algorithm(m) for m in methods])
         ax.set_xlabel("Task", fontsize=9)
         ax.set_ylabel("Unlearning method", fontsize=9)
 
@@ -1104,11 +1143,7 @@ class ResultTemplateMostSimilarMostInterferedGrid(ResultTemplate):
 
         fig.colorbar(image, ax=ax, label='Count')
         ax.set_title(
-            f"Single most-similar receiver is among the top-{top_k} most-interfered\n"
-            f"Cell = count over emitters × {len(meta['interference_pairs'])} interference metrics "
-            f"× {len(meta['similarity_metrics'])} similarity metrics "
-            f"(nominal maximum {max_per_cell}; per-cell denominator shown below each count)",
-            fontsize=9,
+            f"Single most-similar receiver among the top-{top_k} most-interfered", fontsize=10,
         )
         plt.tight_layout(pad=0.5)
         if return_fig:
