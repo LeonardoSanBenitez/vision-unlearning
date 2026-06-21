@@ -1248,10 +1248,16 @@ class TestMostSimilarMostInterferedGridPlot:
         # y-tick labels use display method names (uce -> UCE, distil -> FADE)
         ytick_labels = [t.get_text() for t in ax.get_yticklabels()]
         assert ytick_labels == ["UCE", "FADE"]
-        # sober title: no combinatorics / denominator explanation
+        # dense parameter-listing title: RT name first line, then comma-separated params (no braces,
+        # no max-per-cell, no discursive explanation)
         title = ax.get_title()
+        assert title.startswith("Result Template: MostSimilarInterferedMatrix\n")
+        assert "top_k=1" in title
+        assert "interference_pairs=clip_diff" in title
+        assert "similarity_metrics=dino" in title
+        assert "{" not in title and "}" not in title
+        assert "max per cell" not in title
         assert "nominal maximum" not in title
-        assert "Cell =" not in title
         plt.close(fig)
 
 

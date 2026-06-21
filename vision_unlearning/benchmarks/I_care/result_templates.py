@@ -1119,8 +1119,6 @@ class ResultTemplateMostSimilarMostInterferedGrid(ResultTemplate):
         counts = np.array(result['counts'], dtype=float)
         denominators = np.array(result['denominators'], dtype=float)
         top_k = meta['top_k']
-        # result['max_per_cell'] is intentionally NOT used in the title: the per-cell denominator is
-        # shown inside each cell and the combinatorics belong in the caption, not the figure title.
 
         fig, ax = plt.subplots(figsize=figsize)
         image = ax.imshow(counts, cmap='viridis', aspect='auto')
@@ -1142,8 +1140,14 @@ class ResultTemplateMostSimilarMostInterferedGrid(ResultTemplate):
                         color=colour, fontsize=10)
 
         fig.colorbar(image, ax=ax, label='Count')
+        # Dense parameter-listing title: RT name on the first line, then the swept parameters
+        # comma-separated (no braces, no max-per-cell — the per-cell denominator is shown in the cells).
+        mps = ','.join(meta['interference_pairs'])
+        sims = ','.join(meta['similarity_metrics'])
         ax.set_title(
-            f"Single most-similar receiver among the top-{top_k} most-interfered", fontsize=10,
+            f"Result Template: MostSimilarInterferedMatrix\n"
+            f"top_k={top_k}, interference_pairs={mps}, similarity_metrics={sims}",
+            fontsize=8,
         )
         plt.tight_layout(pad=0.5)
         if return_fig:
