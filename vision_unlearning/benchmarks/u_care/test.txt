@@ -1,0 +1,78 @@
+Used parameters
+"mixed_precision": "fp16", # specified by model trained on styles for unlearn canvas
+"learning_rate": 1e-4,
+"max_grad_norm": 1.0,
+"validation_epochs": 1,
+"lr_scheduler_type": "cosine",
+"lora_r": 4,
+"lora_alpha": 4,
+"lora_dropout": 0.1,
+
+
+Best parameters for other dataset
+
+"dataloader_num_workers": 2,
+"resolution": 512,
+"num_validation_images": 1,
+
+"mixed_precision": "no",
+"learning_rate": 6e-4,
+"max_grad_norm": 5.0,
+
+"num_train_epochs": num_train_epochs,
+"validation_epochs": num_train_epochs+1, # No intermediate validation
+"checkpointing_steps": 10000,
+"lr_scheduler": "constant",
+"lr_warmup_steps": 0,
+"save_strategy": "epoch",
+"save_total_limit": 2,
+"random_flip": True,
+
+"lora_r": 16,
+"target_modules": ["to_k", "to_q", "to_v", "to_out.0"],
+"lora_alpha": 4,
+"lora_dropout": 0.2,
+
+
+--pretrained_model_name_or_path="/home/molna/old_diffusers/examples/text_to_image/unlearn_canvas/main_checkpoint" \
+  --train_data_dir="/home/molna/old_diffusers/examples/text_to_image/unlearn_canvas/dataset/metadata_retain_Winter.jsonl" \
+  --forget_data_dir="/home/molna/old_diffusers/examples/text_to_image/unlearn_canvas/dataset/metadata_forget_Winter.jsonl" \
+  --resolution=512 --random_flip \
+  --train_batch_size=4 \
+  --num_train_epochs=2 --checkpointing_steps=300 --max_train_steps=1550
+  --learning_rate=1e-04 --lr_scheduler="constant" --lr_warmup_steps=0 \
+  --seed=42 \
+  --output_dir="/home/molna/old_diffusers/examples/text_to_image/unlearn_canvas/ckpts_bz_to_bluebloom" \
+  --replacer="Blue Blooming" \
+  --forget_concept="Byzantine"
+  
+--pretrained_model_name_or_path "/home/molna/old_diffusers/examples/text_to_image/unlearn_canvas/main_checkpoint" --replacer Cubism --forget_concept Crayon --train_data_dir "/home/molna/old_diffusers/examples/text_to_image/unlearn_canvas/dataset/metadata_retain_Winter.jsonl" --forget_data_dir "/home/molna/old_diffusers/examples/text_to_image/unlearn_canvas/dataset/metadata_retain_Winter.jsonl" --image_column image --caption_column text --num_validation_images 1 --output_dir  --seed 42 --resolution 512 --random_flip --train_batch_size 16 --num_train_epochs 1 --max_train_steps 1550 --gradient_accumulation_steps 1 --learning_rate 6e-4 --lr_scheduler "constant" --lr_warmup_steps 0 --dataloader_num_workers 2 --max_grad_norm 5.0 --mixed_precision "no" --checkpointing_steps 1000 --checkpoints_total_limit 2 --rank 16 --lora_alpha 4 --lora_dropout 0.2
+
+
+
+Generating.......
+
+Dapple
+Pop_Art
+Defoliation
+Cubism
+Dadaism
+
+Red_Blue_Ink
+Rust
+Sketch
+
+Picasso
+Pencil_Drawing
+Pastel
+On_Fire
+Neon_Lines
+Mosaic
+Monet
+Meteor_Shower
+Meta_Physics
+
+To regenerate.....
+all after Sketch
+all before Dapple
+all classes ?
