@@ -4,6 +4,11 @@ FORGET_CONCEPT ?= Crayon
 REPLACE_CONCEPT ?= Cubism
 
 
+# OUTPUT_MODELS_DIR="assets/models_debug/Bricks" FORGET_CONCEPT="Bricks" REPLACE_CONCEPT="Byzantine"
+# OUTPUT_MODELS_DIR="assets/models_debug/Ink_Art" FORGET_CONCEPT="Ink_Art" REPLACE_CONCEPT="Joy"
+# OUTPUT_MODELS_DIR="assets/models_debug/Blossom_Season" FORGET_CONCEPT="Blossom_Season" REPLACE_CONCEPT="Bricks" 
+
+
 myloradist_real.py \
 						--pretrained_model_name_or_path "/home/${SSH_USER_CLUSTER}/$(GIT_REPOSITORY_NAME)/UnlearnCanvaEval/assets/data/sd" \
 						--replacer $(REPLACE_CONCEPT) \
@@ -50,6 +55,15 @@ PIPELINE_PATH ?= assets/data/sd
 OUTPUT_ACCURACY ?= assets/accuracy_results
 TASK ?= class
 CKPT_CLASSIFIER ?= assets/data/ckpts/style50_cls.pth
+
+
+
+# CKPTS_BASE_PATH="assets/models_debug" OUTPUT_GEN_IMGS="assets/gen_img_samples_debug" FORGET_CONCEPT="Crayon Cubism"
+# OUTPUT_GEN_IMGS="assets/gen_img_samples_debug" OUTPUT_ACCURACY="assets/acc_debug" TASK="class" CKPT_CLASSIFIER="assets/data/ckpts/style50_cls.pth" FORGET_CONCEPT="Crayon"
+
+
+
+
 sample_images.py \
 						--seed 188 288 588 688 888 \
 						--forget_concept $(FORGET_CONCEPT)
