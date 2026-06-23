@@ -93,7 +93,7 @@ class TestConvertParamsFromGuiToBackend:
     def test_known_mappings(self) -> None:
         out = vb.convert_params_from_gui_to_backend(
             {
-                "unlearning_algorithm": "FADE",
+                "unlearning_algorithm": "SPARE",
                 "task": "People",
                 "model": "Stable Diffusion 1.4",
                 "interference_pair": "RMSE",

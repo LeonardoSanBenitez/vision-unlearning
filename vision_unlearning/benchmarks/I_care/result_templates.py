@@ -114,12 +114,12 @@ def _short_entity_display(raw_name: str, max_chars: int = 24) -> str:
 
 # Backend (software) unlearning-algorithm name -> display name used in plots. The mapping is the
 # inverse of GUI_TO_BACKEND['unlearning_algorithm'] (the same software<->display mapping forgety uses,
-# e.g. distil -> FADE). All plots must show the display name, never the internal software name.
+# e.g. distil -> SPARE). All plots must show the display name, never the internal software name.
 _UNLEARNING_ALGORITHM_DISPLAY = {v: k for k, v in GUI_TO_BACKEND['unlearning_algorithm'].items()}
 
 
 def _display_unlearning_algorithm(method: str) -> str:
-    """Map an internal unlearning-algorithm name (e.g. 'distil') to its plot display name (e.g. 'FADE')."""
+    """Map an internal unlearning-algorithm name (e.g. 'distil') to its plot display name (e.g. 'SPARE')."""
     return _UNLEARNING_ALGORITHM_DISPLAY.get(method, method)
 
 

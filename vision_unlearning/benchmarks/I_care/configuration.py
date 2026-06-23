@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 # Petty formatted values
-domain_unlearning_algorithm = ["FADE", "Munba", "UCE"]
+domain_unlearning_algorithm = ["SPARE", "Munba", "UCE"]
 domain_task = ["Breeds", "Scenes", "People"]
 domain_attribute = {
     "Breeds": [
@@ -684,7 +684,7 @@ type_regression_algorithm = Literal[
 # And converting between them
 GUI_TO_BACKEND = {
     "unlearning_algorithm": {
-        "FADE": "distil",
+        "SPARE": "distil",
         "Munba": "munba",
         "UCE": "uce",
     },
