@@ -1434,3 +1434,235 @@ class TestSimilarityVisualSummaryPlot:
         assert out is not None
         fig, ax = out
         assert isinstance(fig, Figure)
+
+
+# ---------------------------------------------------------------------------
+# CountSignificantRelationship (CSR)
+# ---------------------------------------------------------------------------
+
+def _make_sr_result(significant: bool) -> dict:
+    """Minimal SRC/SRN compute() result for mocking."""
+    return {
+        "metadata": {
+            "RT": "ResultTemplateSignificantRelationshipCategorical",
+            "model": "sd1.4",
+            "task": "people",
+            "unlearning_algorithm": "distil",
+            "interference_entity": "Emitter average clip diff",
+            "attribute": "hpi_bin",
+            "interference_entity_direction": "↑",
+            "chosen_metric_col": "metric_distil_400_emitter_average_clip_diff (↑)",
+            "significance_threshold": 0.05,
+        },
+        "result": {
+            "x": ["low", "high"] * 5,
+            "y": [0.1, 0.2] * 5,
+            "anova_statistic": 3.5,
+            "anova_pvalue": 0.02 if significant else 0.5,
+            "kruskal_statistic": 2.5,
+            "kruskal_pvalue": 0.03 if significant else 0.6,
+            "significant": significant,
+        },
+    }
+
+
+class TestCountSignificantRelationshipRegistry:
+    def test_in_rt_name_to_class(self) -> None:
+        assert "CountSignificantRelationship" in vb.rt_name_to_class
+
+    def test_class_is_correct(self) -> None:
+        assert (
+            vb.rt_name_to_class["CountSignificantRelationship"]
+            is _rt_mod.ResultTemplateCountSignificantRelationship
+        )
+
+    def test_registry_consistent(self) -> None:
+        assert set(vb.rt_name_to_class) == set(vb.rt_name_to_params)
+
+
+class TestCountSignificantRelationshipCompute:
+    def _setup_mocks(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        significant_map: Dict[str, bool],
+    ) -> None:
+        """Mock SRC.compute() to return significant=True/False per interference_entity."""
+        def _fake_compute(self_inner: Any) -> dict:
+            sig = significant_map.get(self_inner.interference_entity, False)
+            return _make_sr_result(sig)
+
+        monkeypatch.setattr(
+            _rt_mod.ResultTemplateSignificantRelationshipCategorical,
+            "compute",
+            _fake_compute,
+        )
+        monkeypatch.setattr(
+            vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+
+    def test_grouped_dicts_populated(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """_compute_from_scratch populates all three grouped_by_* dicts."""
+        self._setup_mocks(
+            monkeypatch,
+            {"Emitter average clip diff": True, "Emitter average rmse": False},
+        )
+
+        rt = _rt_mod.ResultTemplateCountSignificantRelationship(
+            task="people",
+            unlearning_algorithm_list=["distil"],
+            interference_entity_list=["Emitter average clip diff", "Emitter average rmse"],
+            attribute_list=["hpi_bin"],
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+        r = data["result"]
+
+        assert "grouped_by_unlearning_algorithm" in r
+        assert "grouped_by_attribute" in r
+        assert "grouped_by_interference_entity" in r
+
+        by_algo = r["grouped_by_unlearning_algorithm"]
+        assert "distil" in by_algo
+        assert by_algo["distil"]["total"] == 2  # 1 algo × 2 me × 1 attr
+        assert by_algo["distil"]["count"] == 1  # only clip_diff is sig
+
+    def test_fraction_correct(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """fraction = count / total for each group key."""
+        self._setup_mocks(
+            monkeypatch,
+            {"Emitter average clip diff": True, "Emitter average rmse": True},
+        )
+
+        rt = _rt_mod.ResultTemplateCountSignificantRelationship(
+            task="people",
+            unlearning_algorithm_list=["distil"],
+            interference_entity_list=["Emitter average clip diff", "Emitter average rmse"],
+            attribute_list=["hpi_bin"],
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+        r = data["result"]
+
+        by_algo = r["grouped_by_unlearning_algorithm"]
+        assert by_algo["distil"]["count"] == 2
+        assert by_algo["distil"]["total"] == 2
+        assert by_algo["distil"]["fraction"] == pytest.approx(1.0)
+
+    def test_rows_field_present(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """result['rows'] contains one record per successful (algo, me, attr) triple."""
+        self._setup_mocks(monkeypatch, {"Emitter average clip diff": False})
+
+        rt = _rt_mod.ResultTemplateCountSignificantRelationship(
+            task="people",
+            unlearning_algorithm_list=["distil", "uce"],
+            interference_entity_list=["Emitter average clip diff"],
+            attribute_list=["hpi_bin"],
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+        rows = data["result"]["rows"]
+        assert len(rows) == 2  # 2 algos × 1 me × 1 attr
+
+    def test_exception_in_src_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Combinations that raise InsufficientSamplesError are silently skipped."""
+        def _raise(_self: Any) -> dict:
+            raise vb.InsufficientSamplesError("not enough")
+
+        monkeypatch.setattr(
+            _rt_mod.ResultTemplateSignificantRelationshipCategorical, "compute", _raise
+        )
+        monkeypatch.setattr(
+            _rt_mod.ResultTemplateSignificantRelationshipNumerical, "compute", _raise
+        )
+        monkeypatch.setattr(
+            vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+
+        rt = _rt_mod.ResultTemplateCountSignificantRelationship(
+            task="people",
+            unlearning_algorithm_list=["distil"],
+            interference_entity_list=["Emitter average clip diff"],
+            attribute_list=["hpi_bin"],
+            save_outputs=False,
+            base_folder=str(tmp_path),
+        )
+        data = rt._compute_from_scratch()
+        assert data["result"]["total"] == 0
+        assert data["result"]["total_count"] == 0
+        assert data["result"]["grouped_by_unlearning_algorithm"] == {}
+
+
+class TestCountSignificantRelationshipPlot:
+    def _make_data(self) -> dict:
+        return {
+            "metadata": {
+                "RT": "ResultTemplateCountSignificantRelationship",
+                "model": "sd1.4",
+                "task": "people",
+                "unlearning_algorithm_list": ["distil", "uce", "munba"],
+                "interference_entity_list": ["Emitter average clip diff"],
+                "attribute_list": ["hpi_bin"],
+            },
+            "result": {
+                "rows": [],
+                "total_count": 3,
+                "total": 6,
+                "grouped_by_unlearning_algorithm": {
+                    "distil": {"count": 1, "total": 2, "fraction": 0.5},
+                    "uce": {"count": 2, "total": 2, "fraction": 1.0},
+                    "munba": {"count": 0, "total": 2, "fraction": 0.0},
+                },
+                "grouped_by_attribute": {
+                    "hpi_bin": {"count": 3, "total": 6, "fraction": 0.5},
+                },
+                "grouped_by_interference_entity": {
+                    "Emitter average clip diff": {"count": 3, "total": 6, "fraction": 0.5},
+                },
+            },
+        }
+
+    def test_plot_by_algorithm_returns_fig(self) -> None:
+        data = self._make_data()
+        out = _rt_mod.ResultTemplateCountSignificantRelationship.plot(
+            data, group_by="unlearning_algorithm", return_fig=True
+        )
+        assert out is not None
+        fig, ax = out
+        assert isinstance(fig, Figure)
+
+    def test_plot_by_attribute_returns_fig(self) -> None:
+        data = self._make_data()
+        out = _rt_mod.ResultTemplateCountSignificantRelationship.plot(
+            data, group_by="attribute", return_fig=True
+        )
+        assert out is not None
+        fig, ax = out
+        assert isinstance(fig, Figure)
+
+    def test_plot_by_interference_entity_returns_fig(self) -> None:
+        data = self._make_data()
+        out = _rt_mod.ResultTemplateCountSignificantRelationship.plot(
+            data, group_by="interference_entity", return_fig=True
+        )
+        assert out is not None
+        fig, ax = out
+        assert isinstance(fig, Figure)
+
+    def test_plot_empty_grouped_returns_none(self) -> None:
+        data = self._make_data()
+        data["result"]["grouped_by_unlearning_algorithm"] = {}
+        out = _rt_mod.ResultTemplateCountSignificantRelationship.plot(
+            data, group_by="unlearning_algorithm", return_fig=True
+        )
+        assert out is None

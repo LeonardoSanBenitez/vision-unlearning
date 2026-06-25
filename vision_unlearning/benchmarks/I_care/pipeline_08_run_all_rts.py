@@ -1,9 +1,10 @@
 """Run all parameter combinations for selected Result Templates (RTs).
 
-Usage:
-    python 5c_run_rts.py --rts all
-    python 5c_run_rts.py --rts SignificantRelationship CountSignificantRelationship
-    python 5c_run_rts.py --rts InterferenceMatrix --tasks people --methods distil
+Usage
+-----
+    python pipeline_08_run_all_rts.py --rts all
+    python pipeline_08_run_all_rts.py --rts SignificantRelationship CountSignificantRelationship
+    python pipeline_08_run_all_rts.py --rts InterferenceMatrix --tasks people --methods distil
 
 RT names accepted (short form, case-insensitive):
     MetricMetricAlignment
@@ -20,22 +21,21 @@ RT names accepted (short form, case-insensitive):
     EmbeddingUnlearningProfile      (per task-method-entity; requires DINOv2 embedding files)
     EmbeddingForgettingEfficiency   (per task-method; requires interference_per_entity)
 
-The script reads the RT class definitions from
-vision_unlearning.benchmarks.I_care (sibling vision-unlearning repo).
-No new HF download abstraction is created here; the existing RT.compute()
-calls already download inputs from HF when they are not present locally.
+By default (``--upload-if-recomputed``) each newly computed RT result is uploaded to
+HuggingFace immediately after computation.  Set ``HF_TOKEN`` in the environment.
 
-Each RT writes its results to the local assets/ folder (or wherever the
-base_folder for that RT points). Upload to HF is NOT done by this script —
-that is handled separately by the synchronize notebook (0b).
+By default (``--skip-if-on-hf``) the HuggingFace ``results/`` tree is listed once at
+startup and any RT whose result file is already on HF is skipped entirely, avoiding
+thousands of per-file HTTP HEAD requests.
+
+Run from: vision-unlearning/vision_unlearning/benchmarks/I_care/
 """
 from __future__ import annotations
 
 import argparse
 import logging
 import os
-import sys
-from typing import List
+from typing import FrozenSet, List, Optional, cast, get_args
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,36 +43,108 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Ensure vision_unlearning is importable from the sibling repo (not yet installed as package).
-_VU_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vision-unlearning")
-)
-if _VU_PATH not in sys.path:
-    sys.path.insert(0, _VU_PATH)
-
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# HF tree cache — list remote results/ folder once to avoid per-file HEAD
+# ---------------------------------------------------------------------------
+
+def list_hf_result_files(
+    repository: str,
+    token: Optional[str] = None,
+) -> FrozenSet[str]:
+    """Return the set of all file paths inside ``results/`` on HuggingFace.
+
+    Makes a single API call and caches the result.  On failure returns an
+    empty frozenset (the callers will fall through to the per-file HEAD path).
+    """
+    try:
+        from huggingface_hub import list_repo_tree
+        paths = frozenset(
+            item.path  # type: ignore[union-attr]
+            for item in list_repo_tree(repository, repo_type="dataset", token=token)
+            if hasattr(item, "path") and item.path.startswith("results/")
+        )
+        logger.info(
+            "HF results tree: %d files listed in '%s/results/'", len(paths), repository
+        )
+        return paths
+    except Exception as exc:
+        logger.warning(
+            "Could not list HF results tree (%s); will check each file individually.",
+            exc,
+        )
+        return frozenset()
+
+
+def _should_skip(
+    rt: "vb.ResultTemplate",  # type: ignore[name-defined]
+    hf_files: FrozenSet[str],
+    upload_if_recomputed: bool,
+) -> bool:
+    """Return True if the RT result is already present locally or on HF.
+
+    When the result only exists locally and ``upload_if_recomputed`` is True,
+    this function uploads it and returns True (the data is already correct,
+    no need to recompute).
+    """
+    local = rt._get_data_path_local()
+    remote = rt._get_data_path_remote()
+
+    if os.path.exists(local):
+        # Already local.  If upload_if_recomputed and not on HF yet, upload it.
+        if upload_if_recomputed and remote not in hf_files:
+            from vision_unlearning.integrations.huggingface import huggingface_dataset_file_upload
+            hf_token = os.getenv("HF_TOKEN")
+            if hf_token:
+                try:
+                    huggingface_dataset_file_upload(
+                        file_path=local,
+                        dataset_repository=rt.remote_repository_name,
+                        dataset_path=remote,
+                        token=hf_token,
+                    )
+                    logger.info("Uploaded local-only result: %s", remote)
+                except Exception as exc:
+                    logger.warning("Upload of %s failed: %s", remote, exc)
+        return True
+
+    if remote in hf_files:
+        return True  # already on HF; skip compute
+
+    return False
 
 
 # ---------------------------------------------------------------------------
 # RT runner functions — one per RT (or group of RTs)
 # ---------------------------------------------------------------------------
 
-def run_metric_metric_alignment(tasks: List[str], methods: List[str]) -> None:
+def run_metric_metric_alignment(
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
     """MetricMetricAlignment: (model, task, unlearning_algorithm, me1, me2)."""
-    me_list = list(vb.type_me.__args__)
-    for model in list(vb.type_model.__args__):
+    me_list = list(get_args(vb.type_me))
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             for unlearning_algorithm in methods:
                 for i, me1 in enumerate(me_list):
                     for me2 in me_list[i + 1:]:
                         try:
-                            rt = vb.ResultTemplateMetricMetricAlignment(
+                            rt = vb.ResultTemplateMetricMetricAlignment(  # type: ignore[arg-type]
                                 model=model,
-                                task=task,
-                                unlearning_algorithm=unlearning_algorithm,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                                 interference_entity_1=me1,
                                 interference_entity_2=me2,
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
                             )
+                            if _should_skip(rt, hf_files, upload_if_recomputed):
+                                continue
                             rt.compute()
                             print(".", end="", flush=True)
                         except Exception as e:
@@ -84,21 +156,30 @@ def run_metric_metric_alignment(tasks: List[str], methods: List[str]) -> None:
     print("MetricMetricAlignment done.")
 
 
-def run_metric_similarity_alignment(tasks: List[str], methods: List[str]) -> None:
+def run_metric_similarity_alignment(
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
     """MetricSimilarityAlignment: (model, task, unlearning_algorithm, mp, s)."""
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in list(vb.type_mp.__args__):
-                    for similarity_metric in list(vb.type_s.__args__):
+                for interference_pair in list(get_args(vb.type_mp)):
+                    for similarity_metric in list(get_args(vb.type_s)):
                         try:
-                            rt = vb.ResultTemplateMetricSimilarityAlignment(
+                            rt = vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
                                 model=model,
-                                task=task,
-                                unlearning_algorithm=unlearning_algorithm,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                                 interference_pair=interference_pair,
                                 similarity_metric=similarity_metric,
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
                             )
+                            if _should_skip(rt, hf_files, upload_if_recomputed):
+                                continue
                             rt.compute()
                             print(".", end="", flush=True)
                         except Exception as e:
@@ -111,34 +192,43 @@ def run_metric_similarity_alignment(tasks: List[str], methods: List[str]) -> Non
     print("MetricSimilarityAlignment done.")
 
 
-def run_metric_similarity_alignment_multi(tasks: List[str], methods: List[str]) -> None:
+def run_metric_similarity_alignment_multi(
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
     """MetricSimilarityAlignmentMulti: (model, task, unlearning_algorithm, mp, s_list, reg_algo).
 
     Runs with all three similarity metrics combined and both regression algorithms.
     The combined run (clip+dino+jacc) is the primary analysis; the individual-metric
     runs (clip-only, dino-only, jacc-only) serve as within-model baselines.
     """
-    all_metrics = list(vb.type_s.__args__)
+    all_metrics = list(get_args(vb.type_s))
     regression_algorithms = ["linear_regression", "random_forest"]
     similarity_sets = [all_metrics]  # primary: all combined
 
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in list(vb.type_mp.__args__):
+                for interference_pair in list(get_args(vb.type_mp)):
                     for similarity_metric_list in similarity_sets:
                         for regression_algorithm in regression_algorithms:
                             try:
                                 rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
                                     model=model,
-                                    task=task,
-                                    unlearning_algorithm=unlearning_algorithm,
+                                    task=task,  # type: ignore[arg-type]
+                                    unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                                     interference_pair=interference_pair,
                                     similarity_metric_list=similarity_metric_list,
                                     include_emitter_forget_quality=True,
                                     include_baseline_quality=True,
-                                    regression_algorithm=regression_algorithm,
+                                    regression_algorithm=regression_algorithm,  # type: ignore[arg-type]
+                                    upload_if_recomputed=upload_if_recomputed,
+                                    save_outputs=True,
                                 )
+                                if _should_skip(rt, hf_files, upload_if_recomputed):
+                                    continue
                                 rt.compute()
                                 print(".", end="", flush=True)
                             except Exception as e:
@@ -152,19 +242,28 @@ def run_metric_similarity_alignment_multi(tasks: List[str], methods: List[str]) 
     print("MetricSimilarityAlignmentMulti done.")
 
 
-def run_interference_matrix(tasks: List[str], methods: List[str]) -> None:
+def run_interference_matrix(
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
     """InterferenceMatrix: (model, task, unlearning_algorithm, interference_pair)."""
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in list(vb.type_mp.__args__):
+                for interference_pair in list(get_args(vb.type_mp)):
                     try:
-                        rt = vb.ResultTemplateInterferenceMatrix(
+                        rt = vb.ResultTemplateInterferenceMatrix(  # type: ignore[arg-type]
                             model=model,
-                            task=task,
-                            unlearning_algorithm=unlearning_algorithm,
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                             interference_pair=interference_pair,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
                         )
+                        if _should_skip(rt, hf_files, upload_if_recomputed):
+                            continue
                         rt.compute()
                         print(".", end="", flush=True)
                     except Exception as e:
@@ -176,17 +275,25 @@ def run_interference_matrix(tasks: List[str], methods: List[str]) -> None:
     print("InterferenceMatrix done.")
 
 
-def run_similarity_matrix(tasks: List[str]) -> None:
+def run_similarity_matrix(
+    tasks: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
     """SimilarityMatrix: (model, task, similarity_metric)."""
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
-            for similarity_metric in list(vb.type_s.__args__):
+            for similarity_metric in list(get_args(vb.type_s)):
                 try:
                     rt = vb.ResultTemplateSimilarityMatrix(
                         model=model,
-                        task=task,
+                        task=task,  # type: ignore[arg-type]
                         similarity_metric=similarity_metric,
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
                     )
+                    if _should_skip(rt, hf_files, upload_if_recomputed):
+                        continue
                     rt.compute()
                     print(".", end="", flush=True)
                 except Exception as e:
@@ -198,35 +305,65 @@ def run_similarity_matrix(tasks: List[str]) -> None:
     print("SimilarityMatrix done.")
 
 
-def run_significant_relationship(tasks: List[str], methods: List[str]) -> None:
+def _sr_attributes_for_task(task: str) -> List[str]:
+    """Return the SR attribute set for a task.
+
+    Covers:
+    - Attributes of interest (categorical, from task_to_attributes_of_interest).
+    - Paper-reported numerical attributes (birthyear, hpi for people).
+    """
+    attrs: List[str] = list(vb.task_to_attributes_of_interest.get(task, []))
+    if task == "people":
+        attrs = attrs + ["birthyear", "hpi"]
+    return attrs
+
+
+def run_significant_relationship(
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
     """SignificantRelationshipCategorical and Numerical.
 
-    Dispatches to Categorical first; falls back to Numerical on
-    InvalidAttributeTypeError.
+    Runs over attributes of interest (categorical) plus paper-reported numerical
+    attributes (birthyear, hpi for people).  Dispatches to Categorical first;
+    falls back to Numerical on InvalidAttributeTypeError.
     """
-    me_list = list(vb.type_me.__args__)
-    for model in list(vb.type_model.__args__):
+    me_list = list(get_args(vb.type_me))
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
+            attributes = _sr_attributes_for_task(task)
             for unlearning_algorithm in methods:
                 for interference_entity in me_list:
-                    for attribute in vb.domain_attribute[task.capitalize()]:
+                    for attribute in attributes:
                         try:
-                            vb.ResultTemplateSignificantRelationshipCategorical(
+                            rt_cat = vb.ResultTemplateSignificantRelationshipCategorical(  # type: ignore[arg-type]
                                 model=model,
-                                task=task,
-                                unlearning_algorithm=unlearning_algorithm,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                                 interference_entity=interference_entity,
                                 attribute=attribute,
-                            ).compute()
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
+                            )
+                            if _should_skip(rt_cat, hf_files, upload_if_recomputed):
+                                continue
+                            rt_cat.compute()
                         except vb.InvalidAttributeTypeError:
                             try:
-                                vb.ResultTemplateSignificantRelationshipNumerical(
+                                rt_num = vb.ResultTemplateSignificantRelationshipNumerical(
                                     model=model,
-                                    task=task,
-                                    unlearning_algorithm=unlearning_algorithm,
+                                    task=task,  # type: ignore[arg-type]
+                                    unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                                     interference_entity=interference_entity,
                                     attribute=attribute,
-                                ).compute()
+                                    upload_if_recomputed=upload_if_recomputed,
+                                    save_outputs=True,
+                                )
+                                if _should_skip(rt_num, hf_files, upload_if_recomputed):
+                                    continue
+                                rt_num.compute()
                             except Exception as e2:
                                 logger.warning(
                                     "SignificantRelationshipNumerical failed for "
@@ -250,19 +387,31 @@ def run_significant_relationship(tasks: List[str], methods: List[str]) -> None:
     print("SignificantRelationship done.")
 
 
-def run_count_significant_relationship(tasks: List[str], methods: List[str]) -> None:
-    """CountSignificantRelationship: one call per (model, task)."""
-    me_list = list(vb.type_me.__args__)
-    for model in list(vb.type_model.__args__):
+def run_count_significant_relationship(
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
+    """CountSignificantRelationship: one call per (model, task).
+
+    Uses attributes of interest only (categorical; 2 per task).
+    """
+    me_list = list(get_args(vb.type_me))
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             try:
                 rt = vb.ResultTemplateCountSignificantRelationship(
                     model=model,
-                    task=task,
-                    unlearning_algorithm_list=methods,
+                    task=task,  # type: ignore[arg-type]
+                    unlearning_algorithm_list=methods,  # type: ignore[arg-type]
                     interference_entity_list=me_list,
-                    attribute_list=vb.domain_attribute[task.capitalize()],
+                    attribute_list=list(vb.task_to_attributes_of_interest.get(task, [])),
+                    upload_if_recomputed=upload_if_recomputed,
+                    save_outputs=True,
                 )
+                if _should_skip(rt, hf_files, upload_if_recomputed):
+                    continue
                 rt.compute()
                 print(f"CountSignificantRelationship {model}/{task} OK")
             except Exception as e:
@@ -273,43 +422,47 @@ def run_count_significant_relationship(tasks: List[str], methods: List[str]) -> 
     print("CountSignificantRelationship done.")
 
 
-def run_implicit_association_test(tasks: List[str], methods: List[str]) -> None:
+def run_implicit_association_test(
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+) -> None:
     """ImplicitAssociationTest: (model, task, unlearning_algorithm, a1, a2, l).
 
-    Attribute pairs must be specified manually; we iterate over all latent
-    embeddings and a representative cross of attribute values from the metadata.
-    This RT is left as a stub loop: update the attribute lists below when the
-    paper specifies which attribute pairs to analyse.
+    Attribute pairs used in the paper (people task only):
+      - (gender, occupation_simplified)  — paper figure iat_gender.png
+      - (gender, hpi_bin)                — paper figure iat_hpi.png
+      - (occupation_simplified, hpi_bin) — paper figure iat_uce.png (UCE method)
     """
-    # Attribute pairs for the 'people' task (metadata keys from
-    # metadata_people_2_enriched_filtered.json).  Only categorical attributes
-    # with a manageable number of distinct values should be used here.
-    # Available categorical attributes and their values:
-    #   gender:                 M, F
-    #   occupation_simplified:  Politician, Artist, Athlete
-    #   hpi_bin:                Q0_25, Q25_50, Q50_75, Q75_100
-    #   race:                   white, asian, middle eastern, black,
-    #                           latino hispanic, indian
+    # Paper-reported IAT attribute pairs (people task only)
     attribute_pairs: list = [
-        ("gender", "occupation_simplified"),  # canonical iEAT pair: gender × occupation
-        ("gender", "hpi_bin"),               # gender × historical popularity quartile
-        ("occupation_simplified", "hpi_bin"),  # occupation × fame level
+        ("gender", "occupation_simplified"),
+        ("gender", "hpi_bin"),
+        ("occupation_simplified", "hpi_bin"),
     ]
 
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
+            if task != "people":
+                logger.info("IAT: skipping task=%s (IAT is people-only in the paper)", task)
+                continue
             for unlearning_algorithm in methods:
-                for latent_embedding in list(vb.type_l.__args__):
+                for latent_embedding in list(get_args(vb.type_l)):
                     for attr1, attr2 in attribute_pairs:
                         try:
-                            rt = vb.ResultTemplateImplicitAssociationTest(
+                            rt = vb.ResultTemplateImplicitAssociationTest(  # type: ignore[arg-type]
                                 model=model,
-                                task=task,
-                                unlearning_algorithm=unlearning_algorithm,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                                 attribute_1=attr1,
                                 attribute_2=attr2,
                                 latent_embedding=latent_embedding,
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
                             )
+                            if _should_skip(rt, hf_files, upload_if_recomputed):
+                                continue
                             rt.compute()
                             print(".", end="", flush=True)
                         except Exception as e:
@@ -324,14 +477,14 @@ def run_implicit_association_test(tasks: List[str], methods: List[str]) -> None:
 
 def run_unlearning_visual_summary(tasks: List[str], methods: List[str]) -> None:
     """UnlearningVisualSummary: (model, task, unlearning_algorithm)."""
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             for unlearning_algorithm in methods:
                 try:
-                    rt = vb.ResultTemplateUnlearningVisualSummary(
+                    rt = vb.ResultTemplateUnlearningVisualSummary(  # type: ignore[arg-type]
                         model=model,
-                        task=task,
-                        unlearning_algorithm=unlearning_algorithm,
+                        task=task,  # type: ignore[arg-type]
+                        unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                     )
                     rt.compute()
                     print(".", end="", flush=True)
@@ -357,12 +510,12 @@ def run_interference_visual_summary(
     """
     for task in tasks:
         for unlearning_algorithm in methods:
-            for interference_pair in list(vb.type_mp.__args__):
+            for interference_pair in list(get_args(vb.type_mp)):
                 for entity_index in range(entity_count):
                     try:
-                        rt = vb.ResultTemplateInterferenceVisualSummary(
-                            task=task,
-                            unlearning_algorithm=unlearning_algorithm,
+                        rt = vb.ResultTemplateInterferenceVisualSummary(  # type: ignore[arg-type]
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
                             interference_pair=interference_pair,
                             entity_index=entity_index,
                             seed=42,
@@ -382,24 +535,31 @@ def run_interference_visual_summary(
 
 
 def run_method_comparison_by_metric_entity(
-    tasks: List[str], methods: List[str]
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
 ) -> None:
     """MethodComparisonByMetricEntity: (model, task, interference_entity, [methods]).
 
     Runs once per (model, task, interference_entity), comparing all
     supplied methods against each other.
     """
-    me_list = list(vb.type_me.__args__)
-    for model in list(vb.type_model.__args__):
+    me_list = list(get_args(vb.type_me))
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             for interference_entity in me_list:
                 try:
                     rt = vb.ResultTemplateMethodComparisonByMetricEntity(
                         model=model,
-                        task=task,
+                        task=task,  # type: ignore[arg-type]
                         interference_entity=interference_entity,
-                        unlearning_algorithm_list=methods,
+                        unlearning_algorithm_list=methods,  # type: ignore[arg-type]
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
                     )
+                    if _should_skip(rt, hf_files, upload_if_recomputed):
+                        continue
                     rt.compute()
                     print(".", end="", flush=True)
                 except Exception as e:
@@ -412,7 +572,10 @@ def run_method_comparison_by_metric_entity(
 
 
 def run_embedding_unlearning_profile(
-    tasks: List[str], methods: List[str]
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
 ) -> None:
     """EmbeddingUnlearningProfile: (model, task, unlearning_algorithm, entity).
 
@@ -422,19 +585,23 @@ def run_embedding_unlearning_profile(
     directory.
     """
     from vision_unlearning.datasets.testbed import get_metadata_filtered
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
-            metadata = get_metadata_filtered(task)
+            metadata = get_metadata_filtered(task)  # type: ignore[arg-type]
             for method in methods:
                 for row in metadata:
                     entity = row["name"]
                     try:
                         rt = vb.ResultTemplateEmbeddingUnlearningProfile(
                             model=model,
-                            task=task,
-                            unlearning_algorithm=method,
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=method,  # type: ignore[arg-type]
                             entity=entity,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
                         )
+                        if _should_skip(rt, hf_files, upload_if_recomputed):
+                            continue
                         rt.compute()
                         print(".", end="", flush=True)
                     except Exception as e:
@@ -447,21 +614,28 @@ def run_embedding_unlearning_profile(
 
 
 def run_embedding_forgetting_efficiency(
-    tasks: List[str], methods: List[str]
+    tasks: List[str],
+    methods: List[str],
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
 ) -> None:
     """EmbeddingForgettingEfficiency: (model, task, unlearning_algorithm).
 
     Requires the interference_per_entity_{task}.json file in assets/.
     """
-    for model in list(vb.type_model.__args__):
+    for model in list(get_args(vb.type_model)):
         for task in tasks:
             for method in methods:
                 try:
                     rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
                         model=model,
-                        task=task,
-                        unlearning_algorithm=method,
+                        task=task,  # type: ignore[arg-type]
+                        unlearning_algorithm=method,  # type: ignore[arg-type]
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
                     )
+                    if _should_skip(rt, hf_files, upload_if_recomputed):
+                        continue
                     rt.compute()
                     print(".", end="", flush=True)
                 except Exception as e:
@@ -477,7 +651,7 @@ def run_embedding_forgetting_efficiency(
 # Dispatch table: short RT name -> runner function
 # ---------------------------------------------------------------------------
 ALL_RT_NAMES = [
-    # "metricmetricalignment" — NOT implemented yet (stub class, no _compute_from_scratch)
+    "metricmetricalignment",
     "metricsimilarityalignment",
     "metricsimilarityalignmentmulti",
     "interferencematrix",
@@ -648,8 +822,10 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Run all parameter combinations for selected Result Templates, "
             "and/or aggregate all existing results into a single CSV. "
-            "Results are written to the local assets/ folder. "
-            "No HF upload is performed by this script."
+            "Results are written to the local assets/ folder.  With "
+            "--upload-if-recomputed each new result is uploaded to HuggingFace "
+            "immediately.  With --skip-if-on-hf the HF tree is listed once at "
+            "startup and already-uploaded results are skipped without per-file HEADs."
         )
     )
     parser.add_argument(
@@ -678,21 +854,21 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=["people"],
         metavar="TASK",
-        choices=list(vb.type_task.__args__),
+        choices=list(get_args(vb.type_task)),
         help=(
             "Task(s) to run. Default: people. "
-            f"Available: {list(vb.type_task.__args__)}"
+            f"Available: {list(get_args(vb.type_task))}"
         ),
     )
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=list(vb.type_unlearning_algorithm.__args__),
+        default=list(get_args(vb.type_unlearning_algorithm)),
         metavar="METHOD",
-        choices=list(vb.type_unlearning_algorithm.__args__),
+        choices=list(get_args(vb.type_unlearning_algorithm)),
         help=(
             "Unlearning algorithm(s) to include. "
-            f"Default: all ({list(vb.type_unlearning_algorithm.__args__)})"
+            f"Default: all ({list(get_args(vb.type_unlearning_algorithm))})"
         ),
     )
     parser.add_argument(
@@ -712,6 +888,25 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Output path for the aggregated CSV "
             "(default: assets/results/rt_results.csv)."
+        ),
+    )
+    parser.add_argument(
+        "--upload-if-recomputed",
+        action="store_true",
+        default=False,
+        help=(
+            "Upload each newly computed RT result to HuggingFace immediately. "
+            "Requires HF_TOKEN environment variable.  Default: off."
+        ),
+    )
+    parser.add_argument(
+        "--skip-if-on-hf",
+        action="store_true",
+        default=False,
+        help=(
+            "List the HF results/ tree once at startup and skip any RT "
+            "whose result file is already on HuggingFace (avoids per-file HEAD requests). "
+            "Default: off."
         ),
     )
     return parser.parse_args()
@@ -744,6 +939,7 @@ def main() -> None:
     args = parse_args()
     tasks: List[str] = args.tasks
     methods: List[str] = args.methods
+    upload: bool = args.upload_if_recomputed
 
     if args.action in ("run", "all"):
         rt_names = resolve_rt_names(args.rts)
@@ -751,33 +947,41 @@ def main() -> None:
         logger.info("Running RTs: %s", rt_names)
         logger.info("Tasks:       %s", tasks)
         logger.info("Methods:     %s", methods)
+        logger.info("Upload:      %s", upload)
+
+        # List HF results tree once to avoid per-file HEAD requests
+        _HF_REPO = "LeonardoBenitez/VisionUnlearningEvaluationTestbeds"
+        hf_files: FrozenSet[str] = frozenset()
+        if args.skip_if_on_hf:
+            hf_token = os.getenv("HF_TOKEN")
+            hf_files = list_hf_result_files(repository=_HF_REPO, token=hf_token)
 
         for rt_name in rt_names:
             logger.info("=== Starting: %s ===", rt_name)
 
             if rt_name == "metricmetricalignment":
-                run_metric_metric_alignment(tasks, methods)
+                run_metric_metric_alignment(tasks, methods, hf_files, upload)
 
             elif rt_name == "metricsimilarityalignment":
-                run_metric_similarity_alignment(tasks, methods)
+                run_metric_similarity_alignment(tasks, methods, hf_files, upload)
 
             elif rt_name == "metricsimilarityalignmentmulti":
-                run_metric_similarity_alignment_multi(tasks, methods)
+                run_metric_similarity_alignment_multi(tasks, methods, hf_files, upload)
 
             elif rt_name == "interferencematrix":
-                run_interference_matrix(tasks, methods)
+                run_interference_matrix(tasks, methods, hf_files, upload)
 
             elif rt_name == "similaritymatrix":
-                run_similarity_matrix(tasks)
+                run_similarity_matrix(tasks, hf_files, upload)
 
             elif rt_name == "significantrelationship":
-                run_significant_relationship(tasks, methods)
+                run_significant_relationship(tasks, methods, hf_files, upload)
 
             elif rt_name == "countsignificantrelationship":
-                run_count_significant_relationship(tasks, methods)
+                run_count_significant_relationship(tasks, methods, hf_files, upload)
 
             elif rt_name == "implicitassociationtest":
-                run_implicit_association_test(tasks, methods)
+                run_implicit_association_test(tasks, methods, hf_files, upload)
 
             elif rt_name == "unlearningvisualsummary":
                 run_unlearning_visual_summary(tasks, methods)
@@ -788,13 +992,13 @@ def main() -> None:
                 )
 
             elif rt_name == "methodcomparisonbymetricentity":
-                run_method_comparison_by_metric_entity(tasks, methods)
+                run_method_comparison_by_metric_entity(tasks, methods, hf_files, upload)
 
             elif rt_name == "embeddingunlearningprofile":
-                run_embedding_unlearning_profile(tasks, methods)
+                run_embedding_unlearning_profile(tasks, methods, hf_files, upload)
 
             elif rt_name == "embeddingforgettingefficiency":
-                run_embedding_forgetting_efficiency(tasks, methods)
+                run_embedding_forgetting_efficiency(tasks, methods, hf_files, upload)
 
             else:
                 logger.warning("Unknown RT name after resolution: %s", rt_name)

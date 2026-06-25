@@ -38,6 +38,7 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     unlearning_algorithm_to_epochs,
     convert_params_from_gui_to_backend,
     s_to_direction,
+    task_to_attributes_of_interest,
 )
 
 from vision_unlearning.benchmarks.I_care.metadata import (
@@ -99,6 +100,7 @@ from vision_unlearning.benchmarks.I_care.result_templates import (
     ResultTemplate,
     ResultTemplateMetricMetricAlignment,
     ResultTemplateMetricSimilarityAlignment,
+    ResultTemplateMetricSimilarityAlignmentOne,
     ResultTemplateMetricSimilarityAlignmentMulti,
     ResultTemplateInterferenceBySimilarityRank,
     ResultTemplateMostSimilarMostInterferedGrid,
@@ -150,6 +152,7 @@ __all__ = [
     "unlearning_algorithm_to_epochs",
     "convert_params_from_gui_to_backend",
     "s_to_direction",
+    "task_to_attributes_of_interest",
     # metadata
     "get_interference_per_pair_path",
     "get_interference_per_pair",
@@ -186,6 +189,7 @@ __all__ = [
     "ResultTemplate",
     "ResultTemplateMetricMetricAlignment",
     "ResultTemplateMetricSimilarityAlignment",
+    "ResultTemplateMetricSimilarityAlignmentOne",
     "ResultTemplateMetricSimilarityAlignmentMulti",
     "ResultTemplateInterferenceBySimilarityRank",
     "ResultTemplateMostSimilarMostInterferedGrid",

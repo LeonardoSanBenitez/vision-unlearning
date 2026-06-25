@@ -186,7 +186,7 @@ all_prompts = [
 # After this call, GeneratedDataset.get_off_image_path() and evaluate_all_seeds()
 # can safely assume the shared baseline folder exists locally.
 logger.info("Ensuring shared baseline is available for task=%s ...", task)
-_baseline_ds = GeneratedDataset(task=task, base_folder=BASE_FOLDER)
+_baseline_ds = GeneratedDataset(task=task, base_folder=BASE_FOLDER)  # type: ignore[arg-type]
 _baseline_ds.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
 logger.info("Shared baseline ready: %s", _baseline_ds.folder_path)
 
@@ -194,7 +194,7 @@ logger.info("Shared baseline ready: %s", _baseline_ds.folder_path)
 
 metric_quality = MetricQuality()
 metric_clip = MetricImageTextSimilarity(metrics=['clip'])
-metric_image_difference = MetricImageImage(metrics=['rmse', 'ssim'])
+metric_image_difference = MetricImageImage(metrics=['rmse', 'ssim'])  # type: ignore[call-arg]
 
 # DINOv2 model for dino_diff computation.  Loading once at script start adds ~100 MB VRAM
 # and a few seconds; negligible vs the SD pipeline already loaded during generation.
@@ -206,8 +206,8 @@ def evaluate_one(prompt, seed, plot: bool = False) -> dict:
     # TODO can this be batched?
 
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)
-    out_off = Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, seed, prompt))
+    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)  # type: ignore[arg-type]
+    out_off = Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, seed, prompt))  # type: ignore[arg-type]
     out_on = Image.open(ds_entity.file_path('on', seed, prompt))
 
     # Metrics
@@ -253,17 +253,18 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
     evaluate_one() per seed.
     """
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)
-    imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt)) for s in seeds]
+    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)  # type: ignore[arg-type]
+    imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt)) for s in seeds]  # type: ignore[arg-type]
     imgs_on  = [Image.open(ds_entity.file_path('on', s, prompt)) for s in seeds]
 
+    n = len(seeds)
     # BRISQUE — batched (one GPU kernel launch for N images instead of N)
-    brisque_off = metric_quality.score_batch(imgs_off)   # List[{'brisque': float}]
-    brisque_on  = metric_quality.score_batch(imgs_on)
+    brisque_off = metric_quality.score_batch(imgs_off)   # type: ignore[arg-type]  # List[{'brisque': float}]
+    brisque_on  = metric_quality.score_batch(imgs_on)    # type: ignore[arg-type]
 
     # CLIP — batched: text encoded once for all N off-images, once for all N on-images
-    clip_off_results = metric_clip.score_batch_same_text(imgs_off, prompt)
-    clip_on_results  = metric_clip.score_batch_same_text(imgs_on,  prompt)
+    clip_off_results = metric_clip.score_batch_same_text(imgs_off, prompt)  # type: ignore[arg-type]
+    clip_on_results  = metric_clip.score_batch_same_text(imgs_on,  prompt)  # type: ignore[arg-type]
     clip_off = [r['clip'] for r in clip_off_results]
     clip_on  = [r['clip'] for r in clip_on_results]
 
@@ -278,7 +279,6 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
     valid_dino = [v for v in dino_sims if not (v != v)]  # filter NaN
     dino_diff_val = sum(valid_dino) / len(valid_dino) if valid_dino else float('nan')  # TODO: compute this from the outputs of script `pipeline_5_compute_embeddings.py`
 
-    n = len(seeds)
     result = {
         'brisque_diff': sum(brisque_on[i]['brisque'] - brisque_off[i]['brisque'] for i in range(n)) / n,
         'clip_diff':    sum(clip_on[i] - clip_off[i] for i in range(n)) / n,
@@ -314,9 +314,7 @@ for index in range(index_start, index_start + max_identities):
         logger.info(f'Skipping measuring scores for "{target}" since already exists')
         continue
 
-    ds_entity = GeneratedDataset(
-        task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
-    )
+    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)  # type: ignore[arg-type]
     try:
         ds_entity.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
     except FileNotFoundError as exc:

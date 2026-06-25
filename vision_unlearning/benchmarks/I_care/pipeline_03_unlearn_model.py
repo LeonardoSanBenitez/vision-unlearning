@@ -8,7 +8,7 @@ import torch
 import gc
 import matplotlib.pyplot as plt
 from diffusers import AutoPipelineForText2Image
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 import json
 import os
 
@@ -17,7 +17,7 @@ sys.path.append('..')
 sys.path.append('../TRDP-unlearning')
 dotenv.load_dotenv()
 os.environ['WANDB_DISABLED'] = "true"
-assert len(os.getenv('HF_TOKEN'))>0
+assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non-empty"
 #!huggingface-cli login --token ${HF_TOKEN}
 
 from unlearner_lora_distillation import UnlearnerLoraDistillation  # FADE
@@ -231,7 +231,7 @@ for index in range(index_start, index_start + max_identities):
     ###########################################
     # Hyperparameters
     ###########################################
-    hyperparameters = {
+    hyperparameters: Dict[str, Any] = {
         "output_dir": output_dir,
         "hub_model_id": hub_model_id,
         "final_eval_prompts_forget": example_prompts_forget,
@@ -411,6 +411,7 @@ for index in range(index_start, index_start + max_identities):
             # Only generate lora_state='on' (unlearned model) images here.
             # Baseline lora_state='off' images are generated once per task by
             # 0_generate_dataset_original.py and stored in the shared baseline folder.
+            model_pipeline: Optional[Any] = None
             if method == 'uce':
                 model_generate_name: Optional[str] = None
                 lora_generate_name: Optional[str] = None
@@ -425,7 +426,7 @@ for index in range(index_start, index_start + max_identities):
                 model_pipeline = None
 
             filenames = [f'on_{seed}_{prompt}.png' for seed in generate_dataset_seeds for prompt in prompts]
-            generate_dataset(
+            generate_dataset(  # type: ignore[arg-type]
                 model_base_name=model_generate_name,
                 lora_name=lora_generate_name,
                 model_pipeline=model_pipeline,

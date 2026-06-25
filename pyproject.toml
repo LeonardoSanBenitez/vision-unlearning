@@ -138,9 +138,16 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.mypy]
 no_warn_incomplete_stub = true
 disable_error_code = [
-    "import-untyped", 
+    "import-untyped",
     "import-not-found"
 ]
 explicit_package_bases = true
 install_types = true
 non_interactive = true
+# Exclude local-only analysis scripts (not part of the published library).
+# The reports/ and unlearning-analysis/ directories are not tracked in git
+# and contain research scripts that intentionally use loose typing.
+exclude = [
+    'vision_unlearning/benchmarks/I_care/reports/',
+    'vision_unlearning/benchmarks/u_care/',
+]
