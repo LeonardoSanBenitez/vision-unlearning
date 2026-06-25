@@ -1,6 +1,5 @@
-# Configuration for the specific setup described in the paper
-# TODO: all this metadata should be calculated from the files in huggingface
-# Or at least some clean json declaring these values...
+# Configuration for the specific setup described in the paper.
+# Defines domain types, metadata, and task-to-attribute mappings.
 
 from __future__ import annotations
 
@@ -570,7 +569,7 @@ domain_me = [
     # Higher is better: ratio >> 1 means unlearning was targeted (forgotten entity
     # drifted more than retained entities in DINOv2 space).
     # DINOv2 cosine similarity between on/off images per receiver (computed by
-    # 3b_compute_caused_interferences_dino.py or 3_compute_caused_interferences.py).
+    # pipeline_06_compute_interference_per_pair.py).
     # Higher = more similar = less semantic drift = less interference.  Analogous to ssim
     # but in DINOv2 embedding space rather than pixel space.
     "Emitter worst interfered dino diff",
@@ -766,7 +765,7 @@ s_to_direction: Dict[type_s, type_direction] = {
 task_to_attributes_of_interest = {
     "breeds": [
         "grooming_frequency_category_binary",  # (a continuous attribute describing how often brushing is required; discretized into two bins based on quartiles)
-        "group",  # (categorical, with values such as retrievers and terriers). NB: was "supergroup", a name that does not exist as a column in interference_per_entity_breeds.json; corrected to "group" on 2026-06-16.
+        "group",  # (categorical, with values such as retrievers and terriers)
     ],
     "scenes": [
         "sports",

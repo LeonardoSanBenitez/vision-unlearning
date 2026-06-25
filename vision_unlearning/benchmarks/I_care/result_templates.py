@@ -2264,35 +2264,137 @@ class ResultTemplateCountSignificantRelationship(ResultTemplate):
         return f"{self.model}_{self.task}_{digest}"
 
     @classmethod
-    def plot(cls, data: dict, figsize: Tuple[int, int] = (6, 5), return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
-        pass
+    def plot(
+        cls,
+        data: dict,
+        group_by: str = 'unlearning_algorithm',
+        figsize: Tuple[int, int] = (7, 4),
+        return_fig: bool = False,
+    ) -> Optional[Tuple[Figure, plt.Axes]]:
+        """Bar chart of % significant SR results, grouped by one axis.
+
+        Parameters
+        ----------
+        data:
+            Output of ``compute()``.
+        group_by:
+            One of ``'unlearning_algorithm'``, ``'attribute'``,
+            ``'interference_entity'``.  Selects which ``grouped_by_*`` key to plot.
+        figsize:
+            Matplotlib figure size.
+        return_fig:
+            If True, return ``(fig, ax)`` instead of calling ``plt.show()``.
+        """
+        key = f'grouped_by_{group_by}'
+        grouped: dict = data['result'].get(key, {})
+        if not grouped:
+            logger.warning('CSR plot: grouped_by_%s is empty — nothing to plot.', group_by)
+            return None
+
+        labels = list(grouped.keys())
+        counts = [grouped[k]['count'] for k in labels]
+        totals = [grouped[k]['total'] for k in labels]
+        fractions = [grouped[k]['fraction'] * 100 for k in labels]
+
+        fig, ax = plt.subplots(figsize=figsize)
+        x = np.arange(len(labels))
+        ax.bar(x, fractions, color='steelblue', edgecolor='white', width=0.55)
+        for xi, (c, n, pct) in enumerate(zip(counts, totals, fractions)):
+            ax.text(xi, pct + 0.5, f'{c}/{n}', ha='center', va='bottom', fontsize=8)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontsize=8, rotation=30, ha='right')
+        ax.set_ylabel('% significant SR results', fontsize=9)
+        ax.set_xlabel(group_by.replace('_', ' ').title(), fontsize=9)
+
+        task_str = data['metadata']['task']
+        ax.set_title(
+            f'CSR | task={task_str} | grouped_by={group_by}\n'
+            f'me={len(data["metadata"]["interference_entity_list"])} '
+            f'attrs={len(data["metadata"]["attribute_list"])} '
+            f'algos={len(data["metadata"]["unlearning_algorithm_list"])}',
+            fontsize=9,
+        )
+
+        plt.tight_layout()
+        if return_fig:
+            return fig, ax
+        plt.show()
+        return None
 
     def _compute_from_scratch(self) -> dict:
-        results = []
+        rows = []
         for unlearning_algorithm in self.unlearning_algorithm_list:
             for interference_entity in self.interference_entity_list:
                 for attribute in self.attribute_list:
                     try:
-                        data = ResultTemplateSignificantRelationshipCategorical(model=self.model, task=self.task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
+                        sr_data = ResultTemplateSignificantRelationshipCategorical(
+                            model=self.model,
+                            task=self.task,
+                            unlearning_algorithm=unlearning_algorithm,
+                            interference_entity=interference_entity,
+                            attribute=attribute,
+                            base_folder=self.base_folder,
+                            save_outputs=self.save_outputs,
+                            upload_if_recomputed=self.upload_if_recomputed,
+                        ).compute()
                     except InvalidAttributeTypeError:
                         try:
-                            data = ResultTemplateSignificantRelationshipNumerical(model=self.model, task=self.task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
+                            sr_data = ResultTemplateSignificantRelationshipNumerical(
+                                model=self.model,
+                                task=self.task,
+                                unlearning_algorithm=unlearning_algorithm,
+                                interference_entity=interference_entity,
+                                attribute=attribute,
+                                base_folder=self.base_folder,
+                                save_outputs=self.save_outputs,
+                                upload_if_recomputed=self.upload_if_recomputed,
+                            ).compute()
                         except (InvalidAttributeTypeError, InsufficientSamplesError):
                             continue
                         except Exception as e:
-                            logger.warning(f'Combination {self.model}, {self.task}, {unlearning_algorithm}, {interference_entity}, {attribute} failled with {e}')
+                            logger.warning(
+                                'CSR: combination %s/%s/%s/%s/%s failed: %s',
+                                self.model, self.task, unlearning_algorithm,
+                                interference_entity, attribute, e,
+                            )
                             continue
                     except InsufficientSamplesError:
                         continue
                     except Exception as e:
-                        logger.warning(f'Combination {self.model}, {self.task}, {unlearning_algorithm}, {interference_entity}, {attribute} failled with {e}')
+                        logger.warning(
+                            'CSR: combination %s/%s/%s/%s/%s failed: %s',
+                            self.model, self.task, unlearning_algorithm,
+                            interference_entity, attribute, e,
+                        )
                         continue
-                    results.append([self.model, self.task, unlearning_algorithm, interference_entity, attribute, data['result']['significant']])
-        df = pd.DataFrame(results, columns=['model', 'task', 'unlearning_algorithm', 'interference_entity', 'attribute', 'significant'])
-        #TODO
-        print(df[df['task']=='people'].groupby('attribute').sum()['significant'].sort_values(ascending=False))
-        print(df[df['task']=='people'].groupby('unlearning_algorithm').sum()['significant'].sort_values(ascending=False))
-        data = {
+
+                    rows.append({
+                        'model': self.model,
+                        'task': self.task,
+                        'unlearning_algorithm': unlearning_algorithm,
+                        'interference_entity': interference_entity,
+                        'attribute': attribute,
+                        'significant': bool(sr_data['result']['significant']),
+                    })
+
+        df = pd.DataFrame(rows)
+
+        def _group_counts(col: str) -> dict:
+            if df.empty or col not in df.columns:
+                return {}
+            result = {}
+            for key, grp in df.groupby(col):
+                n_sig = int(grp['significant'].sum())
+                n_total = int(len(grp))
+                result[str(key)] = {
+                    'count': n_sig,
+                    'total': n_total,
+                    'fraction': n_sig / n_total if n_total > 0 else 0.0,
+                }
+            return result
+
+        return {
             'metadata': {
                 'RT': self.__class__.__name__,
                 'model': self.model,
@@ -2302,38 +2404,14 @@ class ResultTemplateCountSignificantRelationship(ResultTemplate):
                 'attribute_list': self.attribute_list,
             },
             'result': {
-                'grouped_by_unlearning_algorithm': {},
-                'grouped_by_attribute': {},
-                'grouped_by_interference_entity': {},
-            }
+                'rows': rows,
+                'total_count': int(df['significant'].sum()) if not df.empty else 0,
+                'total': int(len(df)),
+                'grouped_by_unlearning_algorithm': _group_counts('unlearning_algorithm'),
+                'grouped_by_attribute': _group_counts('attribute'),
+                'grouped_by_interference_entity': _group_counts('interference_entity'),
+            },
         }
-        return data
-'''TEMP
-results = []
-for model in list(type_model.__args__): 
-    for task in ['people']:#list(type_task.__args__):
-        for unlearning_algorithm in list(type_unlearning_algorithm.__args__):
-            for interference_entity in list(type_me.__args__):
-                for attribute in domain_attribute[task.capitalize()]:
-                    try:
-                        data = ResultTemplateSignificantRelationshipCategorical(model=model, task=task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
-                    except InvalidAttributeTypeError:
-                        data = ResultTemplateSignificantRelationshipNumerical(model=model, task=task, unlearning_algorithm=unlearning_algorithm, interference_entity=interference_entity, attribute=attribute).compute()
-                    except InsufficientSamplesError:
-                        continue
-                    except Exception as e:
-                        logger.warning(f'Combination {model}, {task}, {unlearning_algorithm}, {interference_entity}, {attribute} failled with {e}')
-                        assert 1==0#continue
-                    results.append([model, task, unlearning_algorithm, interference_entity, attribute, data['result']['significant']])
-                    print('.', end='')
-                print('')
-            print('---')
-df = pd.DataFrame(results, columns=['model', 'task', 'unlearning_algorithm', 'interference_entity', 'attribute', 'significant'])
-df.head()
-print(df.shape)
-print(df[df['task']=='people'].groupby('attribute').sum()['significant'].sort_values(ascending=False))
-print(df[df['task']=='people'].groupby('unlearning_algorithm').sum()['significant'].sort_values(ascending=False))
-'''
 
 class ResultTemplateImplicitAssociationTest(ResultTemplate):
     """
@@ -3890,11 +3968,12 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
         labels: List[str] = [e['name'] for e in metadata_filtered]
 
         if self.similarity_metric == 'clip':
-            # see calculate_similarity_clip
-            # Dont fotget to save only when save_outputs==true... or assert save_outputs
-            # Given the current implementation of calculate_similarity_clip, we probably assert save_outputs
-            # To keep compatible with as it was done before, it should save a json with `orient='records'` with the content of `data['result']`
-            raise NotImplementedError(f"Similarity matrix not found locally or in Hugging Face Hub. Please compute it first with calculate_similarity_clip")
+            raise NotImplementedError(
+                "CLIP similarity matrix not found locally or in HuggingFace Hub. "
+                "Recomputing from scratch requires a GPU with CLIP/SD 1.4 and is not "
+                "supported by this RT.  Either upload the precomputed matrix to HF or "
+                "run pipeline_02 with --similarity clip on a GPU machine."
+            )
 
         elif self.similarity_metric == 'jacc':
             # The partial file lives in the same directory as the final output.
@@ -5061,7 +5140,6 @@ def display_interesting_interferences(
     plt.show()
 
 
-# TODO probably a duplicate/oldVersion of analyze_relationship_numerical
 def analyze_relationship_regression(
     df: pd.DataFrame,
     x: str,
@@ -5110,7 +5188,6 @@ def analyze_relationship_regression(
     return bool(significant and direction_matches)
 
 
-# TODO: probably a duplicate/oldVersion of analyze_relationship_categorical
 def analyze_relationship_category(df, metric: str, category: str, plot: bool = True) -> bool:
     categories = df[category].unique()
     metric_per_category = [df[df[category] == c][metric] for c in categories]

@@ -1,43 +1,55 @@
+"""pipeline_07 — Aggregate per-pair interference data into per-entity summary files.
+
+For each entity, method and epoch combination, reads the per-pair JSON files produced by
+pipeline_06 and computes 51 summary metrics (Me) covering emitter, receiver and
+emitter-minus-receiver perspectives for every interference signal, plus
+embedding_specificity_ratio, forget_clip_diff and retain_average_clip_diff.
+
+Writes ``assets/interference_per_entity_{task}.json`` (one JSON record per entity, each
+augmented with the computed metric columns).
+
+Usage
+-----
+    python pipeline_07_compute_interference_per_entity.py \\
+        --task people \\
+        --methods uce munba distil \\
+        --epochs 0 200 400
+
+The ``--methods`` and ``--epochs`` lists are positionally paired: uce→0 epochs,
+munba→200 epochs, distil→400 epochs in the example above.
+
+Run without arguments to see defaults (all three tasks in sequence are covered by
+pipeline_11_run_all.sh calling this script once per task).
+"""
 from __future__ import annotations
 
-import os
-import sys
-
-# Ensure vision_unlearning is importable from the sibling repo directory
-_VU_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vision-unlearning")
-)
-if _VU_PATH not in sys.path:
-    sys.path.insert(0, _VU_PATH)
-
-from diffusers import AutoPipelineForText2Image
-import torch
-import matplotlib.pyplot as plt
-import pandas as pd
-from typing import Literal, Optional, List
+import argparse
 import json
+import os
 from collections import defaultdict
+from typing import Dict, List, Literal, cast
 
 import numpy as np
-from typing import Tuple
+import pandas as pd
 
-from vision_unlearning.utils.data_generation import generate_dataset
 from vision_unlearning.utils.logger import get_logger, setup_loggers
-from vision_unlearning.benchmarks.I_care import get_interference_per_pair_path, get_interference_per_pair, get_interference_per_pair_inverse, get_interference_per_entity_path, save_interference_per_entity, metric_of_worst_interfered, number_of_interfered_worse_than_target, number_of_interfered_worse_than_threshold, average_metric, display_interesting_interferences
-from vision_unlearning.datasets.testbed import get_metadata_filtered, get_target_overwrite, get_target_preprocessed
+from vision_unlearning.benchmarks.I_care import (
+    get_interference_per_pair_path,
+    get_interference_per_pair,
+    get_interference_per_pair_inverse,
+    get_interference_per_entity_path,
+    save_interference_per_entity,
+    metric_of_worst_interfered,
+    number_of_interfered_worse_than_target,
+    number_of_interfered_worse_than_threshold,
+    average_metric,
+)
+from vision_unlearning.datasets.testbed import (
+    get_metadata_filtered,
+    get_target_overwrite,
+    get_target_preprocessed,
+)
 
-
-index_start: int = 0
-max_identities: int = 100
-task: Literal['scenes', 'objects', 'breeds', 'people'] = 'people'
-methods: List[Literal['munba', 'uce', 'distil']] = ['uce', 'munba', 'distil']
-num_train_epochs_list: List[int] = [0, 200, 400]  # same order as methods
-embedding_assets_folder: str = 'assets/datasets'  # folder containing embedding JSON files
-
-
-overwrite_metrics: bool = True  # the metric changes until unlearinig are complete. To be safe, always overwrite
-
-### No changes below this line ###
 
 logger = get_logger('unlearning_analysis')
 setup_loggers(modules_info=['unlearning'])
@@ -46,24 +58,20 @@ setup_loggers(modules_info=['unlearning'])
 def _mean_embeddings_per_entity(embedding_data: dict) -> dict:
     """Return {prompted_entity: L2-normalised mean embedding vector} from a JSON embedding file.
 
-    Expects the new embedding file format:
+    Expects the embedding file format:
         {'prompted_entity': 'X', 'prompt': 'An image of X', 'embedding': [...]}
 
     Raises
     ------
     KeyError
-        If any record is missing the 'prompted_entity' field.  Old-format files
-        (breeds/uce generated before 2026-05) use 'entity' instead; they must be
-        regenerated with the current embedding pipeline before this script can use them.
-        Failing fast is intentional: silent NaN hides data problems.
+        If any record is missing the 'prompted_entity' field.
     """
-    buckets = defaultdict(list)
+    buckets: Dict[str, List[list]] = defaultdict(list)
     for i, entry in enumerate(embedding_data['embeddings']):
         if 'prompted_entity' not in entry:
             raise KeyError(
                 f"Embedding record {i} is missing 'prompted_entity'. "
-                "This file was generated with an old embedding pipeline (uses 'entity' key). "
-                "Regenerate it with the current 3_compute_embeddings.py before re-running script 4."
+                "Regenerate it with the current pipeline_05 before re-running pipeline_07."
             )
         buckets[entry['prompted_entity']].append(entry['embedding'])
     result = {}
@@ -77,44 +85,30 @@ def _mean_embeddings_per_entity(embedding_data: dict) -> dict:
 
 def _compute_specificity_ratio(
     target_hf_name: str,
-    task: str,
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
     target_emb_path: str,
     baseline_mean: dict,
 ) -> float:
     """Compute embedding_specificity_ratio for entity ``target_hf_name``.
 
-    Each entity F has its own embedding file, generated by running ALL entity
-    prompts on F's unlearned model.  By loading F's own file here we compute:
+    Each entity F has its own embedding file generated by running ALL entity
+    prompts on F's unlearned model. We compute:
 
         d_self   = cosine_dist(lora_on_F_under_F_model, baseline_F)
         d_others = mean cosine_dist(lora_on_G_under_F_model, baseline_G)  for G != F
         ratio    = d_self / d_others
 
     Both d_self and d_others are measured under the same model (F-unlearned),
-    so the ratio correctly answers "was unlearning F specific to F?"
+    so the ratio correctly answers "was unlearning F specific to F?".
 
-    NOTE on key names: the ``prompted_entity`` field in the embedding JSON is
-    stored via ``get_target_preprocessed(task, metadata_for_embed_name)``.
-    For people, the name is unchanged (no transformation).  For scenes, the
-    embedding generation used the already-HF-transformed name
-    (``metadata_for_embed[i]["name"]`` = ``get_target_overwrite(...)[0]``
-    = e.g. "an abbey scene"), so ``get_target_preprocessed`` applied a second
-    transformation → "an an abbey scene scene".  The ``task`` parameter is used
-    to correctly derive the lookup key so that d_self is always computed for the
-    right entity regardless of task-specific naming conventions.
-
-    NOTE — why NOT precompute across all entity files:
-    Each entity file contains ALL prompted entities.  If you naively do
-    ``lora_on_all.update(per_entity)`` over all files, the last file processed
-    overwrites every other entity's embedding.  The result is that d_self and
-    d_others for entity A both come from the LAST entity's model, not A's
-    model — making the ratio meaningless for all entities except the last.
-    See test_specificity_ratio.py for a regression test that catches this.
+    Both d_self and d_others must be computed per-entity-file to avoid overwriting
+    embeddings across files (loading all entity files and merging would cause the last
+    file's embeddings to overwrite all earlier ones, making d_self and d_others
+    both come from the wrong model).
     """
     if not os.path.exists(target_emb_path):
         logger.warning(
-            'Embedding file missing for %r (method=%s); '
-            'embedding_specificity_ratio will be NaN.',
+            'Embedding file missing for %r (%s); embedding_specificity_ratio will be NaN.',
             target_hf_name, target_emb_path,
         )
         return float('nan')
@@ -125,10 +119,6 @@ def _compute_specificity_ratio(
     with open(target_emb_path) as _f:
         per_entity = _mean_embeddings_per_entity(json.load(_f))
 
-    # Determine the key under which this entity's embedding is stored.
-    # For people: key == target_hf_name (no double transformation).
-    # For scenes: the embedding was generated with metadata_for_embed using the
-    # already-HF-transformed name, so get_target_preprocessed was applied twice.
     self_key = get_target_preprocessed(task, target_hf_name)
 
     if self_key not in per_entity or self_key not in baseline_mean:
@@ -139,10 +129,8 @@ def _compute_specificity_ratio(
         )
         return float('nan')
 
-    # d_self: how much the forgotten entity's embedding drifted under its own unlearned model
     d_self = float(1.0 - np.dot(per_entity[self_key], baseline_mean[self_key]))
 
-    # d_others: mean collateral drift of retained entities under the same (F-unlearned) model
     other_dists = [
         float(1.0 - np.dot(per_entity[g], baseline_mean[g]))
         for g in per_entity
@@ -152,7 +140,7 @@ def _compute_specificity_ratio(
     if not other_dists:
         logger.warning(
             'No other entities found in embedding file for %r; '
-            'cannot compute d_others. embedding_specificity_ratio will be NaN.',
+            'embedding_specificity_ratio will be NaN.',
             target_hf_name,
         )
         return float('nan')
@@ -161,47 +149,67 @@ def _compute_specificity_ratio(
     return float(d_self / d_others) if d_others > 0 else float('nan')
 
 
-metadata_filtered = get_metadata_filtered(task)
-interference_per_entity = metadata_filtered.copy()
+def compute_for_task(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    methods: List[Literal['munba', 'uce', 'distil']],
+    num_train_epochs_list: List[int],
+    index_start: int,
+    max_identities: int,
+    embedding_assets_folder: str,
+    base_folder: str,
+) -> None:
+    """Aggregate per-pair interference data for one task into interference_per_entity_{task}.json."""
+    logger.info('Starting pipeline_07 for task=%s, methods=%s, epochs=%s',
+                task, methods, num_train_epochs_list)
 
-# Baseline embeddings are method-agnostic: one file per task.
-# Named embeddings_{task}_original.json — same logic as generated_{task}_baseline/ (no method/epoch).
-baseline_embedding_path = os.path.join(
-    embedding_assets_folder,
-    f'embeddings_{task}_original.json',
-)
-if os.path.exists(baseline_embedding_path):
-    with open(baseline_embedding_path) as f:
-        baseline_data = json.load(f)
-    baseline_mean = _mean_embeddings_per_entity(baseline_data)
-else:
-    baseline_mean = {}
-    raise FileNotFoundError(
-        f'Baseline embedding file not found: {baseline_embedding_path}. '
-        f'Run 3_compute_embeddings.py --task {task} --index-start 0 --max-identities 1 '
-        f'to generate it (the baseline pass runs once regardless of method).'
+    metadata_filtered = get_metadata_filtered(task, base_folder=base_folder)
+    interference_per_entity = metadata_filtered.copy()
+
+    baseline_embedding_path = os.path.join(
+        embedding_assets_folder,
+        f'embeddings_{task}_original.json',
     )
+    if os.path.exists(baseline_embedding_path):
+        with open(baseline_embedding_path) as f:
+            baseline_data = json.load(f)
+        baseline_mean = _mean_embeddings_per_entity(baseline_data)
+    else:
+        raise FileNotFoundError(
+            f'Baseline embedding file not found: {baseline_embedding_path}. '
+            f'Run pipeline_05 with --task {task} --lora-state off to generate it.'
+        )
 
-for method, num_train_epochs in zip(methods, num_train_epochs_list):
+    for _method_str, num_train_epochs in zip(methods, num_train_epochs_list):
+        method = cast(Literal['munba', 'uce', 'distil'], _method_str)
 
-    for index in range(index_start, max_identities):
-        if not os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs)):
-            logger.warning(f'SKIP summarizing results for task={task}, index={index}, method={method}, num_train_epochs={num_train_epochs}, do not exist yet')
-            continue
-        logger.info(f'Summarizing results for task={task}, index={index}, method={method}, num_train_epochs={num_train_epochs}...')
-        interference_per_pair = get_interference_per_pair(task, index, method, num_train_epochs)
+        for index in range(index_start, max_identities):
+            if not os.path.exists(get_interference_per_pair_path(
+                task, index, method, num_train_epochs, base_folder=base_folder,
+            )):
+                logger.warning(
+                    'SKIP task=%s index=%d method=%s epochs=%d — per-pair file missing',
+                    task, index, method, num_train_epochs,
+                )
+                continue
+            logger.info(
+                'Summarizing task=%s index=%d method=%s epochs=%d',
+                task, index, method, num_train_epochs,
+            )
+            interference_per_pair = get_interference_per_pair(
+                task, index, method, num_train_epochs, base_folder=base_folder,
+            )
 
-        assert index < len(metadata_filtered)
-        target = metadata_filtered[index]['name']
-        assert type(target) == str
+            assert index < len(metadata_filtered)
+            target = metadata_filtered[index]['name']
+            assert isinstance(target, str)
 
-        ###########################
-        # Calculate statistics
-        ###########################
-        if overwrite_metrics or not os.path.exists(get_interference_per_entity_path(task)):
-            interference_per_pair_inverse = get_interference_per_pair_inverse(task, index, method, num_train_epochs)
-            # Emitter statistics
-            entity_statistics = {}
+            interference_per_pair_inverse = get_interference_per_pair_inverse(
+                task, index, method, num_train_epochs, base_folder=base_folder,
+            )
+
+            # ── Base Mp metrics (brisque_diff, clip_diff, rmse, ssim) ───────────
+            entity_statistics: dict = {}
+
             entity_statistics['emitter_worst_interfered_brisque_diff (↓)'] = metric_of_worst_interfered(interference_per_pair, 'brisque_diff', True)
             entity_statistics['emitter_worst_interfered_clip_diff (↑)'] = metric_of_worst_interfered(interference_per_pair, 'clip_diff', False)
             entity_statistics['emitter_worst_interfered_rmse (↓)'] = metric_of_worst_interfered(interference_per_pair, 'rmse', True)
@@ -219,7 +227,6 @@ for method, num_train_epochs in zip(methods, num_train_epochs_list):
             entity_statistics['emitter_average_rmse (↓)'] = average_metric(interference_per_pair, 'rmse')
             entity_statistics['emitter_average_ssim (↑)'] = average_metric(interference_per_pair, 'ssim')
 
-            # Receiver statistics
             entity_statistics['receiver_worst_interfered_brisque_diff (↓)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'brisque_diff', True)
             entity_statistics['receiver_worst_interfered_clip_diff (↑)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'clip_diff', False)
             entity_statistics['receiver_worst_interfered_rmse (↓)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'rmse', True)
@@ -237,7 +244,6 @@ for method, num_train_epochs in zip(methods, num_train_epochs_list):
             entity_statistics['receiver_average_rmse (↓)'] = average_metric(interference_per_pair_inverse, 'rmse')
             entity_statistics['receiver_average_ssim (↑)'] = average_metric(interference_per_pair_inverse, 'ssim')
 
-            # Diffs
             entity_statistics['emitter_minus_receiver_worst_interfered_brisque_diff (↓)'] = entity_statistics['emitter_worst_interfered_brisque_diff (↓)'] - entity_statistics['receiver_worst_interfered_brisque_diff (↓)']
             entity_statistics['emitter_minus_receiver_worst_interfered_clip_diff (↓)'] = entity_statistics['emitter_worst_interfered_clip_diff (↑)'] - entity_statistics['receiver_worst_interfered_clip_diff (↑)']
             entity_statistics['emitter_minus_receiver_worst_interfered_rmse (↓)'] = entity_statistics['emitter_worst_interfered_rmse (↓)'] - entity_statistics['receiver_worst_interfered_rmse (↓)']
@@ -255,15 +261,12 @@ for method, num_train_epochs in zip(methods, num_train_epochs_list):
             entity_statistics['emitter_minus_receiver_average_rmse (↓)'] = entity_statistics['emitter_average_rmse (↓)'] - entity_statistics['receiver_average_rmse (↓)']
             entity_statistics['emitter_minus_receiver_average_ssim (↑)'] = entity_statistics['emitter_average_ssim (↑)'] - entity_statistics['receiver_average_ssim (↑)']
 
-            # Writeback in metadata
             for stat_name, stat_value in entity_statistics.items():
-                interference_per_entity[index][f'metric_{method}_{num_train_epochs}_{stat_name}'] = stat_value  # Maybe this should be structured somehow? If feel a plain dict is easier to analyse later, but it's ugly
+                interference_per_entity[index][
+                    f'metric_{method}_{num_train_epochs}_{stat_name}'
+                ] = stat_value
 
-            # ── dino_diff Mp → Me aggregations ───────────────────────────────
-            # dino_diff = DINOv2 cosine similarity between on/off images (per pair).
-            # Present only if interference files were patched by 3b_compute_caused_interferences_dino.py
-            # or re-generated by the updated 3_compute_caused_interferences.py.
-            # If absent, all dino_diff Me metrics are set to NaN gracefully.
+            # ── dino_diff Mp → Me aggregations ───────────────────────────────────
             _sample_pair = next(iter(interference_per_pair.values()), {})
             _has_dino_diff = "dino_diff" in _sample_pair
 
@@ -323,13 +326,11 @@ for method, num_train_epochs in zip(methods, num_train_epochs_list):
                 k: v for k, v in entity_statistics.items()
                 if 'dino_diff' in k
             }.items():
-                interference_per_entity[index][f'metric_{method}_{num_train_epochs}_{stat_name}'] = stat_value
+                interference_per_entity[index][
+                    f'metric_{method}_{num_train_epochs}_{stat_name}'
+                ] = stat_value
 
-            # ── Embedding specificity ratio (DINOv2) ──────────────────────────
-            # d_self / d_others where d = cosine_distance between lora-ON and lora-OFF embeddings.
-            # Ratio >> 1: unlearning was specific to this entity.
-            # Ratio ~ 1 or < 1: unlearning affected background equally or more.
-            # See _compute_specificity_ratio for the correct per-entity-file approach.
+            # ── Embedding specificity ratio ────────────────────────────────────────
             target_hf_name = get_target_overwrite(task, method, target)[0]
             target_emb_path = os.path.join(
                 embedding_assets_folder,
@@ -346,27 +347,13 @@ for method, num_train_epochs in zip(methods, num_train_epochs_list):
                 f'metric_{method}_{num_train_epochs}_embedding_specificity_ratio (↑)'
             ] = ratio
 
-            # ── Forget / Retain CLIP delta ────────────────────────────────────────────────
-            # forget_clip_diff: clip_diff for the target entity evaluated on its own prompt
-            # after unlearning itself.  Measures unlearning efficacy.  Effective unlearning
-            # produces strongly negative values (the model can no longer generate the
-            # forgotten entity well).  Analogue of prompts_forget in lora.py
-            # EvaluatorTextToImage (line 652).
-            #
-            # retain_average_clip_diff: mean clip_diff for the other N-1 entities' prompts.
-            # Measures average collateral impact.  Targeted unlearning keeps this near zero.
-            # Analogue of prompts_retain in lora.py EvaluatorTextToImage.
-            #
-            # Together these enable verification of the equalization procedure described in
-            # the paper: hyperparameters were tuned so that forget/retain CLIP score
-            # differences are comparable across the three methods.
+            # ── Forget / Retain CLIP delta ────────────────────────────────────────
             if target in interference_per_pair:
                 forget_clip_diff_val = float(interference_per_pair[target].get('clip_diff', float('nan')))
             else:
                 forget_clip_diff_val = float('nan')
                 logger.warning(
-                    'forget_clip_diff: target %r absent from interference_per_pair '
-                    '(would happen if --limit-prompts excluded the target entity).',
+                    'forget_clip_diff: target %r absent from interference_per_pair.',
                     target,
                 )
 
@@ -374,7 +361,6 @@ for method, num_train_epochs in zip(methods, num_train_epochs_list):
                 v.get('clip_diff', float('nan'))
                 for k, v in interference_per_pair.items()
                 if k != target
-                # N-1 entries normally; fewer when --limit-prompts is active
             ]
             retain_average_clip_diff_val = float(np.mean(retain_diffs)) if retain_diffs else float('nan')
 
@@ -385,11 +371,77 @@ for method, num_train_epochs in zip(methods, num_train_epochs_list):
                 f'metric_{method}_{num_train_epochs}_retain_average_clip_diff (↑)'
             ] = retain_average_clip_diff_val
 
+    save_interference_per_entity(task, interference_per_entity, base_folder=base_folder)
+    logger.info('Saved interference_per_entity_%s.json', task)
 
-if overwrite_metrics or not os.path.exists(get_interference_per_entity_path(task)):
-    save_interference_per_entity(task, interference_per_entity)
+    # Sanity check
+    df = pd.read_json(get_interference_per_entity_path(task, base_folder=base_folder))
+    assert df.shape[0] == max_identities, (
+        f'Expected {max_identities} rows, got {df.shape[0]}'
+    )
+    logger.info('Assertion passed: %d rows × %d columns', df.shape[0], df.shape[1])
 
 
-df = pd.read_json(get_interference_per_entity_path(task))
-assert df.shape[0] == 100
-df.shape
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description='Aggregate per-pair interference data into per-entity summary files.'
+    )
+    parser.add_argument(
+        '--task',
+        choices=['scenes', 'breeds', 'people'],
+        required=True,
+        help='Task to process.',
+    )
+    parser.add_argument(
+        '--methods',
+        nargs='+',
+        default=['uce', 'munba', 'distil'],
+        help='Unlearning methods, positionally paired with --epochs.',
+    )
+    parser.add_argument(
+        '--epochs',
+        nargs='+',
+        type=int,
+        default=[0, 200, 400],
+        help='Training epochs, positionally paired with --methods.',
+    )
+    parser.add_argument(
+        '--index-start',
+        type=int,
+        default=0,
+        help='Index of the first entity to process (default 0).',
+    )
+    parser.add_argument(
+        '--max-identities',
+        type=int,
+        default=100,
+        help='Number of entities to process (default 100).',
+    )
+    parser.add_argument(
+        '--base-folder',
+        default='assets',
+        help='Root assets folder relative to CWD (default: assets).',
+    )
+    args = parser.parse_args()
+
+    if len(args.methods) != len(args.epochs):
+        parser.error(
+            f'--methods and --epochs must have the same length '
+            f'(got {len(args.methods)} methods and {len(args.epochs)} epochs).'
+        )
+
+    embedding_assets_folder = os.path.join(args.base_folder, 'datasets')
+
+    compute_for_task(
+        task=cast(Literal['scenes', 'objects', 'breeds', 'people'], args.task),
+        methods=cast(List[Literal['munba', 'uce', 'distil']], args.methods),
+        num_train_epochs_list=args.epochs,
+        index_start=args.index_start,
+        max_identities=args.max_identities,
+        embedding_assets_folder=embedding_assets_folder,
+        base_folder=args.base_folder,
+    )
+
+
+if __name__ == '__main__':
+    main()
