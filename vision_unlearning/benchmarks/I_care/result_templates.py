@@ -151,18 +151,30 @@ class ResultTemplate(BaseModel):
     def _compute_from_scratch(self) -> dict | list:
         raise NotImplementedError()
 
+    def _hf_file_exists(self, hf_token: Optional[str]) -> bool:
+        """Check whether the result exists on HuggingFace, catching all network/auth errors.
+
+        Returns False on any exception so that a bad token or transient network error
+        causes compute() to fall through to _compute_from_scratch() rather than failing.
+        """
+        try:
+            return huggingface_dataset_file_exists(
+                self.remote_repository_name,
+                self._get_data_path_remote(),
+                token=hf_token,
+            )
+        except Exception as exc:
+            logger.debug("HF existence check failed for %s (falling through to local compute): %s",
+                         self._get_data_path_remote(), exc)
+            return False
+
     def compute(self) -> dict:
         hf_token: Optional[str] = os.getenv('HF_TOKEN')
         data: Any
         if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
                 data = json.load(f)
-        elif not self.recompute_if_exists and huggingface_dataset_file_exists(  # Remote
-            self.remote_repository_name,
-            self._get_data_path_remote(),
-            token=hf_token,
-        ):
-            #print('going the remote option', flush=True)
+        elif not self.recompute_if_exists and self._hf_file_exists(hf_token):  # Remote
             huggingface_dataset_file_download(
                 folder_datasets=self.base_folder,
                 dataset_repository=self.remote_repository_name,
@@ -170,7 +182,6 @@ class ResultTemplate(BaseModel):
                 token=hf_token or "",
             )
             assert os.path.exists(self._get_data_path_local())
-            #print('downloaded', flush=True)
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
                 data = json.load(f)
         else:  # Compute from scratch
