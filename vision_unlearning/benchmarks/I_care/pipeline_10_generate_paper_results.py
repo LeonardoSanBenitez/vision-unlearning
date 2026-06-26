@@ -691,7 +691,7 @@ def gen_latent_embedding_figures() -> None:
         # Paper reference for latent_dino_bush uses distil method.
         ("people", "distil", "George W. Bush", "latent_dino_bush.png"),
         ("people", "distil", "Serena Williams", "latent_dino_serena.png"),
-        ("people", "munba", "Winona Ryder", "latent_dino_winona.png"),
+        ("people", "distil", "Winona Ryder", "latent_dino_winona.png"),
     ]
     for task, method, entity_name, filename in cases:
         try:
