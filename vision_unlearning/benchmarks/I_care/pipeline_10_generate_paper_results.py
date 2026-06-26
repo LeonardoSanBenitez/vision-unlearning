@@ -485,7 +485,9 @@ def gen_directional_sr_figures() -> None:
     Sports: 2 panels (False, True).
     """
     try:
-        # Occupation: all 3 source groups side by side
+        # Occupation: all 3 source groups side by side.
+        # Saved under two names: the descriptive paper name and the RT-conventional name
+        # (both are in paper/images/).
         _gen_directional_sr_composite(
             task="people",
             method="distil",
@@ -493,6 +495,15 @@ def gen_directional_sr_figures() -> None:
             interference_pair="clip_diff",
             source_values=["Politician", "Athlete", "Artist"],
             filename="sig_dir_occupation.png",
+        )
+        # Also save as the RT-conventional name (committed in paper/images/ as a separate file).
+        _gen_directional_sr_composite(
+            task="people",
+            method="distil",
+            attribute="occupation_simplified",
+            interference_pair="clip_diff",
+            source_values=["Politician", "Athlete", "Artist"],
+            filename="SignificantRelationshipCategoricalDirectional_occupation_people_fade.png",
         )
     except AttributeError:
         logger.warning(
