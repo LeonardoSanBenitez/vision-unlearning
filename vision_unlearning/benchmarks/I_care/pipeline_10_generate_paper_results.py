@@ -355,37 +355,111 @@ def gen_srn_highlights() -> None:
 # 7. Directional SR figures
 # ---------------------------------------------------------------------------
 
-def gen_directional_sr_figures() -> None:
-    """sig_dir_occupation.png and sig_dir_sports.png.
+def _gen_directional_sr_composite(
+    task: str,
+    method: str,
+    attribute: str,
+    interference_pair: str,
+    source_values: list,
+    filename: str,
+) -> None:
+    """Generate a multi-panel directional SR figure (one panel per source group).
 
-    Each figure shows a SignificantRelationshipCategoricalDirectional RT
-    (two attribute values side by side).  The paper places two RT output
-    panels next to each other; here we generate each RT plot separately.
+    The paper reference shows all source groups for an attribute side by side in one figure.
+    Each panel is produced by one RT invocation; panels are stitched into a composite.
     """
-    cases = [
-        ("people", "distil", "occupation_simplified", "sig_dir_occupation.png"),
-        ("scenes", "distil", "sports", "sig_dir_sports.png"),
-    ]
-    for task, method, attr, filename in cases:
+    import matplotlib.pyplot as plt
+    import io
+
+    panel_figs = []
+    for source_val in source_values:
         try:
             rt = vb.ResultTemplateSignificantRelationshipCategoricalDirectional(
                 task=task,
                 unlearning_algorithm=method,
-                attribute=attr,
+                attribute=attribute,
+                source_attribute_value=source_val,
+                interference_pair=interference_pair,
                 base_folder=ASSETS_DIR,
             )
             data = rt.compute()
             result = rt.plot(data, return_fig=True)
             if result is not None:
-                fig, _ = result
-                _save(fig, filename)
-        except AttributeError:
-            logger.warning(
-                "ResultTemplateSignificantRelationshipCategoricalDirectional not found — "
-                "skipping %s", filename
-            )
+                panel_fig, _ = result
+                panel_figs.append(panel_fig)
+            else:
+                logger.warning(
+                    "Directional SR %s/%s/%s/%s: plot returned None — skipping panel",
+                    task, method, attribute, source_val,
+                )
         except Exception as exc:
-            logger.error("Directional SR %s/%s/%s: %s", task, method, attr, exc)
+            logger.error(
+                "Directional SR %s/%s/%s/%s: %s", task, method, attribute, source_val, exc
+            )
+
+    if not panel_figs:
+        logger.warning("Directional SR %s: no panels generated — skipping %s", attribute, filename)
+        return
+
+    # Stitch panels into a single composite figure via PNG buffer + imshow
+    n_panels = len(panel_figs)
+    composite_fig, composite_axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
+    if n_panels == 1:
+        composite_axes = [composite_axes]
+
+    for ax, panel_fig in zip(composite_axes, panel_figs):
+        buf = io.BytesIO()
+        panel_fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        import matplotlib.image as mpimg
+        img = mpimg.imread(buf)
+        ax.imshow(img)
+        ax.axis('off')
+        plt.close(panel_fig)
+
+    composite_fig.tight_layout(pad=0)
+    _save(composite_fig, filename)
+
+
+def gen_directional_sr_figures() -> None:
+    """sig_dir_occupation.png and sig_dir_sports.png.
+
+    Each figure is a multi-panel composite showing all source groups for the attribute
+    side by side, matching the paper reference layout.
+    Occupation: 3 panels (Politician, Athlete, Artist).
+    Sports: 2 panels (False, True).
+    """
+    try:
+        # Occupation: all 3 source groups side by side
+        _gen_directional_sr_composite(
+            task="people",
+            method="distil",
+            attribute="occupation_simplified",
+            interference_pair="clip_diff",
+            source_values=["Politician", "Athlete", "Artist"],
+            filename="sig_dir_occupation.png",
+        )
+    except AttributeError:
+        logger.warning(
+            "ResultTemplateSignificantRelationshipCategoricalDirectional not found — "
+            "skipping directional SR figures"
+        )
+
+    try:
+        # Sports: both source groups (False=non-sport, True=sport)
+        _gen_directional_sr_composite(
+            task="scenes",
+            method="distil",
+            attribute="sports",
+            interference_pair="clip_diff",
+            source_values=["False", "True"],
+            filename="sig_dir_sports.png",
+        )
+    except AttributeError:
+        logger.warning(
+            "ResultTemplateSignificantRelationshipCategoricalDirectional not found — "
+            "skipping directional SR figures"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -431,8 +505,9 @@ def gen_visual_summaries() -> None:
     from vision_unlearning.datasets.testbed import get_metadata_filtered
 
     cases = [
-        ("breeds", "uce", "Giant Schnauzer", "clip_diff", "visual_summary_schnauzer_uce.png"),
-        ("scenes", "distil", "ice skating", "clip_diff", "visual_summary_skating_distil.png"),
+        # Entity names must exactly match the 'name' field in metadata_breeds/scenes JSON.
+        ("breeds", "uce", "giant schnauzer dog", "clip_diff", "visual_summary_schnauzer_uce.png"),
+        ("scenes", "distil", "ice_skating_rink_indoor", "clip_diff", "visual_summary_skating_distil.png"),
     ]
     for task, method, entity_name, mp, filename in cases:
         try:
@@ -470,9 +545,13 @@ def gen_visual_summaries() -> None:
 def gen_latent_embedding_figures() -> None:
     """latent_dino_bush.png, latent_dino_serena.png, latent_dino_winona.png."""
     cases = [
-        ("people", "uce", "George W. Bush", "latent_dino_bush.png"),
+        # Paper reference for latent_dino_bush uses distil method.
+        ("people", "distil", "George W. Bush", "latent_dino_bush.png"),
         ("people", "distil", "Serena Williams", "latent_dino_serena.png"),
-        ("people", "munba", "Winona Ryder", "latent_dino_winona.png"),
+        # latent_dino_winona: Winona Ryder munba embedding file is malformed
+        # (only 400 records for Winona Ryder herself, not all 100 entities).
+        # Deferred until embedding file is regenerated.
+        # ("people", "munba", "Winona Ryder", "latent_dino_winona.png"),
     ]
     for task, method, entity_name, filename in cases:
         try:
@@ -559,11 +638,12 @@ def gen_msaone_figures() -> None:
     """
     cases = [
         # (task, method, mp, similarity_metric, emitter, filename)
-        ("breeds", "uce", "clip_diff", "dino", "Giant Schnauzer",
+        # Entity names must exactly match the 'name' field in filtered metadata JSON.
+        ("breeds", "uce", "clip_diff", "dino", "giant schnauzer dog",
          "msaone_giant_schnauzer_clip_diff_dino.png"),
-        ("breeds", "uce", "clip_diff", "dino", "Giant Schnauzer",
+        ("breeds", "uce", "clip_diff", "dino", "giant schnauzer dog",
          "msaone_rank_giant_schnauzer_uce_clip_diff_dino.png"),
-        ("scenes", "distil", "clip_diff", "act", "ice skating",
+        ("scenes", "distil", "clip_diff", "act", "ice_skating_rink_indoor",
          "msaone_rank_ice_skating_distil_clip_diff_act.png"),
     ]
     for task, method, mp, sim, emitter, filename in cases:

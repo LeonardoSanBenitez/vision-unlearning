@@ -2471,7 +2471,16 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
     # ------------------------------------------------------------------
 
     def _get_baseline_embedding_path(self) -> str:
-        """Path to the original-model baseline DINOv2 embedding file."""
+        """Path to the original-model baseline DINOv2 embedding file.
+
+        Prefers the canonical method-agnostic file (embeddings_{task}_original.json);
+        falls back to the per-method file for backward compatibility.
+        """
+        canonical = os.path.join(
+            self.base_folder, "datasets", f"embeddings_{self.task}_original.json"
+        )
+        if os.path.exists(canonical):
+            return canonical
         epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
         fname = (
             f"embeddings_{self.task}_original"
@@ -4277,7 +4286,9 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     n_pca_components: int = 2
 
     def _serialize_parameters(self) -> str:
-        entity_slug = self.entity.lower().replace(" ", "_")
+        # Strip spaces → underscore; also strip dots and other non-alphanumeric chars
+        # so that "George W. Bush" → "george_w_bush" (matching on-disk cache file names).
+        entity_slug = self.entity.lower().replace(" ", "_").replace(".", "")
         return f"{self.model}_{self.task}_{self.unlearning_algorithm}_{entity_slug}"
 
     def _resolve_hf_entity(self) -> str:
@@ -4289,11 +4300,14 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     # ------------------------------------------------------------------
 
     def _get_baseline_embedding_path(self) -> str:
-        # NOTE: The baseline is method-agnostic (base SD1.4, no LoRA/unlearning).
-        # The file includes method+epoch in its name for historical/backward-compat
-        # reasons only (see 3_compute_embeddings.py comment on "filename coupling").
-        # All per-method baseline files should contain identical embeddings once
-        # generated from the shared baseline folder (generated_{task}_baseline/).
+        # Prefer the canonical (method-agnostic) baseline file; fall back to the
+        # per-method file for backward compatibility (older datasets that shipped
+        # embeddings_{task}_original_{method}_{epochs:03d}.json instead).
+        canonical = os.path.join(
+            self.base_folder, "datasets", f"embeddings_{self.task}_original.json"
+        )
+        if os.path.exists(canonical):
+            return canonical
         epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
         fname = f"embeddings_{self.task}_original_{self.unlearning_algorithm}_{epochs:03d}.json"
         return os.path.join(self.base_folder, "datasets", fname)

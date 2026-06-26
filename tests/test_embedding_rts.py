@@ -195,7 +195,9 @@ class TestEmbeddingUnlearningProfileSerialize:
         )
         s = rt._serialize_parameters()
         assert "distil" in s
-        assert "george_w._bush" in s.lower()
+        # Dots are stripped from the entity slug: "George W. Bush" → "george_w_bush"
+        assert "george_w_bush" in s.lower()
+        assert "george_w._bush" not in s.lower()
 
     def test_serialize_no_spaces(self) -> None:
         rt = vb.ResultTemplateEmbeddingUnlearningProfile(
