@@ -333,6 +333,7 @@ class ResultTemplateMetricMetricAlignment(ResultTemplate):
         legend_handles: List[Line2D] = []
 
         for (method, data), colour in zip(method_data.items(), palette):
+            display_method = _display_unlearning_algorithm(method)
             result = data['result']
             x: List[float] = result['x']
             y: List[float] = result['y']
@@ -342,7 +343,7 @@ class ResultTemplateMetricMetricAlignment(ResultTemplate):
             legend_handles.append(
                 Line2D(
                     [0], [0], marker='o', color='w',
-                    markerfacecolor=colour, markersize=8, label=method,
+                    markerfacecolor=colour, markersize=8, label=display_method,
                 )
             )
 
@@ -355,7 +356,7 @@ class ResultTemplateMetricMetricAlignment(ResultTemplate):
                 ax.scatter(cx, cy, color=colour, s=120, marker='D',
                            zorder=5, edgecolors='black', linewidths=0.8)
                 ax.annotate(
-                    f"{method}\nμ=({cx:.1f}, {cy:.1f})",
+                    f"{display_method}\nμ=({cx:.1f}, {cy:.1f})",
                     xy=(cx, cy),
                     xytext=(6, 6),
                     textcoords='offset points',

@@ -429,7 +429,7 @@ for index in range(index_start, index_start + max_identities):
             generate_dataset(  # type: ignore[arg-type]
                 model_base_name=model_generate_name,
                 lora_name=lora_generate_name,
-                model_pipeline=model_pipeline,
+                model_pipeline=model_pipeline,  # type: ignore[arg-type]
                 prompts=prompts,
                 output_path=generated_dataset_output_path,
                 seeds=generate_dataset_seeds,

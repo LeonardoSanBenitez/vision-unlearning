@@ -488,7 +488,8 @@ class TestPlotFromFakeData:
         )
         assert isinstance(fig, Figure)
         legend_labels = [h.get_label() for h in ax.get_legend().legend_handles]
-        assert set(legend_labels) == {"distil", "munba", "uce"}
+        # Labels show publication display names (SPARE = distil, UCE = uce, Munba = munba)
+        assert set(legend_labels) == {"SPARE", "UCE", "Munba"}
 
     def test_metric_similarity_alignment_multi_plot(self) -> None:
         # Build a tiny but real SHAP Explanation, serialize it the way the

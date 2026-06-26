@@ -778,7 +778,8 @@ if __name__ == "__main__":
         )
 
         ds_entity = GeneratedDataset(  # type: ignore[arg-type]
-            task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
+            task=task,  # type: ignore[arg-type]
+            target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
         )
         dataset_folder = ds_entity.folder_path
 
