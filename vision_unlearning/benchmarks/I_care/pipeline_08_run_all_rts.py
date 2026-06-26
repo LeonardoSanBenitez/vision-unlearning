@@ -56,15 +56,19 @@ def list_hf_result_files(
 ) -> FrozenSet[str]:
     """Return the set of all file paths inside ``results/`` on HuggingFace.
 
-    Makes a single API call and caches the result.  On failure returns an
-    empty frozenset (the callers will fall through to the per-file HEAD path).
+    Uses ``list_repo_files`` (faster than ``list_repo_tree`` for large datasets)
+    to list all files and filter for the ``results/`` prefix.  On failure
+    returns an empty frozenset (callers fall through to per-file HEAD requests).
     """
     try:
-        from huggingface_hub import list_repo_tree
+        from huggingface_hub import list_repo_files
         paths = frozenset(
-            item.path  # type: ignore[union-attr]
-            for item in list_repo_tree(repository, repo_type="dataset", token=token)
-            if hasattr(item, "path") and item.path.startswith("results/")
+            p for p in list_repo_files(
+                repository,
+                repo_type="dataset",
+                token=token,
+            )
+            if p.startswith("results/")
         )
         logger.info(
             "HF results tree: %d files listed in '%s/results/'", len(paths), repository
@@ -310,11 +314,14 @@ def _sr_attributes_for_task(task: str) -> List[str]:
 
     Covers:
     - Attributes of interest (categorical, from task_to_attributes_of_interest).
-    - Paper-reported numerical attributes (birthyear, hpi for people).
+    - Paper-reported numerical attributes: birthyear/hpi for people,
+      grooming_frequency_value for breeds.
     """
     attrs: List[str] = list(vb.task_to_attributes_of_interest.get(task, []))
     if task == "people":
         attrs = attrs + ["birthyear", "hpi"]
+    elif task == "breeds":
+        attrs = attrs + ["grooming_frequency_value"]
     return attrs
 
 
