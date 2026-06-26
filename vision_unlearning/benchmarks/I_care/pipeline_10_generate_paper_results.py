@@ -164,39 +164,82 @@ def gen_sig_by_method(df: pd.DataFrame) -> None:
 # 2. sig_by_attribute.png
 # ---------------------------------------------------------------------------
 
+def _load_srn_significant_counts() -> Dict[str, Dict[str, int]]:
+    """Load count of significant results from SRN JSONs.
+
+    Returns {task: {attribute: count}} for all numerical attributes.
+    """
+    srn_dir = os.path.join(ASSETS_DIR, "results", "SignificantRelationshipNumerical")
+    result: Dict[str, Dict[str, int]] = {}
+    if not os.path.isdir(srn_dir):
+        logger.warning("SRN dir not found: %s", srn_dir)
+        return result
+    for fpath in sorted(glob.glob(os.path.join(srn_dir, "*.json"))):
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                d = json.load(f)
+            meta = d["metadata"]
+            task = meta["task"]
+            attr = meta["attribute"]
+            sig = bool(d["result"]["significant"])
+            if task not in result:
+                result[task] = {}
+            result[task][attr] = result[task].get(attr, 0) + (1 if sig else 0)
+        except Exception as exc:
+            logger.warning("SRN load %s: %s", fpath, exc)
+    return result
+
+
 def gen_sig_by_attribute(df: pd.DataFrame) -> None:
-    """Bar chart: % significant SR by attribute, three task panels."""
+    """Bar chart: % significant SR by attribute, three task panels.
+
+    Combines SRC (categorical) results from the df argument with SRN (numerical)
+    results loaded from the SRN result JSONs.  Denominator = N_ME × N_METHODS = 153.
+    """
     task_order = ["breeds", "scenes", "people"]
     task_labels = {"breeds": "Breeds", "scenes": "Scenes", "people": "People"}
     N_ME = 51
     N_METHODS = 3
-    denom = N_ME * N_METHODS
+    denom = N_ME * N_METHODS  # 153
 
-    fig, axes = plt.subplots(1, 3, figsize=(9, 4))
+    # Load SRN counts {task: {attr: sig_count}}
+    srn_counts = _load_srn_significant_counts()
+
+    fig, axes = plt.subplots(1, 3, figsize=(11, 4))
     for ax, task in zip(axes, task_order):
+        # SRC counts (from sr_grid_reconciled.csv)
         sub = df[df["task"] == task]
-        counts = sub.groupby("attribute")["significant"].sum().sort_values(ascending=False)
-        attrs = list(counts.index)
+        src_counts = sub.groupby("attribute")["significant"].sum().to_dict()
+
+        # Merge with SRN counts for this task
+        all_counts = dict(src_counts)
+        for attr, cnt in (srn_counts.get(task, {})).items():
+            all_counts[attr] = all_counts.get(attr, 0) + cnt
+
+        # Sort descending
+        sorted_items = sorted(all_counts.items(), key=lambda kv: kv[1], reverse=True)
+        attrs = [kv[0] for kv in sorted_items]
+        values_raw = [kv[1] for kv in sorted_items]
         labels = [ATTR_LABELS.get(a, a) for a in attrs]
-        values = counts.values.astype(int)
-        pcts: np.ndarray = values / denom * 100  # type: ignore[operator,assignment]
+        values: np.ndarray = np.array(values_raw, dtype=float)
+        pcts: np.ndarray = values / denom * 100
 
         x = np.arange(len(attrs))
         ax.bar(x, pcts, color="steelblue", edgecolor="white", width=0.55)
-        for xi, (k, pct) in enumerate(zip(values, pcts)):
+        for xi, (k, pct) in enumerate(zip(values_raw, pcts)):
             ax.text(xi, pct + 0.5, f"{k}/{denom}", ha="center", va="bottom", fontsize=6.5)
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontsize=7.5, rotation=20, ha="right")
         ax.set_ylabel("% significant", fontsize=8)
         ax.set_title(task_labels[task], fontsize=9)
-        ax.set_ylim(0, 55)
+        ax.set_ylim(0, max(float(pcts.max()) + 15, 55))
         ax.tick_params(axis="y", labelsize=7)
 
         pairs = [(i, j) for i in range(len(attrs)) for j in range(i + 1, len(attrs))]
         bracket_y = float(pcts.max()) + 4.0
         gap = 5.5
         for idx, (i, j) in enumerate(pairs):
-            p = _chi2_pair(int(values[i]), denom, int(values[j]), denom)
+            p = _chi2_pair(int(values_raw[i]), denom, int(values_raw[j]), denom)
             _draw_bracket(ax, x[i], x[j], bracket_y + idx * gap, _pval_str(p))
 
     plt.suptitle(
@@ -212,22 +255,53 @@ def gen_sig_by_attribute(df: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def gen_sig_by_me(df: pd.DataFrame) -> None:
-    """Bar chart: top-15 Me by % significant relationships."""
-    counts = df.groupby("me")["significant"].sum()
-    denom = df.groupby("me").size()
-    fracs = (counts / denom * 100).sort_values(ascending=False).head(15)
+    """Heatmap: count significant SR per Me (y-axis) × method (x-axis).
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    fracs.plot.bar(ax=ax, color="steelblue", edgecolor="white")
+    Each cell = number of significant results for that (Me, method) combination
+    summed across all tasks and attributes-of-interest.
+    Matches paper figure format.
+    """
+    method_order = ["uce", "distil", "munba"]
+    method_labels_ordered = [METHOD_LABELS.get(m, m) for m in method_order]
+
+    # Count significant per (me, method)
+    piv = df.pivot_table(
+        index="me",
+        columns="method",
+        values="significant",
+        aggfunc="sum",
+        fill_value=0,
+    )
+    # Reorder columns to match paper method order (use only those present)
+    cols_present = [m for m in method_order if m in piv.columns]
+    piv = piv[cols_present]
+    piv.columns = [METHOD_LABELS.get(c, c) for c in piv.columns]
+    method_labels_ordered = list(piv.columns)
+
+    # Sort rows by total count descending
+    piv = piv.loc[piv.sum(axis=1).sort_values(ascending=False).index]
+
+    fig_h = max(6, 0.35 * len(piv))
+    fig, ax = plt.subplots(figsize=(3 + len(method_labels_ordered) * 0.9, fig_h))
+    sns.heatmap(
+        piv,
+        ax=ax,
+        annot=True,
+        fmt="d",
+        cmap="YlOrRd",
+        linewidths=0.4,
+        linecolor="lightgray",
+        cbar_kws={"shrink": 0.6, "label": "Count significant"},
+    )
     ax.set_title(
-        "Top-15 Me by % significant relationships\n"
-        "(all tasks × attributes-of-interest × methods)",
+        "Significant SR results per interference metric × method\n"
+        "(summed over all tasks × attributes-of-interest)",
         fontsize=9,
     )
-    ax.set_ylabel("% significant", fontsize=8)
-    ax.set_xlabel("Me", fontsize=8)
-    ax.tick_params(axis="x", rotation=45, labelsize=7)
-    ax.set_ylim(0, 100)
+    ax.set_xlabel("Method", fontsize=8)
+    ax.set_ylabel("Interference metric (Me)", fontsize=8)
+    plt.setp(ax.get_xticklabels(), rotation=0, fontsize=8)
+    plt.setp(ax.get_yticklabels(), rotation=0, fontsize=7)
     plt.tight_layout()
     _save(fig, "sig_by_me.png")
 
@@ -236,33 +310,27 @@ def gen_sig_by_me(df: pd.DataFrame) -> None:
 # 4. sig_breeds_group.png (breeds / group attribute)
 # ---------------------------------------------------------------------------
 
-def gen_sig_breeds_group(df: pd.DataFrame) -> None:
-    """Bar chart: % significant SR for breeds / group attribute by method."""
-    sub = df[(df["task"] == "breeds") & (df["attribute"] == "group")]
-    sub = sub.copy()
-    sub["method_label"] = sub["method"].map(lambda m: METHOD_LABELS.get(m, m))
+def gen_sig_breeds_group(_df: pd.DataFrame) -> None:
+    """SRC boxplot: breeds / group attribute, UCE method.
 
-    grp = sub.groupby("method_label")
-    counts = grp["significant"].sum().astype(int)
-    totals = grp.size().astype(int)
-    pcts: pd.Series = (counts / totals * 100)
-
-    order = [l for l in ["uce", "spare", "munba"] if l in pcts.index]
-    counts, totals, pcts = counts[order], totals[order], pcts[order]
-
-    fig, ax = plt.subplots(figsize=(4, 4))
-    x = np.arange(len(order))
-    ax.bar(x, pcts.values, color="steelblue", edgecolor="white", width=0.55)  # type: ignore[arg-type]
-    for xi, (k, n, pct) in enumerate(zip(counts, totals, pcts)):
-        ax.text(xi, pct + 0.8, f"{k}/{n}", ha="center", va="bottom", fontsize=8)
-    ax.set_xticks(x)
-    ax.set_xticklabels(order, fontsize=9)
-    ax.set_ylabel("% significant SR results", fontsize=9)
-    ax.set_xlabel("Method", fontsize=9)
-    ax.set_ylim(0, max(pcts.max() + 20, 50))
-    ax.set_title("Breeds / group attribute × Me × method", fontsize=9)
-    plt.tight_layout()
-    _save(fig, "sig_breeds_group.png")
+    Matches paper figure: y = 'Emitter worst interfered clip diff', x = breed group,
+    method = UCE.  Uses the precomputed SRC RT JSON directly.
+    """
+    try:
+        rt = vb.ResultTemplateSignificantRelationshipCategorical(
+            task="breeds",  # type: ignore[arg-type]
+            unlearning_algorithm="uce",  # type: ignore[arg-type]
+            interference_entity="Emitter worst interfered clip diff",  # type: ignore[arg-type]
+            attribute="group",
+            base_folder=ASSETS_DIR,
+        )
+        data = rt.compute()
+        result = rt.plot(data, return_fig=True)
+        if result is not None:
+            fig, _ = result
+            _save(fig, "sig_breeds_group.png")
+    except Exception as exc:
+        logger.error("SRC breeds/group: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +604,7 @@ def gen_iat_figures() -> None:
     """iat_gender.png, iat_hpi.png, iat_uce.png."""
     cases = [
         ("people", "distil", "gender", "occupation_simplified", "iat_gender.png"),
-        ("people", "distil", "gender", "hpi_bin", "iat_hpi.png"),
+        ("people", "distil", "occupation_simplified", "hpi_bin", "iat_hpi.png"),
         ("people", "uce", "occupation_simplified", "hpi_bin", "iat_uce.png"),
     ]
     for task, method, attr1, attr2, filename in cases:
@@ -563,45 +631,54 @@ def gen_iat_figures() -> None:
 # ---------------------------------------------------------------------------
 
 def gen_visual_summaries() -> None:
-    """visual_summary_schnauzer_uce.png and visual_summary_skating_distil.png.
+    """visual_summary_schnauzer_uce_seed{N}.png and visual_summary_skating_distil_seed{N}.png.
 
-    These require the InterferenceVisualSummary RT which downloads from HF.
-    Entity indices are looked up from the metadata.
+    Generates one image per seed (42, 43, 44, 45) for each entity.
+    The paper combined all seeds manually; we now produce separate per-seed figures.
     """
     from vision_unlearning.datasets.testbed import get_metadata_filtered
 
+    SEEDS = [42, 43, 44, 45]
     cases = [
-        # Entity names must exactly match the 'name' field in metadata_breeds/scenes JSON.
-        ("breeds", "uce", "giant schnauzer dog", "clip_diff", "visual_summary_schnauzer_uce.png"),
-        ("scenes", "distil", "ice_skating_rink_indoor", "clip_diff", "visual_summary_skating_distil.png"),
+        # (task, method, entity_name, mp, filename_prefix)
+        ("breeds", "uce", "giant schnauzer dog", "clip_diff", "visual_summary_schnauzer_uce"),
+        ("scenes", "distil", "ice_skating_rink_indoor", "clip_diff", "visual_summary_skating_distil"),
     ]
-    for task, method, entity_name, mp, filename in cases:
+    for task, method, entity_name, mp, prefix in cases:
         try:
             metadata = get_metadata_filtered(task)  # type: ignore[arg-type]
             names = [m["name"] for m in metadata]
             if entity_name not in names:
                 logger.warning(
                     "Entity '%s' not found in %s metadata; skipping %s",
-                    entity_name, task, filename,
+                    entity_name, task, prefix,
                 )
                 continue
             entity_index = names.index(entity_name)
-            rt = vb.ResultTemplateInterferenceVisualSummary(
-                task=task,  # type: ignore[arg-type]
-                unlearning_algorithm=method,  # type: ignore[arg-type]
-                interference_pair=mp,  # type: ignore[arg-type]
-                entity_index=entity_index,
-                seed=42,
-                save_outputs=True,
-                base_folder=ASSETS_DIR,
-            )
-            data = rt.compute()
-            result = rt.plot(data, return_fig=True)
-            if result is not None:
-                fig, _ = result
-                _save(fig, filename)
+            for seed in SEEDS:
+                filename = f"{prefix}_seed{seed}.png"
+                try:
+                    rt = vb.ResultTemplateInterferenceVisualSummary(
+                        task=task,  # type: ignore[arg-type]
+                        unlearning_algorithm=method,  # type: ignore[arg-type]
+                        interference_pair=mp,  # type: ignore[arg-type]
+                        entity_index=entity_index,
+                        seed=seed,
+                        save_outputs=True,
+                        base_folder=ASSETS_DIR,
+                    )
+                    data = rt.compute()
+                    result = rt.plot(data, return_fig=True)
+                    if result is not None:
+                        fig, _ = result
+                        _save(fig, filename)
+                except Exception as exc:
+                    logger.error(
+                        "VisualSummary %s/%s/%s/%s seed=%d: %s",
+                        task, method, entity_name, mp, seed, exc,
+                    )
         except Exception as exc:
-            logger.error("VisualSummary %s/%s/%s/%s: %s", task, method, entity_name, mp, exc)
+            logger.error("VisualSummary setup %s/%s/%s: %s", task, method, entity_name, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -614,10 +691,7 @@ def gen_latent_embedding_figures() -> None:
         # Paper reference for latent_dino_bush uses distil method.
         ("people", "distil", "George W. Bush", "latent_dino_bush.png"),
         ("people", "distil", "Serena Williams", "latent_dino_serena.png"),
-        # latent_dino_winona: Winona Ryder munba embedding file is malformed
-        # (only 400 records for Winona Ryder herself, not all 100 entities).
-        # Deferred until embedding file is regenerated.
-        # ("people", "munba", "Winona Ryder", "latent_dino_winona.png"),
+        ("people", "munba", "Winona Ryder", "latent_dino_winona.png"),
     ]
     for task, method, entity_name, filename in cases:
         try:
@@ -744,39 +818,49 @@ def gen_mma_clip_rmse() -> None:
 # ---------------------------------------------------------------------------
 
 def gen_msaone_figures() -> None:
-    """msaone_* figures — MetricSimilarityAlignment single-emitter views.
+    """msaone_* figures — single-emitter MSA and rank-by-similarity plots.
 
-    Requires the MSAOne / InterferenceBySimilarityRank RT.
-    These use specific (emitter, task, method, mp, similarity_metric) parameters
-    chosen during analysis; see unlearning-analysis/run_msaone_figures.py.
+    scatter cases: ResultTemplateMetricSimilarityAlignmentOne (x=similarity, y=interference)
+    rank cases:    ResultTemplateInterferenceBySimilarityRank  (x=similarity rank, y=interference)
     """
+    # (rt_type, task, method, mp, similarity_metric, emitter, filename)
+    # rt_type: "scatter" | "rank"
     cases = [
-        # (task, method, mp, similarity_metric, emitter, filename)
-        # Entity names must exactly match the 'name' field in filtered metadata JSON.
-        ("breeds", "uce", "clip_diff", "dino", "giant schnauzer dog",
+        ("scatter", "breeds", "uce", "clip_diff", "dino", "giant schnauzer dog",
          "msaone_giant_schnauzer_clip_diff_dino.png"),
-        ("breeds", "uce", "clip_diff", "dino", "giant schnauzer dog",
+        ("rank", "breeds", "uce", "clip_diff", "dino", "giant schnauzer dog",
          "msaone_rank_giant_schnauzer_uce_clip_diff_dino.png"),
-        ("scenes", "distil", "clip_diff", "act", "ice_skating_rink_indoor",
+        ("rank", "scenes", "distil", "clip_diff", "act", "ice_skating_rink_indoor",
          "msaone_rank_ice_skating_distil_clip_diff_act.png"),
     ]
-    for task, method, mp, sim, emitter, filename in cases:
+    for rt_type, task, method, mp, sim, emitter, filename in cases:
         try:
-            rt = vb.ResultTemplateMetricSimilarityAlignmentOne(  # type: ignore[arg-type]
-                task=task,  # type: ignore[arg-type]
-                unlearning_algorithm=method,  # type: ignore[arg-type]
-                interference_pair=mp,  # type: ignore[arg-type]
-                similarity_metric=sim,  # type: ignore[arg-type]
-                entity=emitter,
-                base_folder=ASSETS_DIR,
-            )
+            rt: Any  # ResultTemplateMetricSimilarityAlignmentOne or ResultTemplateInterferenceBySimilarityRank
+            if rt_type == "scatter":
+                rt = vb.ResultTemplateMetricSimilarityAlignmentOne(  # type: ignore[arg-type]
+                    task=task,  # type: ignore[arg-type]
+                    unlearning_algorithm=method,  # type: ignore[arg-type]
+                    interference_pair=mp,  # type: ignore[arg-type]
+                    similarity_metric=sim,  # type: ignore[arg-type]
+                    entity=emitter,
+                    base_folder=ASSETS_DIR,
+                )
+            else:
+                rt = vb.ResultTemplateInterferenceBySimilarityRank(  # type: ignore[arg-type]
+                    task=task,  # type: ignore[arg-type]
+                    unlearning_algorithm=method,  # type: ignore[arg-type]
+                    interference_pair=mp,  # type: ignore[arg-type]
+                    similarity_metric=sim,  # type: ignore[arg-type]
+                    entity=emitter,
+                    base_folder=ASSETS_DIR,
+                )
             data = rt.compute()
             result = rt.plot(data, return_fig=True)
             if result is not None:
                 fig, _ = result
                 _save(fig, filename)
         except Exception as exc:
-            logger.error("MSAOne %s/%s/%s/%s/%s: %s", task, method, mp, sim, emitter, exc)
+            logger.error("MSAOne %s/%s/%s/%s/%s/%s: %s", rt_type, task, method, mp, sim, emitter, exc)
 
 
 # ---------------------------------------------------------------------------
