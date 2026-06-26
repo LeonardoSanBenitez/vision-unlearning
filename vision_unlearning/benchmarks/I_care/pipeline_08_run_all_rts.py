@@ -47,6 +47,23 @@ import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
+# Type-safe enumeration lists
+# Derived from vb.type_* Literals; kept in sync with configuration.py.
+# Defined once to avoid repeating get_args() calls and to give mypy a clean
+# List[str] type.  Only type_me uses get_args() because it has 51 values.
+# ---------------------------------------------------------------------------
+
+_ALL_MODELS: List[str] = ["sd1.4"]
+_ALL_TASKS: List[str] = ["breeds", "scenes", "people"]
+_ALL_METHODS: List[str] = ["distil", "munba", "uce"]
+_ALL_MP: List[str] = ["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"]
+_ALL_S: List[str] = ["clip", "jacc", "dino", "act", "weight_overlap"]
+_ALL_L: List[str] = ["clip_embedding", "dino_embedding"]
+_ALL_ME: List[str] = list(get_args(vb.type_me))  # type: ignore[misc]
+_ALL_REG_ALGOS: List[str] = ["linear_regression", "random_forest"]
+
+
+# ---------------------------------------------------------------------------
 # HF tree cache — list remote results/ folder once to avoid per-file HEAD
 # ---------------------------------------------------------------------------
 
@@ -131,8 +148,8 @@ def run_metric_metric_alignment(
     upload_if_recomputed: bool = False,
 ) -> None:
     """MetricMetricAlignment: (model, task, unlearning_algorithm, me1, me2)."""
-    me_list = list(get_args(vb.type_me))
-    for model in list(get_args(vb.type_model)):
+    me_list = _ALL_ME
+    for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
                 for i, me1 in enumerate(me_list):
@@ -167,11 +184,11 @@ def run_metric_similarity_alignment(
     upload_if_recomputed: bool = False,
 ) -> None:
     """MetricSimilarityAlignment: (model, task, unlearning_algorithm, mp, s)."""
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in list(get_args(vb.type_mp)):
-                    for similarity_metric in list(get_args(vb.type_s)):
+                for interference_pair in _ALL_MP:
+                    for similarity_metric in _ALL_S:
                         try:
                             rt = vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
                                 model=model,
@@ -208,14 +225,14 @@ def run_metric_similarity_alignment_multi(
     The combined run (clip+dino+jacc) is the primary analysis; the individual-metric
     runs (clip-only, dino-only, jacc-only) serve as within-model baselines.
     """
-    all_metrics = list(get_args(vb.type_s))
-    regression_algorithms = ["linear_regression", "random_forest"]
+    all_metrics = _ALL_S
+    regression_algorithms = _ALL_REG_ALGOS
     similarity_sets = [all_metrics]  # primary: all combined
 
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in list(get_args(vb.type_mp)):
+                for interference_pair in _ALL_MP:
                     for similarity_metric_list in similarity_sets:
                         for regression_algorithm in regression_algorithms:
                             try:
@@ -253,10 +270,10 @@ def run_interference_matrix(
     upload_if_recomputed: bool = False,
 ) -> None:
     """InterferenceMatrix: (model, task, unlearning_algorithm, interference_pair)."""
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in list(get_args(vb.type_mp)):
+                for interference_pair in _ALL_MP:
                     try:
                         rt = vb.ResultTemplateInterferenceMatrix(  # type: ignore[arg-type]
                             model=model,
@@ -285,9 +302,9 @@ def run_similarity_matrix(
     upload_if_recomputed: bool = False,
 ) -> None:
     """SimilarityMatrix: (model, task, similarity_metric)."""
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
-            for similarity_metric in list(get_args(vb.type_s)):
+            for similarity_metric in _ALL_S:
                 try:
                     rt = vb.ResultTemplateSimilarityMatrix(
                         model=model,
@@ -337,8 +354,8 @@ def run_significant_relationship(
     attributes (birthyear, hpi for people).  Dispatches to Categorical first;
     falls back to Numerical on InvalidAttributeTypeError.
     """
-    me_list = list(get_args(vb.type_me))
-    for model in list(get_args(vb.type_model)):
+    me_list = _ALL_ME
+    for model in _ALL_MODELS:
         for task in tasks:
             attributes = _sr_attributes_for_task(task)
             for unlearning_algorithm in methods:
@@ -404,8 +421,8 @@ def run_count_significant_relationship(
 
     Uses attributes of interest only (categorical; 2 per task).
     """
-    me_list = list(get_args(vb.type_me))
-    for model in list(get_args(vb.type_model)):
+    me_list = _ALL_ME
+    for model in _ALL_MODELS:
         for task in tasks:
             try:
                 rt = vb.ResultTemplateCountSignificantRelationship(
@@ -449,13 +466,13 @@ def run_implicit_association_test(
         ("occupation_simplified", "hpi_bin"),
     ]
 
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
             if task != "people":
                 logger.info("IAT: skipping task=%s (IAT is people-only in the paper)", task)
                 continue
             for unlearning_algorithm in methods:
-                for latent_embedding in list(get_args(vb.type_l)):
+                for latent_embedding in _ALL_L:
                     for attr1, attr2 in attribute_pairs:
                         try:
                             rt = vb.ResultTemplateImplicitAssociationTest(  # type: ignore[arg-type]
@@ -484,7 +501,7 @@ def run_implicit_association_test(
 
 def run_unlearning_visual_summary(tasks: List[str], methods: List[str]) -> None:
     """UnlearningVisualSummary: (model, task, unlearning_algorithm)."""
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
                 try:
@@ -517,7 +534,7 @@ def run_interference_visual_summary(
     """
     for task in tasks:
         for unlearning_algorithm in methods:
-            for interference_pair in list(get_args(vb.type_mp)):
+            for interference_pair in _ALL_MP:
                 for entity_index in range(entity_count):
                     try:
                         rt = vb.ResultTemplateInterferenceVisualSummary(  # type: ignore[arg-type]
@@ -552,8 +569,8 @@ def run_method_comparison_by_metric_entity(
     Runs once per (model, task, interference_entity), comparing all
     supplied methods against each other.
     """
-    me_list = list(get_args(vb.type_me))
-    for model in list(get_args(vb.type_model)):
+    me_list = _ALL_ME
+    for model in _ALL_MODELS:
         for task in tasks:
             for interference_entity in me_list:
                 try:
@@ -592,7 +609,7 @@ def run_embedding_unlearning_profile(
     directory.
     """
     from vision_unlearning.datasets.testbed import get_metadata_filtered
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
             metadata = get_metadata_filtered(task)  # type: ignore[arg-type]
             for method in methods:
@@ -630,7 +647,7 @@ def run_embedding_forgetting_efficiency(
 
     Requires the interference_per_entity_{task}.json file in assets/.
     """
-    for model in list(get_args(vb.type_model)):
+    for model in _ALL_MODELS:
         for task in tasks:
             for method in methods:
                 try:
@@ -861,21 +878,21 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=["people"],
         metavar="TASK",
-        choices=list(get_args(vb.type_task)),
+        choices=_ALL_TASKS,
         help=(
             "Task(s) to run. Default: people. "
-            f"Available: {list(get_args(vb.type_task))}"
+            f"Available: {_ALL_TASKS}"
         ),
     )
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=list(get_args(vb.type_unlearning_algorithm)),
+        default=_ALL_METHODS,
         metavar="METHOD",
-        choices=list(get_args(vb.type_unlearning_algorithm)),
+        choices=_ALL_METHODS,
         help=(
             "Unlearning algorithm(s) to include. "
-            f"Default: all ({list(get_args(vb.type_unlearning_algorithm))})"
+            f"Default: all ({_ALL_METHODS})"
         ),
     )
     parser.add_argument(
