@@ -88,7 +88,7 @@ def _draw_bracket(
 
 
 def _load_sr_grid() -> pd.DataFrame:
-    """Load the reconciled SR grid (Phase 0 output)."""
+    """Load the reconciled SR grid (sr_grid_reconciled.csv); falls back to sr_grid.csv."""
     reconciled = os.path.join(
         "reports", "AttributeInterference_analysis", "sr_grid_reconciled.csv"
     )
@@ -102,7 +102,7 @@ def _load_sr_grid() -> pd.DataFrame:
         df = pd.read_csv(fallback)
         logger.warning(
             "SR grid: reconciled file not found; using stale %s (%d rows). "
-            "Run Phase 0 (phase0_reconcile_sr_grid.py) to rebuild it.",
+            "Run phase0_reconcile_sr_grid.py (in unlearning-analysis) to rebuild it.",
             fallback, len(df),
         )
     else:

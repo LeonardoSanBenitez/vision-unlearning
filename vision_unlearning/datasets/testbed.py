@@ -545,7 +545,7 @@ class GeneratedDataset(BaseModel):
             Text prompts — one per image template, excluding seed variation.
         batch_size : int
             Number of prompts per pipeline call.  Default 16 (optimal for 8–12 GB
-            VRAM on this hardware; see perf test in PLAN-TASK-2026-05-19-Baseline.md).
+            VRAM on this hardware; see batch-size profiling in the project notes).
         """
         import gc  # noqa: PLC0415
         import torch  # noqa: PLC0415
@@ -687,8 +687,8 @@ class GeneratedDataset(BaseModel):
         batch_size : int
             Prompts per pipeline call, forwarded to ``_compute_from_scratch()``.
             Ignored if the data is already available locally or on HuggingFace.
-            Default 16 (optimal for 8–12 GB VRAM; see perf results in
-            PLAN-TASK-2026-05-19-Baseline.md).
+            Default 16 (optimal for 8–12 GB VRAM; see batch-size profiling in
+            the project notes).
 
         Returns
         -------
