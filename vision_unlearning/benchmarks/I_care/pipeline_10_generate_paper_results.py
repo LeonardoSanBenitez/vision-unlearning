@@ -275,7 +275,7 @@ def gen_sig_by_me(df: pd.DataFrame) -> None:
     # Reorder columns to match paper method order (use only those present)
     cols_present = [m for m in method_order if m in piv.columns]
     piv = piv[cols_present]
-    piv.columns = [METHOD_LABELS.get(c, c) for c in piv.columns]
+    piv.columns = pd.Index([METHOD_LABELS.get(c, c) for c in piv.columns])
     method_labels_ordered = list(piv.columns)
 
     # Sort rows by total count descending

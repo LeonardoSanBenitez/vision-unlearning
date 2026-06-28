@@ -49,17 +49,19 @@ import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 # ---------------------------------------------------------------------------
 # Type-safe enumeration lists
 # Derived from vb.type_* Literals; kept in sync with configuration.py.
-# Defined once to avoid repeating get_args() calls and to give mypy a clean
-# List[str] type.  Only type_me uses get_args() because it has 51 values.
+# cast() is used to restore the Literal types that loop variables need so that
+# RT constructors are satisfied without per-argument type: ignore comments.
+# _ALL_ME uses get_args() because it has 51 values; cast() silences [misc].
+# _ALL_TASKS/_ALL_METHODS/_ALL_REG_ALGOS are plain str (RT params accept str).
 # ---------------------------------------------------------------------------
 
-_ALL_MODELS: List[str] = ["sd1.4"]
+_ALL_MODELS: List[vb.type_model] = cast(List[vb.type_model], ["sd1.4"])
 _ALL_TASKS: List[str] = ["breeds", "scenes", "people"]
 _ALL_METHODS: List[str] = ["distil", "munba", "uce"]
-_ALL_MP: List[str] = ["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"]
-_ALL_S: List[str] = ["clip", "jacc", "dino", "act", "weight_overlap"]
-_ALL_L: List[str] = ["clip_embedding", "dino_embedding"]
-_ALL_ME: List[str] = list(get_args(vb.type_me))  # type: ignore[misc]
+_ALL_MP: List[vb.type_mp] = cast(List[vb.type_mp], ["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"])
+_ALL_S: List[vb.type_s] = cast(List[vb.type_s], ["clip", "jacc", "dino", "act", "weight_overlap"])
+_ALL_L: List[vb.type_l] = cast(List[vb.type_l], ["clip_embedding", "dino_embedding"])
+_ALL_ME: List[vb.type_me] = cast(List[vb.type_me], list(get_args(vb.type_me)))  # type: ignore[misc]
 _ALL_REG_ALGOS: List[str] = ["linear_regression", "random_forest"]
 
 
