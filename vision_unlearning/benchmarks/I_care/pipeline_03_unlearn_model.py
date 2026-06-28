@@ -20,24 +20,24 @@ os.environ['WANDB_DISABLED'] = "true"
 assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non-empty"
 #!huggingface-cli login --token ${HF_TOKEN}
 
-from unlearner_lora_distillation import UnlearnerLoraDistillation  # FADE
-from vision_unlearning.unlearner import UnlearnerLoraDirect  # Munba
-from vision_unlearning.unlearner import UCE, ConceptType
+from unlearner_lora_distillation import UnlearnerLoraDistillation  # FADE  # noqa: E402
+from vision_unlearning.unlearner import UnlearnerLoraDirect  # Munba  # noqa: E402
+from vision_unlearning.unlearner import UCE, ConceptType  # noqa: E402
 
 
-from vision_unlearning.utils.parameter_attribution import ParameterAttributionMethodSaliency
-from vision_unlearning.utils.logger import get_logger, setup_loggers
-from vision_unlearning.datasets import UnlearnDatasetImagenette
-from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple, GradientWeightingMethodMunba
-from vision_unlearning.benchmarks.I_care import check_eval_results
-from vision_unlearning.datasets.testbed import (
+from vision_unlearning.utils.parameter_attribution import ParameterAttributionMethodSaliency  # noqa: E402
+from vision_unlearning.utils.logger import get_logger, setup_loggers  # noqa: E402
+from vision_unlearning.datasets import UnlearnDatasetImagenette  # noqa: E402
+from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple, GradientWeightingMethodMunba  # noqa: E402
+from vision_unlearning.benchmarks.I_care import check_eval_results  # noqa: E402
+from vision_unlearning.datasets.testbed import (  # noqa: E402
     get_target_overwrite,
     get_unlearned_model_folder,
     exists_unlearned_model,
     exists_unlearned_dataset,
     GeneratedDataset,
 )
-from vision_unlearning.utils.data_generation import generate_dataset
+from vision_unlearning.utils.data_generation import generate_dataset  # noqa: E402
 
 
 # Breeds
@@ -140,7 +140,7 @@ generate_dataset_seeds = [42, 43, 44, 45]  # [42]  # [42, 43, 44, 45]
 generate_dataset_limit_prompts: Optional[int] = None  # 5  # None
 hub_model_id = None  # 'LeonardoBenitez/demo-vision-unlearning-' + 'fade' if method=='distil' else method  #None
 
-### No need to change anything from now on... ###
+# No need to change anything from now on...
 
 # Basic params
 with open(f"assets/metadata_{task}_2_enriched_filtered.json", "r", encoding="utf-8") as f:
@@ -202,7 +202,7 @@ for index in range(index_start, index_start + max_identities):
         ]
     elif task == 'breeds':
         validation_prompt = f'An image of {target_preprocessed}'
-        target_preprocessed_next, _ = get_target_overwrite(task, method, metadata_filtered[(index+1)%100]['name'])
+        target_preprocessed_next, _ = get_target_overwrite(task, method, metadata_filtered[(index + 1) % 100]['name'])
         example_prompts_forget = [
             f'An image of {target_preprocessed}',
             f'Photograph of {target_preprocessed.replace("_", " ")}; high definition',
@@ -247,7 +247,7 @@ for index in range(index_start, index_start + max_identities):
             "lamb": 0.01,
             "edit_concepts": target_preprocessed,  # example: cat
             "guide_concepts": task,  # Optional. Example: animals. Default: same as edit_concepts
-            "preserve_concepts": task, # TODO: this isnt good... Example: lion; tiger; leopard
+            "preserve_concepts": task,  # TODO: this isnt good... Example: lion; tiger; leopard
             "expand_prompts": False,
             "device": device,
             "save_entire_model": False,
@@ -270,7 +270,7 @@ for index in range(index_start, index_start + max_identities):
             "max_grad_norm": 5.0,
             
             "num_train_epochs": num_train_epochs,
-            "validation_epochs": num_train_epochs+1, # No intermediate validation
+            "validation_epochs": num_train_epochs + 1,  # No intermediate validation
             "checkpointing_steps": 10000,
             "lr_scheduler_type": "constant",
             "lr_warmup_steps": 0,
@@ -299,9 +299,9 @@ for index in range(index_start, index_start + max_identities):
             })
         else:
             hyperparameters.update({
-                "per_device_train_batch_size": 2,#1,
-                "train_batch_size": 2,#1,
-                "gradient_accumulation_steps": 2,#4,
+                "per_device_train_batch_size": 2,  # 1,
+                "train_batch_size": 2,  # 1,
+                "gradient_accumulation_steps": 2,  # 4,
             })
 
     if free_memory > 20e9:
@@ -349,7 +349,7 @@ for index in range(index_start, index_start + max_identities):
         ###########################################
         # Check metrics
         ###########################################
-        check_eval_results(eval_results, 'Runtime training seconds', 10*3600, 'lt')
+        check_eval_results(eval_results, 'Runtime training seconds', 10 * 3600, 'lt')
         check_eval_results(eval_results, 'Runtime training seconds', 60, 'gt')
 
         # TODO define ideal values for more combinations
@@ -374,7 +374,7 @@ for index in range(index_start, index_start + max_identities):
         #ForgetSet clip score difference between original and unlearned mean = 5.882541179656982
         #RetainSet clip score difference between original and unlearned mean = 1.421424388885498                
         
-        print('-'*50)
+        print('-' * 50)
         print(f"Metrics for task={task}, method={method}, epochs={num_train_epochs}, index={index}")
         print(f"ForgetSet clip score difference between original and unlearned mean = {check_eval_results(eval_results, 'ForgetSet clip score difference between original and unlearned mean', 999, 'lt')}")
         print(f"RetainSet clip score difference between original and unlearned mean = {check_eval_results(eval_results, 'RetainSet clip score difference between original and unlearned mean', 999, 'lt')}")
@@ -446,8 +446,8 @@ for index in range(index_start, index_start + max_identities):
             logger.info(f'Skipping dataset generation for "{target_preprocessed}" since already exists at "{generated_dataset_output_path}"')
         assert ds_entity.exists(generate_dataset_seeds, prompts)
 
-    logger.info('-'*100)
+    logger.info('-' * 100)
     logger.info(f"Finished unlearning and dataset generation for target '{target_preprocessed}' ({index}/{index_start + max_identities -1})")
-    logger.info('-'*100)
+    logger.info('-' * 100)
 
 logger.info("ALL DONE YAY =D")
