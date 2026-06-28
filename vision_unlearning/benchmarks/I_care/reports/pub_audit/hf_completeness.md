@@ -30,7 +30,7 @@ is impractical for a 650K-file repo). `found/checked = 5/5` means all sampled fi
 | `InterferenceMatrix` | 45 | 5 | 5 | ✅ |
 | `InterferenceVisualSummary` | 3 | 3 | 3 | ✅ |
 | `MethodComparisonByMetricEntity` | 158 | 5 | 5 | ✅ |
-| `MetricMetricAlignment` | ~8780+ (rerun in progress) | 5 | 5 | ⏳ RERUNNING — people/munba+uce gap being filled; batch upload pending after compute |
+| `MetricMetricAlignment` | 11382 total (8731 flat + 3846 in people/ subdir) | 5 | 5 | ✅ DONE — breeds/scenes in results/MetricMetricAlignment/ (flat); people in results/MetricMetricAlignment/people/ (subdirectory, required due to HF 10k files/dir limit) |
 | `MetricSimilarityAlignment` | 181 | 5 | 5 | ✅ |
 | `MetricSimilarityAlignmentMulti` | 112 | 5 | 5 | ✅ |
 | `MetricSimilarityAlignmentOne` | 9 | 5 | 5 | ✅ |

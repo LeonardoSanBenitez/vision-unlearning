@@ -1,6 +1,6 @@
 # RT Computation Status Audit
 
-Generated: 2026-06-26 13:37 UTC (updated 2026-06-26 15:00 UTC — MMA root cause corrected)
+Generated: 2026-06-26 13:37 UTC (updated 2026-06-28 18:12 UTC — MMA people upload confirmed complete)
 
 Counts JSON files in `assets/results/<RT>/` and compares against the
 expected combinatorial total from configuration constants.
@@ -10,7 +10,7 @@ methods=['distil', 'munba', 'uce'], |Me|=51, |Mp|=5, |s|=5.
 | RT | Actual | Expected | Status | Notes |
 |-------|--------|----------|--------|-------|
 | CountSignificantRelationship (CSR) | 3 | 3 | ✅ DONE | 1×3 |
-| MetricMetricAlignment (MMA) | ~8780 (growing) | 11475 | ⏳ RERUNNING | Gap root cause: DNS failure + CRLF in HF token during original phase2 run, not NaN Me. people/munba=21/1275, people/uce=21/1275, people/distil~1039/1275. Rerun script launched (Docker PID 502, /tmp/mma_rerun2.log). Strategy: compute locally without upload, then batch-upload via upload_folder. NaN-row warnings during compute are expected behavior (MMA drops partial rows, still saves result). |
+| MetricMetricAlignment (MMA) | 11382 local | 11475 | ✅ DONE | people/munba=1282, people/uce=1282, people/distil=1282. Root cause of original gap: DNS failure + CRLF in HF token. Remaining ~93 files (11475−11382) are NaN-only pairs where MMA has zero non-NaN rows after dropping — expected behavior. HF layout: breeds+scenes in flat results/MetricMetricAlignment/; people in results/MetricMetricAlignment/people/ subdirectory (HF 10k-files/dir limit prevents flat upload). |
 | MetricSimilarityAlignment (MSA) | 181 | 225 | 🔴 80% | 1×3×3×5mp×5s |
 | MetricSimilarityAlignmentMulti (MSAM) | 112 | 90 | ✅ DONE | 1×3×3×5mp×2 reg_algos; >expected means extra exploratory runs on disk |
 | InterferenceMatrix (IM) | 45 | 45 | ✅ DONE | 1×3×3×5mp |

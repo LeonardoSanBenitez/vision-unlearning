@@ -14,7 +14,6 @@ Requirements: HF_TOKEN env var set (no \\r character).
 import logging
 import os
 import sys
-from typing import FrozenSet
 
 # Ensure the repo root is on the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
@@ -26,10 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger('rerun_mma')
 
-import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
-from pipeline_08_run_all_rts import (  # noqa: E402
-    run_metric_metric_alignment,
-)
+import vision_unlearning.benchmarks.I_care as vb  # noqa: E402, F401
 
 _MMA_LOCAL_DIR = os.path.join(
     os.path.dirname(__file__),
@@ -40,16 +36,30 @@ _HF_MMA_PATH = "results/MetricMetricAlignment"
 
 
 def _batch_upload(hf_token: str) -> None:
-    """Upload the full local MMA directory to HF in one git commit."""
+    """Upload people MMA files to a task subdirectory on HF.
+
+    The flat results/MetricMetricAlignment/ directory already holds ~8,731
+    breeds+scenes files from Phase 2a.  Adding all 3,846 people files would
+    push the total to ~12,577, exceeding HuggingFace's 10,000-files-per-
+    directory limit.  Fix: upload people files to the task subdirectory
+    results/MetricMetricAlignment/people/ (3,846 files, safely under 10k).
+    Breeds and scenes remain in the flat directory; the subdirectory is
+    self-consistent.
+    """
     from huggingface_hub import HfApi
     api = HfApi(token=hf_token)
-    logger.info("Batch-uploading %s → %s/%s ...", _MMA_LOCAL_DIR, _HF_REPO, _HF_MMA_PATH)
+    people_hf_path = _HF_MMA_PATH + "/people"
+    logger.info(
+        "Batch-uploading people MMA files → %s/%s (allow_patterns=*_people_*) ...",
+        _HF_REPO, people_hf_path,
+    )
     api.upload_folder(
         repo_id=_HF_REPO,
         repo_type="dataset",
         folder_path=_MMA_LOCAL_DIR,
-        path_in_repo=_HF_MMA_PATH,
-        commit_message="MMA people rerun: upload computed results",
+        path_in_repo=people_hf_path,
+        allow_patterns=["*_people_*"],
+        commit_message="MMA people rerun: upload people results to task subdirectory",
     )
     logger.info("Batch upload complete.")
 
@@ -63,32 +73,16 @@ def main() -> None:
         logger.error("HF_TOKEN contains \\r — strip CRLF from .env first.")
         sys.exit(1)
 
-    # Step 1: Compute all missing local MMA files WITHOUT individual HF uploads.
-    # Passing hf_files=frozenset() and upload_if_recomputed=False means:
-    #   - _should_skip returns True for local-existing files (no upload).
-    #   - _should_skip returns False for missing files (compute, no upload).
-    # This makes computation fast (no per-file HTTP round-trips).
-    hf_files: FrozenSet[str] = frozenset()
-    targets = [
-        ('people', 'munba'),   # 21/1275 local — critical
-        ('people', 'uce'),     # 21/1275 local — critical
-        ('people', 'distil'),  # ~1039/1275 local — partial
-    ]
-    for task, method in targets:
-        logger.info("Computing MMA for %s/%s (no upload) ...", task, method)
-        run_metric_metric_alignment(
-            tasks=[task],
-            methods=[method],
-            hf_files=hf_files,
-            upload_if_recomputed=False,
-        )
+    # Compute phase is DONE (people/munba=1282, people/uce=1282, people/distil=1282
+    # all computed locally in previous run).  Skip straight to upload.
+    for method in ['munba', 'uce', 'distil']:
         count = len([
             f for f in os.listdir(_MMA_LOCAL_DIR)
-            if f'_{task}_{method}_' in f
+            if f'_people_{method}_' in f
         ])
-        logger.info("Done computing %s/%s — local files now: %d", task, method, count)
+        logger.info("Local people/%s count: %d", method, count)
 
-    # Step 2: Batch-upload the full MMA directory.
+    # Batch-upload people files to task subdirectory to stay under HF 10k limit.
     _batch_upload(hf_token)
 
 
