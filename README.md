@@ -7,7 +7,10 @@
 ![Pycodestyle](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pycodestyle.yml/badge.svg?branch=dev&job=pycodestyle)
 ![Pytest](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pytest.yml/badge.svg?branch=dev&job=pytest)
 ![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/LeonardoSanBenitez/vision-unlearning/dev/coverage.json)
-[![Publish Package to PyPI](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/publish.yml/badge.svg)](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/publish.yml)
+[![Release](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/release.yml)
+[![PyPI](https://img.shields.io/pypi/v/vision-unlearning.svg)](https://pypi.org/project/vision-unlearning/)
+[![Python](https://img.shields.io/pypi/pyversions/vision-unlearning.svg)](https://pypi.org/project/vision-unlearning/)
+[![License](https://img.shields.io/github/license/LeonardoSanBenitez/vision-unlearning)](LICENSE)
 
 
 [Documentation](https://vision-unlearning.readthedocs.io/)
@@ -110,21 +113,17 @@ Additionally, common tasks and evaluation setups are provided as example noteboo
 
 # Citation
 
-We don't have yet a paper specifically about the library. Instead, please cite the Zenodo DOI that releases the data for the testbeds:
+We don't have yet a paper specifically about the library. Instead, please cite the first paper that was build using vision-unlearning:
 
 ```
-@dataset{vision_unlearning_evaluation_testbeds,
-  author       = {Benitez Pereira, Leonardo Santiago and
-                  Mola, Natnael and
-                  R. Kelsch, Carolina and
-                  Vaze, Soham},
-  title        = {Vision Unlearning Evaluation Testbeds},
-  month        = feb,
-  year         = 2026,
-  publisher    = {Zenodo},
-  version      = {0.1.0},
-  doi          = {10.5281/zenodo.18649818},
-  url          = {https://doi.org/10.5281/zenodo.18649818},
+@misc{mola2026,
+      title={SPARE: Self-distillation for PARameter-Efficient Removal}, 
+      author={Natnael Mola and Leonardo S. B. Pereira and Carolina R. Kelsch and Luis H. Arribas and Juan C. S. M. Avedillo},
+      year={2026},
+      eprint={2602.07058},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2602.07058}, 
 }
 ```
 
