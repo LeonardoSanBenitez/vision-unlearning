@@ -1,13 +1,8 @@
 # Vision Unlearning
-
-<!-- ![CI](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/tests.yml/badge.svg) -->
-
-<!-- Seperate batches for 3 tests-->
 ![Mypy](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/mypy.yml/badge.svg?branch=dev&job=mypy)
 ![Pycodestyle](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pycodestyle.yml/badge.svg?branch=dev&job=pycodestyle)
 ![Pytest](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pytest.yml/badge.svg?branch=dev&job=pytest)
 ![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/LeonardoSanBenitez/vision-unlearning/dev/coverage.json)
-[![Release](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/release.yml)
 [![PyPI](https://img.shields.io/pypi/v/vision-unlearning.svg)](https://pypi.org/project/vision-unlearning/)
 [![Python](https://img.shields.io/pypi/pyversions/vision-unlearning.svg)](https://pypi.org/project/vision-unlearning/)
 [![License](https://img.shields.io/github/license/LeonardoSanBenitez/vision-unlearning)](LICENSE)
