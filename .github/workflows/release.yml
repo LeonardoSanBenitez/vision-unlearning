@@ -1,0 +1,93 @@
+name: Release
+
+# Triggered automatically when a PR is merged into main.
+# Workflow:
+#   1. Read the current version from pyproject.toml (must already be bumped on dev).
+#   2. Build and publish to PyPI.
+#   3. Create a git tag and a GitHub release with auto-generated notes.
+#   4. Bump the minor version on the dev branch so it is ready for the next cycle.
+#
+# Version conventions:
+#   - Minor version is incremented automatically after every release.
+#   - Major version bumps are done manually on dev before opening the release PR.
+#     Example: set version = "2.0.0" in pyproject.toml on dev, open PR to main,
+#     merge — the workflow publishes 2.0.0 then bumps dev to 2.1.0.
+#   - Patch releases (hot-fixes): cherry-pick to main, set version manually to X.Y.Z,
+#     then open a PR to main as usual.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Read release version
+        run: |
+          VERSION=$(poetry version -s)
+          echo "RELEASE_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Releasing version: $VERSION"
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Build distribution
+        run: poetry build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          pip install twine
+          twine upload --skip-existing dist/*
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ env.RELEASE_VERSION }}"
+          git push origin "v${{ env.RELEASE_VERSION }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ env.RELEASE_VERSION }}" \
+            --title "v${{ env.RELEASE_VERSION }}" \
+            --generate-notes \
+            --latest
+
+      - name: Bump minor version on dev
+        run: |
+          git fetch origin
+          git checkout dev
+          poetry version minor
+          NEXT_VERSION=$(poetry version -s)
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: bump version to $NEXT_VERSION for next development cycle"
+          git push origin dev
+          echo "Dev branch bumped to $NEXT_VERSION"
