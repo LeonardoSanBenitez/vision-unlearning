@@ -606,7 +606,7 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
                 value1 = df1.loc[label_i, label_j]
                 value2 = df2.loc[label_i, label_j]
                 if self.colouring_attribute:
-                    color = next(filter(lambda e: e['name']==label_i , metadata_filtered))[self.colouring_attribute]
+                    color = next(filter(lambda e: e['name']==label_i, metadata_filtered))[self.colouring_attribute]
                 else:
                     color = 0
                 df_prepared = pd.concat([df_prepared, pd.DataFrame({'c1': [value1], 'c2': [value2], 'color': color}, index=[f'{label_i}_to_{label_j}'])])
@@ -3552,12 +3552,12 @@ class ResultTemplateVisualSummaryBase(ResultTemplate):
             return float((al.get_position().x0 + ar.get_position().x1) / 2)
 
         left_x = float(axes[0, 0].get_position().x0) - 0.01
-        fig.text(left_x, _row_center(axes[0, 0]), 'Original',  rotation=90, va='center', ha='center', fontsize=12, weight="bold")
+        fig.text(left_x, _row_center(axes[0, 0]), 'Original', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
         fig.text(left_x, _row_center(axes[1, 0]), 'Unlearned', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
 
-        fig.text(_col_center(axes[0, 0], axes[0, 0]), 0.98, "Target",          ha="center", va="bottom", fontsize=12, weight="bold")
+        fig.text(_col_center(axes[0, 0], axes[0, 0]), 0.98, "Target", ha="center", va="bottom", fontsize=12, weight="bold")
         fig.text(_col_center(axes[0, 1], axes[0, 4]), 0.98, worst_group_label, ha="center", va="bottom", fontsize=12, weight="bold")
-        fig.text(_col_center(axes[0, 5], axes[0, 8]), 0.98, best_group_label,  ha="center", va="bottom", fontsize=12, weight="bold")
+        fig.text(_col_center(axes[0, 5], axes[0, 8]), 0.98, best_group_label, ha="center", va="bottom", fontsize=12, weight="bold")
 
         top_y = 1.0
         bottom_y = float(axes[1, 0].get_position().y0) - 0.005
@@ -3599,7 +3599,7 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplateVisualSummaryBase):
         interference_pair = data['metadata']['interference_pair']
         is_worst_biggest = data['result']['is_worst_biggest']
         worst_label = f"Worst interfered ({interference_pair} {'↑' if is_worst_biggest else '↓'})"
-        best_label  = f"Least interfered ({interference_pair} {'↓' if is_worst_biggest else '↑'})"
+        best_label = f"Least interfered ({interference_pair} {'↓' if is_worst_biggest else '↑'})"
         return cls._plot_grid(
             data=data,
             col_values=data['result']['interference_values'],
@@ -3624,14 +3624,14 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplateVisualSummaryBase):
 
         if is_worst_biggest:
             metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1], reverse=True)
-            metric_sorted_best_first  = sorted(metric_list, key=lambda x: x[1])
+            metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1])
         else:
             metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1])
-            metric_sorted_best_first  = sorted(metric_list, key=lambda x: x[1], reverse=True)
+            metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1], reverse=True)
         worst = [n for n, _ in metric_sorted_worst_first if n != self.entity][:4]
-        best  = [n for n, _ in metric_sorted_best_first  if n != self.entity and n not in worst][:4]
+        best = [n for n, _ in metric_sorted_best_first if n != self.entity and n not in worst][:4]
         assert len(worst) == 4, f"Expected 4 worst interfered, got {len(worst)}"
-        assert len(best)  == 4, f"Expected 4 best interfered, got {len(best)}"
+        assert len(best) == 4, f"Expected 4 best interfered, got {len(best)}"
 
         displayed_entities: List[str] = [self.entity, *worst, *best]
         interference_values = {
@@ -3693,9 +3693,9 @@ class ResultTemplateSimilarityVisualSummary(ResultTemplateVisualSummaryBase):
         return_fig: bool = False,
     ) -> Optional[Tuple[Figure, Any]]:
         sim_metric = data['metadata']['similarity_metric']
-        direction  = data['metadata']['similarity_metric_direction']
+        direction = data['metadata']['similarity_metric_direction']
         worst_label = f"Most similar ({sim_metric} {direction})"
-        best_label  = f"Least similar ({sim_metric} {'↓' if direction == '↑' else '↑'})"
+        best_label = f"Least similar ({sim_metric} {'↓' if direction == '↑' else '↑'})"
         return cls._plot_grid(
             data=data,
             col_values=data['result']['similarity_values'],
@@ -3728,11 +3728,11 @@ class ResultTemplateSimilarityVisualSummary(ResultTemplateVisualSummaryBase):
             if name != self.entity and not pd.isna(row_sim[name])
         ]
         sorted_most_first = sorted(sim_list, key=lambda t: t[1], reverse=True)
-        most_similar: List[str]  = [n for n, _ in sorted_most_first[:4]]
+        most_similar: List[str] = [n for n, _ in sorted_most_first[:4]]
         least_similar: List[str] = [
             n for n, _ in reversed(sorted_most_first) if n not in most_similar
         ][:4]
-        assert len(most_similar)  == 4, f"Expected 4 most similar, got {len(most_similar)}"
+        assert len(most_similar) == 4, f"Expected 4 most similar, got {len(most_similar)}"
         assert len(least_similar) == 4, f"Expected 4 least similar, got {len(least_similar)}"
 
         displayed_entities: List[str] = [self.entity, *most_similar, *least_similar]

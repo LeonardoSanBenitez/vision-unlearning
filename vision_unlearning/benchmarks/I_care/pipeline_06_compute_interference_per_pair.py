@@ -6,20 +6,11 @@ import shutil
 import sys
 from typing import Literal, Optional
 
-# ---------------------------------------------------------------------------
-# Ensure vision_unlearning is importable from the sibling repo directory
-# ---------------------------------------------------------------------------
-_VU_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vision-unlearning")
-)
-if _VU_PATH not in sys.path:
-    sys.path.insert(0, _VU_PATH)
-
 import matplotlib.pyplot as plt
-from vision_unlearning.metrics import MetricQuality, MetricImageImage, MetricImageTextSimilarity
-from vision_unlearning.benchmarks.I_care.embeddings import load_dino_model, compute_dino_image_similarity
 from PIL import Image
 
+from vision_unlearning.metrics import MetricQuality, MetricImageImage, MetricImageTextSimilarity
+from vision_unlearning.benchmarks.I_care.embeddings import load_dino_model, compute_dino_image_similarity
 from vision_unlearning.utils.logger import get_logger, setup_loggers
 from vision_unlearning.datasets.testbed import (
     get_target_overwrite,
@@ -65,7 +56,7 @@ except ImportError:
 HF_TOKEN: str = os.getenv("HF_TOKEN", "")
 
 
-## All possible combinations of inputs for the script (uncomment the one you want to run, and make sure to comment the others):
+# All possible combinations of inputs for the script (uncomment the one you want to run, and make sure to comment the others):
 # Breeds
 '''
 index_start: int = 0
@@ -164,7 +155,7 @@ logger.info(
 )
 
 
-### No need to change anything from now on... ###
+# No need to change anything from now on...
 
 metadata_filtered = get_metadata_filtered(task, base_folder=BASE_FOLDER)
 
@@ -232,7 +223,7 @@ def evaluate_one(prompt, seed, plot: bool = False) -> dict:
         axes[1].imshow(out_off)
         axes[1].axis('off')
         axes[1].set_title('out_off')
-        fig.suptitle(prompt+f'\n{result}', fontsize=12)
+        fig.suptitle(prompt + f'\n{result}', fontsize=12)
         plt.tight_layout()
         plt.show()
 
@@ -255,18 +246,18 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
     target_hf_name = get_target_overwrite(task, method, target)[0]
     ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)  # type: ignore[arg-type]
     imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt)) for s in seeds]  # type: ignore[arg-type]
-    imgs_on  = [Image.open(ds_entity.file_path('on', s, prompt)) for s in seeds]
+    imgs_on = [Image.open(ds_entity.file_path('on', s, prompt)) for s in seeds]
 
     n = len(seeds)
     # BRISQUE — batched (one GPU kernel launch for N images instead of N)
     brisque_off = metric_quality.score_batch(imgs_off)   # type: ignore[arg-type]  # List[{'brisque': float}]
-    brisque_on  = metric_quality.score_batch(imgs_on)    # type: ignore[arg-type]
+    brisque_on = metric_quality.score_batch(imgs_on)    # type: ignore[arg-type]
 
     # CLIP — batched: text encoded once for all N off-images, once for all N on-images
     clip_off_results = metric_clip.score_batch_same_text(imgs_off, prompt)  # type: ignore[arg-type]
-    clip_on_results  = metric_clip.score_batch_same_text(imgs_on,  prompt)  # type: ignore[arg-type]
+    clip_on_results = metric_clip.score_batch_same_text(imgs_on, prompt)  # type: ignore[arg-type]
     clip_off = [r['clip'] for r in clip_off_results]
-    clip_on  = [r['clip'] for r in clip_on_results]
+    clip_on = [r['clip'] for r in clip_on_results]
 
     # RMSE / SSIM — CPU-only, must be per-pair
     img_diffs = [metric_image_difference.score(off, on) for off, on in zip(imgs_off, imgs_on)]
@@ -281,10 +272,10 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
 
     result = {
         'brisque_diff': sum(brisque_on[i]['brisque'] - brisque_off[i]['brisque'] for i in range(n)) / n,
-        'clip_diff':    sum(clip_on[i] - clip_off[i] for i in range(n)) / n,
-        'rmse':         sum(d['rmse']  for d in img_diffs) / n,
-        'ssim':         sum(d['ssim']  for d in img_diffs) / n,
-        'dino_diff':    dino_diff_val,
+        'clip_diff': sum(clip_on[i] - clip_off[i] for i in range(n)) / n,
+        'rmse': sum(d['rmse'] for d in img_diffs) / n,
+        'ssim': sum(d['ssim'] for d in img_diffs) / n,
+        'dino_diff': dino_diff_val,
     }
     return result
 
@@ -348,7 +339,7 @@ for index in range(index_start, index_start + max_identities):
         print("Prompt: ", p)
         # evaluate_all_seeds batches BRISQUE across all seeds in one GPU pass
         interference_per_pair[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
-    print('-'*50 + '\n' + '-'*50)
+    print('-' * 50 + '\n' + '-' * 50)
     save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs)
 
     # Clean up local dataset to save disk space (only if --delete-dataset was passed)

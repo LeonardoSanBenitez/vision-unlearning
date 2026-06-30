@@ -28,28 +28,6 @@ import shutil
 import sys
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-# ---------------------------------------------------------------------------
-# Ensure vision_unlearning is importable from the sibling repo directory
-# ---------------------------------------------------------------------------
-_VU_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vision-unlearning")
-)
-if _VU_PATH not in sys.path:
-    sys.path.insert(0, _VU_PATH)
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    format="[%(asctime)s] %(levelname)-8s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
-)
-logger = logging.getLogger("compute_embeddings")
-
-# ---------------------------------------------------------------------------
-# vision_unlearning imports
-# ---------------------------------------------------------------------------
 from vision_unlearning.datasets.testbed import (
     get_target_preprocessed,
     get_target_overwrite,
@@ -64,6 +42,16 @@ from vision_unlearning.integrations.huggingface import (
     huggingface_dataset_file_exists,
     huggingface_dataset_file_download,
 )
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    format="[%(asctime)s] %(levelname)-8s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger("compute_embeddings")
 
 
 # ---------------------------------------------------------------------------

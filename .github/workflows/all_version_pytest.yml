@@ -2,9 +2,9 @@ name: Pytest + Coverage
 
 on:
   push:
-    branches: ["dev","test_matrix"]
+    branches: ["dev", "main", "test_matrix"]
   pull_request:
-    branches: ["dev","test_matrix"]
+    branches: ["dev", "main", "test_matrix"]
 
 permissions:
   contents: write
