@@ -34,8 +34,9 @@ jobs:
           sudo rm -rf /opt/ghc /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h
 
+      # Pinned to match the Dockerfile's `poetry~=1.2` constraint -- see mypy.yml for why.
       - name: Install Poetry
-        run: pip install poetry
+        run: pip install "poetry~=1.2"
 
       - name: Cache Poetry dependencies
         uses: actions/cache@v4

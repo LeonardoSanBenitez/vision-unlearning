@@ -40,8 +40,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Pinned to match the Dockerfile's `poetry~=1.2` constraint. Same class of bug as
+      # mypy.yml/pycodestyle.yml/all_version_pytest.yml (discovered 2026-07-02): an
+      # unpinned `pip install poetry` here would resolve Poetry 2.x, whose lock-file
+      # format is incompatible with the 1.x-generated poetry.lock, breaking `poetry
+      # install` on the next release with "pyproject.toml changed significantly since
+      # poetry.lock was last generated".
       - name: Install Poetry
-        run: pip install poetry
+        run: pip install "poetry~=1.2"
 
       - name: Read release version
         run: |
