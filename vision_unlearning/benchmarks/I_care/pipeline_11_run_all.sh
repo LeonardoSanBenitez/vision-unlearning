@@ -75,8 +75,7 @@ python pipeline_07_compute_interference_per_entity.py --task people --methods uc
 
 python pipeline_08_run_all_rts.py --rts MetricMetricAlignment MetricSimilarityAlignment InterferenceMatrix SimilarityMatrix SignificantRelationship CountSignificantRelationship MethodComparisonByMetricEntity ImplicitAssociationTest 
 
-# pipeline_09 is a Jupyter notebook (.ipynb) — execute with:
-#   jupyter nbconvert --to notebook --execute pipeline_09_synchronize_huggingface.ipynb
-jupyter nbconvert --to notebook --execute pipeline_09_synchronize_huggingface.ipynb
+# Upload everything computed above; pass --no-upload for a check-only completion report.
+python pipeline_09_synchronize_huggingface.py --stages metadata models generated-datasets embeddings act-fingerprints interference-per-pair interference-per-entity
 
 python pipeline_10_generate_paper_results.py

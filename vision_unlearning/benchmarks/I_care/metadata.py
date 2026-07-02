@@ -259,7 +259,36 @@ def choose_metric_column_interference_per_entity(
 ##########################################
 # Metadata files - embeddings
 ##########################################
-# TODO
+def get_embedding_output_path(
+    task: str,
+    target_preprocessed: str,
+    method: str,
+    num_train_epochs: int,
+    base_folder: str = "assets",
+) -> str:
+    """Local path for the output JSON.
+
+    Baseline embeddings (target_preprocessed == 'original') use a method-agnostic
+    name because they embed generated_{task}_baseline/ which has no method or epoch.
+    Per-entity embeddings include method and epoch.
+    """
+    if target_preprocessed == "original":
+        filename = f"embeddings_{task}_original.json"
+    else:
+        filename = f"embeddings_{task}_{target_preprocessed}_{method}_{num_train_epochs:03d}.json"
+    return os.path.join(base_folder, "datasets", filename)
+
+
+def get_embedding_hf_path(
+    task: str,
+    target_preprocessed: str,
+    method: str,
+    num_train_epochs: int,
+) -> str:
+    """HF repo path (no leading slash) for the output JSON."""
+    if target_preprocessed == "original":
+        return f"datasets/embeddings_{task}_original.json"
+    return f"datasets/embeddings_{task}_{target_preprocessed}_{method}_{num_train_epochs:03d}.json"
 
 
 
