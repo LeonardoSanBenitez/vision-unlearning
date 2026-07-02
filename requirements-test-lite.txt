@@ -1,0 +1,45 @@
+# Lite tier test dependencies -- NO torch, NO diffusers, NO jax.
+#
+# This is the dependency set for the I-CARE analysis path (Result Templates, embeddings
+# *loading* and similarity computation, metrics that operate on already-generated data).
+# It does NOT cover: actual unlearning (FADE/munba training), embedding *generation*
+# (DINOv2/CLIP/act fingerprint extraction), or anything under the `gpu` pytest marker.
+# See CONTRIBUTING.md Section 6 and PLAN-TASK-2026-07-01-TestTooling.md for the full
+# lite/heavy/gpu tier rationale.
+#
+# Versions are pinned FROM poetry.lock (the authoritative Docker environment), NOT
+# free-floating, so mypy/pycodestyle agree between the lite venv and CI/Docker (an
+# unpinned install gave stub-skew false positives in mypy during the Phase 0 spike --
+# see PLAN-TASK-2026-07-01-TestTooling.md Phase 0 finding 3).
+#
+# pytest-cov is NOT part of this list: it is only needed for the coverage-reporting job
+# (all_version_pytest.yml), which runs against the full/heavy environment, not the lite
+# tier. hypothesis is added here once Workstream E pins it in poetry.lock.
+#
+# Regeneration command (run after poetry.lock changes, from the vision-unlearning repo
+# root, inside the Docker container so `poetry show` reflects the locked versions):
+#   for pkg in pytest pytest-asyncio pytest-timeout hypothesis pandas numpy scipy \
+#              scikit-learn matplotlib seaborn pydantic pillow huggingface-hub requests \
+#              networkx mypy pycodestyle; do
+#     echo "$pkg==$(poetry show $pkg | grep -m1 version | awk '{print $3}')"
+#   done
+# Then paste the output below, replacing the pinned versions.
+
+pytest==8.4.2
+pytest-asyncio==0.24.0
+pytest-timeout==2.4.0
+pandas==2.3.3
+numpy==1.26.4
+scipy==1.15.3
+scikit-learn==1.7.2
+matplotlib==3.10.7
+seaborn==0.13.2
+pydantic==2.12.4
+pillow==12.0.0
+huggingface-hub==0.36.0
+requests==2.32.5
+networkx==3.4.2
+mypy==1.12.1
+pycodestyle==2.12.1
+hypothesis==6.155.7
+

@@ -69,13 +69,58 @@ test: run-interactive-docker
 	# W391: blank line at end of file — cosmetic only
 	# E117,E501: over-indent and long lines — cosmetic only
 	# W503,W504: line break before/after binary operator (PEP8 style choice — codebase uses W503 style)
-	$(call exec_docker, poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 ./vision_unlearning)
+	# NOTE: this line intentionally does NOT use the exec_docker macro. `$(call ...)`
+	# splits its argument on every literal comma, and the --ignore list below is a
+	# comma-separated list -- so `$(call exec_docker, ...--ignore=E701,W605,...)` silently
+	# truncated to `--ignore=E701` (everything after the first comma became unused $(2),
+	# $(3), ... arguments to the macro). Calling docker directly sidesteps the problem.
+	# --exclude matches pycodestyle.yml's u_care exclusion, PLUS reports/: fixing the
+	# truncation bug above (verified this session, see PLAN-TASK-2026-07-01-TestTooling.md)
+	# means this line now actually executes with the full ignore list for the first time,
+	# which surfaced that reports/ (git-ignored, so invisible to CI, but present on disk
+	# from prior local research sessions) has ~100 pre-existing style violations of its
+	# own. Excluding it here matches `make test-lite`'s exclusion and keeps this check
+	# testing the tracked repo, not whatever a developer happens to have on disk locally.
+	docker compose exec notebooks poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 --exclude=vision_unlearning/benchmarks/u_care,vision_unlearning/benchmarks/I_care/reports ./vision_unlearning
 
 	echo '\n\n-------\nPytest checks\n-------'
 	$(call exec_docker, poetry run --quiet pytest ./tests)
 	# Manual tests (requires things like connecting some hardware or doing something interactive)
 	# poetry run --quiet pytest ./tests/**/manual_*.py
 	# poetry run --quiet pytest --capture=no -k "test_example" ./tests/**/manual_example.py
+
+##############################
+# Lite tier: fast local development proxy for the I-CARE analysis path.
+# Runs on the HOST (no Docker Desktop dependency) against a plain venv with
+# requirements-test-lite.txt (no torch, no diffusers, no jax). This is a PROXY only --
+# CI (GitHub Actions) is the authoritative merge gate, and `make test` (Docker, full
+# dependency stack) is the full-parity proxy required before declaring a task done.
+# See CONTRIBUTING.md Section 6.
+# Windows venvs put executables in Scripts/, not bin/ -- $(OS) is set to "Windows_NT" by
+# the environment on Windows (including Git Bash), so this picks the right layout without
+# needing a separate Windows-specific target. All tools are invoked via `python -m` so we
+# never depend on the entry-point wrapper scripts (identical behaviour on both layouts).
+ifeq ($(OS),Windows_NT)
+	VENV_LITE_PY := .venv-lite/Scripts/python
+else
+	VENV_LITE_PY := .venv-lite/bin/python
+endif
+
+test-lite:
+	if [ ! -d .venv-lite ]; then python3 -m venv .venv-lite; fi
+	$(VENV_LITE_PY) -m pip install --quiet --upgrade pip
+	$(VENV_LITE_PY) -m pip install --quiet -r requirements-test-lite.txt
+
+	echo '\n\n------------------------\nMypy Check (lite tier)\n------------------------'
+	$(VENV_LITE_PY) -m mypy --no-warn-incomplete-stub --disable-error-code import-untyped --explicit-package-bases --check-untyped-defs ./vision_unlearning
+
+	echo '\n\n------------------------\nPycodestyle Check (lite tier)\n------------------------'
+	# --exclude adds reports/ on top of the CI ignore list: reports/ is git-ignored (never
+	# seen by CI) but exists on disk locally with looser research-script style.
+	$(VENV_LITE_PY) -m pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 --exclude=vision_unlearning/benchmarks/u_care,vision_unlearning/benchmarks/I_care/reports ./vision_unlearning
+
+	echo '\n\n-------\nPytest checks (lite tier -- heavy files excluded via tests/conftest.py)\n-------'
+	PYTHONPATH=. $(VENV_LITE_PY) -m pytest -m "not gpu" tests/
 
 build-pip: run-interactive-docker
 	$(call exec_docker, poetry run --quiet python -m build)

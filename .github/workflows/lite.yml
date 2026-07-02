@@ -1,0 +1,76 @@
+name: Lite Tier Check
+
+# Enforces the lite/heavy dependency boundary documented in CONTRIBUTING.md Section 6 and
+# PLAN-TASK-2026-07-01-TestTooling.md. This job installs ONLY the pinned lite dependency
+# set (requirements-test-lite.txt) -- no torch, no diffusers, no jax -- and runs mypy,
+# pycodestyle, and the lite pytest selection against it.
+#
+# Why this job exists: the main mypy/pycodestyle/pytest_coverage jobs install the FULL
+# dependency stack, so a test or source module that quietly starts importing torch/jax at
+# module level would still pass there. This job is the only place that boundary is
+# actually enforced -- if a heavy import leaks into a file the lite tier assumes is
+# torch-free, this job fails loudly with an import error.
+
+on:
+  push:
+    branches: ["dev", "main"]
+  pull_request:
+    branches: ["dev", "main"]
+
+concurrency:
+  group: lite-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+
+      - name: Cache lite pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-lite-${{ runner.os }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ hashFiles('requirements-test-lite.txt') }}
+          restore-keys: |
+            pip-lite-${{ runner.os }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-
+
+      - name: Install lite dependencies (no torch, no diffusers, no jax)
+        run: pip install -r requirements-test-lite.txt
+
+      - name: Confirm torch is NOT installed (boundary sanity check)
+        run: |
+          python -c "
+          import importlib.util, sys
+          if importlib.util.find_spec('torch') is not None:
+              print('ERROR: torch is importable in the lite environment -- the lite/heavy boundary is broken.')
+              sys.exit(1)
+          print('OK: torch is not installed in the lite environment.')
+          "
+
+      - name: Mypy (lite tier)
+        run: |
+          echo '----------- Mypy check (lite tier) ---------------'
+          mypy \
+            --no-warn-incomplete-stub \
+            --disable-error-code import-untyped \
+            --explicit-package-bases \
+            --check-untyped-defs \
+            ./vision_unlearning
+
+      - name: Pycodestyle (lite tier)
+        run: |
+          echo '----------- Pycodestyle check (lite tier) ----------'
+          pycodestyle --max-line-length=300 \
+            --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 \
+            --exclude=vision_unlearning/benchmarks/u_care \
+            ./vision_unlearning
+
+      - name: Pytest (lite tier -- heavy files excluded via tests/conftest.py collect_ignore)
+        env:
+          PYTHONPATH: .
+        run: |
+          echo '----------- Pytest check (lite tier) ----------'
+          pytest -m "not gpu" tests/

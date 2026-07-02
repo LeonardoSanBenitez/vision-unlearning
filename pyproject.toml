@@ -52,24 +52,16 @@ image-similarity-measures = "*"
 opencv-python = "*"
 matplotlib = "^3.10.0"
 phonemizer = "*"
-dadapy = "~0.3"
-pyfftw = "*"
 safetensors = ">=0.3.1"
 sentencepiece = ">=0.1.91,!=0.1.92"
 Pillow = "*"
 compel = "==0.1.8"
 filelock = "*"
-flax = ">=0.4.1"
 hf-doc-builder = ">=0.3.0"
 importlib_metadata = "*"
 invisible-watermark = ">=0.2.0"
 isort = ">=5.5.4"
-jax = ">=0.4.1"
-jaxlib = ">=0.4.1"
 Jinja2 = "*"
-k-diffusion = ">=0.0.12"
-note_seq = "*"
-librosa = "*"
 parameterized = "*"
 protobuf = ">=3.20.3,<4"
 pytest = "*"
@@ -112,6 +104,8 @@ sphinx-rtd-theme = "~2.0"
 myst-parser = "~4.0"   # To support Markdown (README.md)
 sphinx-autoapi = "~3.6"  # To generate docs from docstrings
 autodoc_pydantic = "*"
+pytest-cov = "^7.1.0"
+hypothesis = "^6.155.7"
 
 [build-system]
 requires = ["poetry-core", "setuptools>=61.0.0", "wheel"]  # TODO: do I have to declare them again?
@@ -126,8 +120,6 @@ builder = "html"
 
 [tool.pytest.ini_options]
 filterwarnings = [
-    "ignore::numba.core.errors.NumbaDeprecationWarning",
-    "ignore:.*nopython=False.*",
     "ignore:.*builtin type SwigPyPacked.*",
     "ignore:.*builtin type SwigPyObject.*",
     "ignore:.*builtin type swigvarlink.*"

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: ["dev", "main", "test_matrix"]
 
+concurrency:
+  group: pytest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -33,11 +37,19 @@ jobs:
       - name: Install Poetry
         run: pip install poetry
 
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          # Cache key includes the runner image version (not just poetry.lock + Python
+          # version) so a GitHub-side runner image bump cannot be masked by a stale
+          # cache of wheels compiled against an older image.
+          key: poetry-${{ runner.os }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-py${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-py${{ matrix.python-version }}-
+
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
-
-      - name: Add pytest-cov
-        run: poetry add --dev pytest-cov
 
       - name: Install package (editable mode)
         run: poetry run pip install -e .
