@@ -63,3 +63,11 @@ Additional details for each task:
     * hpi_bin: enum["Q0_25", "Q25_50", "Q50_75", "Q75_100"]
   * <ins>Attributes chosen for data balancing</ins>: occupation_simplified, hpi_bin
   * <ins>Number of entities</ins>: 100
+
+* **Lean proofs** (`lean_proofs/`)
+  * Mechanized Lean 4 + Mathlib proof of the paper's appendix `ap:flow_isolation`
+    (Max-Flow / Min-Cut and Isolation Duality). Work in progress.
+  * To run: with a Lean 4 + Mathlib toolchain configured (`elan`/`lake`), `cd` into
+    `lean_proofs/mfmc_isolation_duality` and run `lake build`. On Windows, build from a
+    short path — Mathlib's file paths combined with a deeply nested checkout can exceed
+    `MAX_PATH`.
