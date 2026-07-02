@@ -52,6 +52,7 @@ image-similarity-measures = "*"
 opencv-python = "*"
 matplotlib = "^3.10.0"
 phonemizer = "*"
+pyfftw = "*"  # FFTW bindings; used for performance in FFT-heavy signal-processing paths
 safetensors = ">=0.3.1"
 sentencepiece = ">=0.1.91,!=0.1.92"
 Pillow = "*"
