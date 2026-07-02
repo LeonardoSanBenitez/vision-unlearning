@@ -20,20 +20,28 @@ Proved so far, mechanically checked, **zero `sorry`**:
   foundation the augmenting-path argument needs: pushing `δ = min residual capacity along the
   chain` is only safe if no edge is used twice (a repeated edge would need `2δ` capacity).
 
-Not yet started:
-- `AugmentingPath.lean` — use `shortcut_spec` to build the actual flow augmentation: max flow
-  ⟹ no augmenting path in the residual graph (the "hard direction" proper)
-- `Saturation.lean` — no augmenting path ⟹ a cut of equal capacity exists, assembling the full
-  `maxFlowMinCut` theorem
-- `IsolationDuality.lean` — the paper's actual corollary
+In progress — `AugmentingPath.lean` (all zero-`sorry`, verified so far):
+- `exists_nodup_residual_chain` — combines `exists_chain_of_reflTransGen` + `shortcut_spec`
+  into: reachability in the residual graph ⟹ a duplicate-free chain exists.
+- `chainMinResidual`, `chainMinResidual_pos`, `chainMinResidual_le` — δ (min residual
+  capacity along the chain), proved positive and a valid lower bound for every edge.
+- `mem_zip_tail_imp`, `not_isStep_both` — the Nodup-list combinatorial fact that consecutive-
+  pair edges never occur in both directions (needed so the flow update below is well-defined).
+
+Not yet done: the actual flow update `f'` (definition below is designed but not yet written
+in Lean) and its three properties (feasibility, conservation, value increase) — this is the
+remaining content of `AugmentingPath.lean`. Then `Saturation.lean` (no augmenting path ⟹ a
+cut of equal capacity exists, assembling `maxFlowMinCut`), then `IsolationDuality.lean` (the
+paper's corollary).
 
 ## Resume point (2026-07-02, mid-session)
 
-Working on `AugmentingPath.lean` next (not created yet). `ResidualGraph.lean` is done and
-synced here (zero `sorry`, verified).
+`ResidualGraph.lean` is done and synced (zero `sorry`, verified). `AugmentingPath.lean` is
+partially done and synced (see above) — resume by writing the flow update itself, using the
+design below, which is already fully worked out.
 
-**Precise design for the augmented flow (worked out, not yet written in Lean)** — this is
-the one place with a real subtlety worth recording exactly rather than re-deriving:
+**Precise design for the augmented flow** — this is the one place with a real subtlety worth
+recording exactly rather than re-deriving:
 
 Given max flow `f`, contradiction hypothesis `t ∈ ResidualReach w f s` (with `s ≠ t`, from
 the cut), get a duplicate-free chain `s :: l` via `exists_chain_of_reflTransGen` +
