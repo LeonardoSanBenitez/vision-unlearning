@@ -135,7 +135,11 @@ class ResultTemplate(BaseModel):
         raise NotImplementedError()
 
     def _get_data_path_remote(self) -> str:
-        return os.path.join("results", self.__class__.__name__.replace('ResultTemplate', ''), f"{self._serialize_parameters()}.json")
+        # Forward slashes always: this is a path inside the HuggingFace repository, not a
+        # filesystem path. os.path.join would produce backslashes on Windows hosts, which
+        # HF rejects (the file then looks nonexistent and compute() falls through to
+        # _compute_from_scratch).
+        return f"results/{self.__class__.__name__.replace('ResultTemplate', '')}/{self._serialize_parameters()}.json"
 
     def _get_data_path_local(self) -> str:
         return os.path.join(self.base_folder, self._get_data_path_remote())
@@ -179,7 +183,10 @@ class ResultTemplate(BaseModel):
                 folder_datasets=self.base_folder,
                 dataset_repository=self.remote_repository_name,
                 file_path=self._get_data_path_remote(),
-                token=hf_token or "",
+                # None (not "") when unset: an empty string becomes an illegal
+                # 'Authorization: Bearer ' header and breaks unauthenticated
+                # downloads from public repositories.
+                token=hf_token,
             )
             assert os.path.exists(self._get_data_path_local())
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:

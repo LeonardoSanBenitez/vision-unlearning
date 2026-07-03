@@ -686,6 +686,35 @@ class TestInterferencePerEntityUploadIfRecomputed:
         with pytest.raises(AssertionError, match="HF_TOKEN"):
             ipe.compute()
 
+    def test_download_token_is_none_when_hf_token_unset(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Without HF_TOKEN, the download must receive token=None, not token="":
+        an empty string becomes an illegal 'Authorization: Bearer ' header and breaks
+        unauthenticated downloads from public repositories."""
+        ipe = vb.InterferencePerEntity(task='people', base_folder=str(tmp_path))
+        monkeypatch.setattr(
+            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: True
+        )
+
+        download_calls: List[Any] = []
+
+        def fake_download(**kw: Any) -> None:
+            download_calls.append(kw)
+            local_path = ipe._get_data_path_local()
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, "w", encoding="utf-8") as f:
+                json.dump(list(_FAKE_IPE_DATA), f)
+
+        monkeypatch.setattr(_meta_mod, "huggingface_dataset_file_download", fake_download)
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+
+        result = ipe.compute()
+
+        assert len(result) == len(_FAKE_IPE_DATA)
+        assert len(download_calls) == 1
+        assert download_calls[0]["token"] is None
+
 
 # ---------------------------------------------------------------------------
 # ResultTemplateMetricSimilarityAlignmentOne (MSAOne)

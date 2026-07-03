@@ -183,7 +183,10 @@ class InterferencePerEntity(BaseModel):
                 folder_datasets=self.base_folder,
                 dataset_repository=self.remote_repository_name,
                 file_path=self._get_data_path_remote(),
-                token=hf_token or "",
+                # None (not "") when unset: an empty string becomes an illegal
+                # 'Authorization: Bearer ' header and breaks unauthenticated
+                # downloads from public repositories.
+                token=hf_token,
             )
             assert os.path.exists(self._get_data_path_local())
             #print('downloaded', flush=True)

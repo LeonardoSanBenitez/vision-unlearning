@@ -1238,6 +1238,53 @@ class TestResultTemplateUploadIfRecomputed:
 
 
 # ---------------------------------------------------------------------------
+# Remote path and download token — ResultTemplate base class
+# ---------------------------------------------------------------------------
+
+class TestResultTemplateRemotePathAndToken:
+    """Regression tests for two unauthenticated/cross-platform download bugs."""
+
+    def test_remote_path_uses_forward_slashes(self) -> None:
+        """The remote path is a HuggingFace repository path, never an OS filesystem
+        path: on Windows an os.path.join-built path contains backslashes, HF rejects
+        it, and compute() silently falls through to _compute_from_scratch."""
+        assert _FakeRT()._get_data_path_remote() == "results/_FakeRT/fake_params.json"
+        rt = vb.ResultTemplateInterferenceMatrix(
+            model="sd1.4", task="people", unlearning_algorithm="uce", interference_pair="clip_diff"
+        )
+        assert rt._get_data_path_remote() == "results/InterferenceMatrix/sd1.4_people_uce_clip_diff.json"
+
+    def test_download_token_is_none_when_hf_token_unset(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Without HF_TOKEN, the download must receive token=None, not token="":
+        an empty string becomes an illegal 'Authorization: Bearer ' header and breaks
+        unauthenticated downloads from public repositories."""
+        rt = _FakeRT(base_folder=str(tmp_path))
+        monkeypatch.setattr(
+            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: True
+        )
+
+        download_calls: List[Any] = []
+
+        def fake_download(**kw: Any) -> None:
+            download_calls.append(kw)
+            local_path = rt._get_data_path_local()
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, "w", encoding="utf-8") as f:
+                json.dump({"metadata": {"RT": "Fake"}, "result": {"value": 42}}, f)
+
+        monkeypatch.setattr(_rt_mod, "huggingface_dataset_file_download", fake_download)
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+
+        data = rt.compute()
+
+        assert data["result"]["value"] == 42
+        assert len(download_calls) == 1
+        assert download_calls[0]["token"] is None
+
+
+# ---------------------------------------------------------------------------
 # Example of a GPU-marked test (none of the above need a GPU). This single
 # placeholder documents the marker convention and is skipped on CI.
 # ---------------------------------------------------------------------------
