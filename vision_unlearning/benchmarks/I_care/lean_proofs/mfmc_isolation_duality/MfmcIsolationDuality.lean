@@ -3,3 +3,6 @@ import MfmcIsolationDuality.WeakDuality
 import MfmcIsolationDuality.MaxFlowExists
 import MfmcIsolationDuality.ResidualGraph
 import MfmcIsolationDuality.AugmentingPath
+import MfmcIsolationDuality.Augment
+import MfmcIsolationDuality.NoAugmentingPath
+import MfmcIsolationDuality.MaxFlowMinCut

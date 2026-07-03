@@ -65,9 +65,60 @@ Additional details for each task:
   * <ins>Number of entities</ins>: 100
 
 * **Lean proofs** (`lean_proofs/`)
-  * Mechanized Lean 4 + Mathlib proof of the paper's appendix `ap:flow_isolation`
-    (Max-Flow / Min-Cut and Isolation Duality). Work in progress.
+  * Mechanized Lean 4 + Mathlib formalization of the paper's appendix `ap:flow_isolation`
+    (Max-Flow / Min-Cut and Isolation Duality).
   * To run: with a Lean 4 + Mathlib toolchain configured (`elan`/`lake`), `cd` into
     `lean_proofs/mfmc_isolation_duality` and run `lake build`. On Windows, build from a
     short path — Mathlib's file paths combined with a deeply nested checkout can exceed
     `MAX_PATH`.
+  * <ins>Status</ins>: the Max-Flow/Min-Cut half of the appendix (`maxFlow_eq_minCut` in
+    `MaxFlowMinCut.lean`) is fully proved, `lake build` succeeds project-wide with zero
+    `sorry`, and `#print axioms maxFlow_eq_minCut` reports only the three standard classical
+    axioms (`propext`, `Classical.choice`, `Quot.sound`) — no unproved gaps. The appendix's
+    second half, the **Isolation Duality corollary** (minimum blocking-edge-set weight equals
+    min-cut capacity), is **not yet formalized** — no Lean file addresses it.
+  * <ins>Which files formalize what the paper actually argues</ins>, file by file, matching
+    the appendix's own section breaks:
+    * `Network.lean` — the paper's setup (flow, cut, capacity).
+    * `WeakDuality.lean` — the paper's "Weak upper bound" paragraph, proved the same way
+      (sum the conservation equations over the source side of the cut).
+    * `ResidualGraph.lean` (`residualCap`, `ResidualStep`, `ResidualReach` only) — the
+      paper's "Residual graph and augmenting paths" definitions.
+    * `AugmentingPath.lean` + `Augment.lean` (`chainMinResidual`, `stepEdge`,
+      `augmentAlong`) — the paper asserts, without proof, that "one may push an additional
+      `δ` units of flow along [an augmenting path]... producing a feasible flow of strictly
+      larger value." These two files *are* that proof, done in full: entry-by-entry
+      construction of the augmented flow, feasibility, and the value increase.
+    * `NoAugmentingPath.lean` — the fact the paper packages into "let `f*` be the resulting
+      flow with no augmenting path in `G_{f*}`" (i.e. the output of running Ford–Fulkerson to
+      termination). Proved directly here as its own theorem
+      (`no_augmenting_path_of_maxFlow`): any maximum flow has no augmenting path, independent
+      of any particular algorithm reaching it.
+    * `MaxFlowMinCut.lean` — the paper's "Constructing a cut from the final residual graph"
+      paragraph (saturation of crossing edges, `|f*| = cap(S,T)`) and the final combination
+      with weak duality into the Max-Flow/Min-Cut theorem itself.
+  * <ins>One deliberate departure from the paper's proof sketch</ins>: the paper obtains
+    existence of a maximum flow implicitly, as the output of running Ford–Fulkerson to
+    termination (and notes this needs e.g. rational capacities, or Edmonds–Karp/preflow-push,
+    for a termination guarantee). `MaxFlowExists.lean` instead proves existence
+    non-algorithmically: the feasible-flow set is a closed, bounded (hence compact) subset of
+    `V → V → ℝ`, `flowValue` is continuous, and the extreme value theorem gives a maximizer
+    directly. This holds for arbitrary nonnegative real capacities and sidesteps the
+    termination question entirely — but it is a different argument from the one the paper
+    describes, not a mechanization of it.
+  * <ins>Fundamental formalization infrastructure</ins> — content with no counterpart in the
+    paper's text at all, because a human reader takes it for granted. Mathlib has no
+    flow-network library, so this had to be built from scratch:
+    * `ResidualGraph.lean`'s chain-extraction machinery (`exists_chain_of_reflTransGen`,
+      `shortcut`, `shortcut_spec`, the `dropWhile_*` lemmas): reachability
+      (`Relation.ReflTransGen`) only witnesses a *walk*, which may repeat vertices. The paper
+      calls an augmenting path simply "any `s`-`t` path in `G_f`," silently assuming
+      repeat-free. Extracting an actual duplicate-free witness from a walk is nontrivial list
+      combinatorics with no connection to flows specifically.
+    * `AugmentingPath.lean`'s `mem_zip_tail_imp` and `not_isStep_both`, and `Augment.lean`'s
+      `stepEdge_agrees_of_ne_left`, `chain_congr_of_agree`, `chainMinResidual_congr`,
+      `sum_ite_eq_delta`: bookkeeping needed to make "push `δ` along the path" precise at the
+      level of individual flow-array entries — which entries change, that a duplicate-free
+      path never asks two different steps to touch the same entry, and `Finset.sum` surgery
+      to track net flow at each vertex before/after. The paper's proof hides all of this in
+      one sentence; a human referee checks it "obviously" works without writing it out.
