@@ -717,7 +717,10 @@ class GeneratedDataset(BaseModel):
                 folder_datasets=os.path.join(self.base_folder, 'datasets'),
                 dataset_repository=self.remote_repository_name,
                 dataset_config=self.hf_config_name,
-                token=hf_token or '',
+                # None (not "") when unset: an empty string becomes an illegal
+                # 'Authorization: Bearer ' header and breaks unauthenticated
+                # downloads from public repositories.
+                token=hf_token,
                 path_in_repo=self.hf_path_in_repo,
             )
             assert self.exists(seeds, prompts), (

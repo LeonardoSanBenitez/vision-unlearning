@@ -235,7 +235,7 @@ def huggingface_dataset_download(
     folder_datasets: str,
     dataset_repository: str,
     dataset_config: str,
-    token: str,
+    token: Optional[str],
     clean: bool = False,
     folder_cache: str = '/tmp/huggingface_cache',
     clean_cache: bool = False,
@@ -249,6 +249,11 @@ def huggingface_dataset_download(
             ``os.path.join(folder_datasets, dataset_config)``.
         dataset_config: Name of the local subfolder to create under
             ``folder_datasets``.
+        token: Hugging Face authentication token. Pass ``None`` (not ``""``) to request
+            anonymous access to a public repository — this is a genuinely supported,
+            correct usage, not a missing credential. An empty string is sent as a literal
+            (invalid) ``Authorization: Bearer`` header value and breaks anonymous
+            downloads; only ``None`` means "no token".
         path_in_repo: Path inside the HF repository that contains the dataset
             files.  When None (default) it is the same as ``dataset_config``.
             Pass an explicit value when the HF-side path differs from the local
@@ -308,9 +313,13 @@ def huggingface_dataset_file_download(
         folder_datasets: Local directory where datasets are stored.
         dataset_repository: Hugging Face dataset repository ID
         file_path: Full path of the file within the repository (e.g., "config/data.jsonl")
-        token: Hugging Face authentication token
+        token: Hugging Face authentication token. Pass ``None`` (not ``""``) to request
+            anonymous access to a public repository — this is a genuinely supported,
+            correct usage, not a missing credential. An empty string is sent as a literal
+            (invalid) ``Authorization: Bearer`` header value and breaks anonymous
+            downloads; only ``None`` means "no token".
         folder_cache: Cache directory for downloads
-    
+
     The file will be saved at os.path.join(folder_datasets, file_path)
     '''
     os.makedirs(folder_datasets, exist_ok=True)
