@@ -6,3 +6,4 @@ import MfmcIsolationDuality.AugmentingPath
 import MfmcIsolationDuality.Augment
 import MfmcIsolationDuality.NoAugmentingPath
 import MfmcIsolationDuality.MaxFlowMinCut
+import MfmcIsolationDuality.IsolationDuality

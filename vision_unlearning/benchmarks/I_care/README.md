@@ -71,12 +71,12 @@ Additional details for each task:
     `lean_proofs/mfmc_isolation_duality` and run `lake build`. On Windows, build from a
     short path — Mathlib's file paths combined with a deeply nested checkout can exceed
     `MAX_PATH`.
-  * <ins>Status</ins>: the Max-Flow/Min-Cut half of the appendix (`maxFlow_eq_minCut` in
-    `MaxFlowMinCut.lean`) is fully proved, `lake build` succeeds project-wide with zero
-    `sorry`, and `#print axioms maxFlow_eq_minCut` reports only the three standard classical
-    axioms (`propext`, `Classical.choice`, `Quot.sound`) — no unproved gaps. The appendix's
-    second half, the **Isolation Duality corollary** (minimum blocking-edge-set weight equals
-    min-cut capacity), is **not yet formalized** — no Lean file addresses it.
+  * <ins>Status</ins>: both halves of the appendix are fully proved. `maxFlow_eq_minCut`
+    (`MaxFlowMinCut.lean`) is the Max-Flow/Min-Cut theorem; `isolationDuality`
+    (`IsolationDuality.lean`) is the Isolation Duality corollary (minimum blocking-edge-set
+    weight equals min-cut capacity, hence max-flow value). `lake build` succeeds project-wide
+    with zero `sorry`, and `#print axioms` on both top-level theorems reports only the three
+    standard classical axioms (`propext`, `Classical.choice`, `Quot.sound`) — no unproved gaps.
   * <ins>Which files formalize what the paper actually argues</ins>, file by file, matching
     the appendix's own section breaks:
     * `Network.lean` — the paper's setup (flow, cut, capacity).
@@ -97,6 +97,19 @@ Additional details for each task:
     * `MaxFlowMinCut.lean` — the paper's "Constructing a cut from the final residual graph"
       paragraph (saturation of crossing edges, `|f*| = cap(S,T)`) and the final combination
       with weak duality into the Max-Flow/Min-Cut theorem itself.
+    * `IsolationDuality.lean` — the paper's "Corollary: Isolation Duality" paragraph, both
+      inequality directions: `blocks_of_cut`/`edgeWeight_product_eq_cutCap` show a min cut's
+      full `S ×ˢ Sᶜ` product is itself a blocking set of equal weight (cut → blocking set);
+      `isCut_graphReachFinset`/`graphReach_saturated`/`cutCap_le_edgeWeight_of_blocks` show
+      the vertex set reachable from `s` in `G − F` is a cut of capacity at most `F`'s weight,
+      for any blocking `F` (blocking set → cut). `isolationDuality` assembles both directions
+      with `maxFlow_eq_minCut` into the full three-way optimum (flow value = cut capacity =
+      minimum blocking-set weight). Mirrors `MaxFlowMinCut.lean`'s own
+      "reachable-set-is-a-cut, crossing-edges-are-constrained" pattern almost verbatim, on the
+      plain edge-survival relation `GraphEdge` instead of the residual-graph relation
+      `ResidualStep` — no augmentation machinery needed, since this corollary only needs
+      reachability existence/non-existence (`Relation.ReflTransGen` directly), never an
+      explicit path witness.
   * <ins>One deliberate departure from the paper's proof sketch</ins>: the paper obtains
     existence of a maximum flow implicitly, as the output of running Ford–Fulkerson to
     termination (and notes this needs e.g. rational capacities, or Edmonds–Karp/preflow-push,
@@ -106,6 +119,18 @@ Additional details for each task:
     directly. This holds for arbitrary nonnegative real capacities and sidesteps the
     termination question entirely — but it is a different argument from the one the paper
     describes, not a mechanization of it.
+  * <ins>One honest divergence in `IsolationDuality.lean`</ins>: the paper quantifies its
+    minimum over blocking sets `F ⊆ A` (subsets of the network's actually-existing edges
+    only, i.e. pairs with positive capacity). The Lean statement `isolationDuality` instead
+    lets `F` range over all of `Finset (V × V)`, unconstrained — a strictly larger search
+    space than the paper's literal quantifier. This does not change the value of the minimum:
+    any `F` can be intersected with the positive-weight edges without increasing
+    `edgeWeight` (the removed pairs contribute weight `0`) or losing the blocking property
+    (`GraphEdge`'s truth value at a zero-weight pair is unaffected by whether that pair is
+    "in `F`" or not, since `0 < w u v` already fails). Not attempted: restating this with `F`
+    carried as a genuine subtype of a fixed edge set `A`, which would need threading a
+    membership constraint through every quantifier — left for a future pass if this
+    divergence turns out to matter for how the result gets cited.
   * <ins>Fundamental formalization infrastructure</ins> — content with no counterpart in the
     paper's text at all, because a human reader takes it for granted. Mathlib has no
     flow-network library, so this had to be built from scratch:
