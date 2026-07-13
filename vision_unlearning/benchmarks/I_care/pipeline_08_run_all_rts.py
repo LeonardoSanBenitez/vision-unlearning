@@ -5,6 +5,7 @@ Usage
     python pipeline_08_run_all_rts.py --rts all
     python pipeline_08_run_all_rts.py --rts SignificantRelationship CountSignificantRelationship
     python pipeline_08_run_all_rts.py --rts InterferenceMatrix --tasks people --methods distil
+    python pipeline_08_run_all_rts.py --rts InterferenceVisualSummary --mp clip_diff
 
 RT names accepted (short form, case-insensitive):
     MetricMetricAlignment
@@ -15,11 +16,21 @@ RT names accepted (short form, case-insensitive):
     CountSignificantRelationship
     ImplicitAssociationTest
     MinimumCutInterference          (skipped — too many combos, computed on-demand)
-    UnlearningVisualSummary
     InterferenceVisualSummary
     MethodComparisonByMetricEntity
     EmbeddingUnlearningProfile      (per task-method-entity; requires DINOv2 embedding files)
     EmbeddingForgettingEfficiency   (per task-method; requires interference_per_entity)
+
+    UnlearningVisualSummary is not in ``ALL_RT_NAMES``:
+    ``ResultTemplateUnlearningVisualSummary`` is an unimplemented stub
+    (``.compute()`` raises ``NotImplementedError``) and is not used anywhere in
+    Forgety's entity-browsing flow.
+
+``--mp`` restricts which per-pair interference metric(s) are computed for
+InterferenceMatrix, MetricSimilarityAlignment(Multi), and InterferenceVisualSummary
+(default: all 5). Forgety's entity-browsing flow only ever displays
+``interference_pair="clip_diff"``, so a cluster run backing that flow only needs
+``--mp clip_diff``.
 
 By default (``--upload-if-recomputed``) each newly computed RT result is uploaded to
 HuggingFace immediately after computation.  Set ``HF_TOKEN`` in the environment.
@@ -139,6 +150,26 @@ def _should_skip(
     return False
 
 
+def _compute_and_report(
+    rt: "vb.ResultTemplate",  # type: ignore[name-defined]
+    hf_files: FrozenSet[str],
+    upload_if_recomputed: bool,
+    error_context: str,
+) -> None:
+    """Skip if the result already exists locally or on HuggingFace; otherwise compute it.
+
+    Centralizes the skip-check, compute, progress marker, and warn-and-continue behavior
+    every RT runner needs, so upload/skip semantics cannot be forgotten case-by-case.
+    """
+    try:
+        if _should_skip(rt, hf_files, upload_if_recomputed):
+            return
+        rt.compute()
+        print(".", end="", flush=True)
+    except Exception as exc:
+        logger.warning("%s failed: %s", error_context, exc)
+
+
 # ---------------------------------------------------------------------------
 # RT runner functions — one per RT (or group of RTs)
 # ---------------------------------------------------------------------------
@@ -156,25 +187,19 @@ def run_metric_metric_alignment(
             for unlearning_algorithm in methods:
                 for i, me1 in enumerate(me_list):
                     for me2 in me_list[i + 1:]:
-                        try:
-                            rt = vb.ResultTemplateMetricMetricAlignment(  # type: ignore[arg-type]
-                                model=model,
-                                task=task,  # type: ignore[arg-type]
-                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                                interference_entity_1=me1,
-                                interference_entity_2=me2,
-                                upload_if_recomputed=upload_if_recomputed,
-                                save_outputs=True,
-                            )
-                            if _should_skip(rt, hf_files, upload_if_recomputed):
-                                continue
-                            rt.compute()
-                            print(".", end="", flush=True)
-                        except Exception as e:
-                            logger.warning(
-                                "MetricMetricAlignment failed for %s/%s/%s/%s/%s: %s",
-                                model, task, unlearning_algorithm, me1, me2, e,
-                            )
+                        rt = vb.ResultTemplateMetricMetricAlignment(  # type: ignore[arg-type]
+                            model=model,
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                            interference_entity_1=me1,
+                            interference_entity_2=me2,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
+                        )
+                        _compute_and_report(
+                            rt, hf_files, upload_if_recomputed,
+                            f"MetricMetricAlignment for {model}/{task}/{unlearning_algorithm}/{me1}/{me2}",
+                        )
                 print("")
     print("MetricMetricAlignment done.")
 
@@ -184,33 +209,28 @@ def run_metric_similarity_alignment(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    mp_list: List[vb.type_mp] = _ALL_MP,
 ) -> None:
     """MetricSimilarityAlignment: (model, task, unlearning_algorithm, mp, s)."""
     for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in _ALL_MP:
+                for interference_pair in mp_list:
                     for similarity_metric in _ALL_S:
-                        try:
-                            rt = vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
-                                model=model,
-                                task=task,  # type: ignore[arg-type]
-                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                                interference_pair=interference_pair,
-                                similarity_metric=similarity_metric,
-                                upload_if_recomputed=upload_if_recomputed,
-                                save_outputs=True,
-                            )
-                            if _should_skip(rt, hf_files, upload_if_recomputed):
-                                continue
-                            rt.compute()
-                            print(".", end="", flush=True)
-                        except Exception as e:
-                            logger.warning(
-                                "MetricSimilarityAlignment failed for %s/%s/%s/%s/%s: %s",
-                                model, task, unlearning_algorithm, interference_pair,
-                                similarity_metric, e,
-                            )
+                        rt = vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
+                            model=model,
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                            interference_pair=interference_pair,
+                            similarity_metric=similarity_metric,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
+                        )
+                        _compute_and_report(
+                            rt, hf_files, upload_if_recomputed,
+                            f"MetricSimilarityAlignment for {model}/{task}/{unlearning_algorithm}/"
+                            f"{interference_pair}/{similarity_metric}",
+                        )
                 print("")
     print("MetricSimilarityAlignment done.")
 
@@ -220,6 +240,7 @@ def run_metric_similarity_alignment_multi(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    mp_list: List[vb.type_mp] = _ALL_MP,
 ) -> None:
     """MetricSimilarityAlignmentMulti: (model, task, unlearning_algorithm, mp, s_list, reg_algo).
 
@@ -234,33 +255,27 @@ def run_metric_similarity_alignment_multi(
     for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in _ALL_MP:
+                for interference_pair in mp_list:
                     for similarity_metric_list in similarity_sets:
                         for regression_algorithm in regression_algorithms:
-                            try:
-                                rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
-                                    model=model,
-                                    task=task,  # type: ignore[arg-type]
-                                    unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                                    interference_pair=interference_pair,
-                                    similarity_metric_list=similarity_metric_list,
-                                    include_emitter_forget_quality=True,
-                                    include_baseline_quality=True,
-                                    regression_algorithm=regression_algorithm,  # type: ignore[arg-type]
-                                    upload_if_recomputed=upload_if_recomputed,
-                                    save_outputs=True,
-                                )
-                                if _should_skip(rt, hf_files, upload_if_recomputed):
-                                    continue
-                                rt.compute()
-                                print(".", end="", flush=True)
-                            except Exception as e:
-                                logger.warning(
-                                    "MetricSimilarityAlignmentMulti failed for "
-                                    "%s/%s/%s/%s/%s/%s: %s",
-                                    model, task, unlearning_algorithm, interference_pair,
-                                    similarity_metric_list, regression_algorithm, e,
-                                )
+                            rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
+                                model=model,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                                interference_pair=interference_pair,
+                                similarity_metric_list=similarity_metric_list,
+                                include_emitter_forget_quality=True,
+                                include_baseline_quality=True,
+                                regression_algorithm=regression_algorithm,  # type: ignore[arg-type]
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
+                            )
+                            _compute_and_report(
+                                rt, hf_files, upload_if_recomputed,
+                                f"MetricSimilarityAlignmentMulti for {model}/{task}/"
+                                f"{unlearning_algorithm}/{interference_pair}/"
+                                f"{similarity_metric_list}/{regression_algorithm}",
+                            )
                 print("")
     print("MetricSimilarityAlignmentMulti done.")
 
@@ -270,31 +285,26 @@ def run_interference_matrix(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    mp_list: List[vb.type_mp] = _ALL_MP,
 ) -> None:
     """InterferenceMatrix: (model, task, unlearning_algorithm, interference_pair)."""
     for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
-                for interference_pair in _ALL_MP:
-                    try:
-                        rt = vb.ResultTemplateInterferenceMatrix(  # type: ignore[arg-type]
-                            model=model,
-                            task=task,  # type: ignore[arg-type]
-                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                            interference_pair=interference_pair,
-                            upload_if_recomputed=upload_if_recomputed,
-                            save_outputs=True,
-                        )
-                        if _should_skip(rt, hf_files, upload_if_recomputed):
-                            continue
-                        rt.compute()
-                        print(".", end="", flush=True)
-                    except Exception as e:
-                        logger.warning(
-                            "InterferenceMatrix failed for %s/%s/%s/%s: %s",
-                            model, task, unlearning_algorithm, interference_pair, e,
-                        )
-            print("")
+                for interference_pair in mp_list:
+                    rt = vb.ResultTemplateInterferenceMatrix(  # type: ignore[arg-type]
+                        model=model,
+                        task=task,  # type: ignore[arg-type]
+                        unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                        interference_pair=interference_pair,
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
+                    )
+                    _compute_and_report(
+                        rt, hf_files, upload_if_recomputed,
+                        f"InterferenceMatrix for {model}/{task}/{unlearning_algorithm}/{interference_pair}",
+                    )
+                print("")
     print("InterferenceMatrix done.")
 
 
@@ -307,23 +317,17 @@ def run_similarity_matrix(
     for model in _ALL_MODELS:
         for task in tasks:
             for similarity_metric in _ALL_S:
-                try:
-                    rt = vb.ResultTemplateSimilarityMatrix(
-                        model=model,
-                        task=task,  # type: ignore[arg-type]
-                        similarity_metric=similarity_metric,
-                        upload_if_recomputed=upload_if_recomputed,
-                        save_outputs=True,
-                    )
-                    if _should_skip(rt, hf_files, upload_if_recomputed):
-                        continue
-                    rt.compute()
-                    print(".", end="", flush=True)
-                except Exception as e:
-                    logger.warning(
-                        "SimilarityMatrix failed for %s/%s/%s: %s",
-                        model, task, similarity_metric, e,
-                    )
+                rt = vb.ResultTemplateSimilarityMatrix(
+                    model=model,
+                    task=task,  # type: ignore[arg-type]
+                    similarity_metric=similarity_metric,
+                    upload_if_recomputed=upload_if_recomputed,
+                    save_outputs=True,
+                )
+                _compute_and_report(
+                    rt, hf_files, upload_if_recomputed,
+                    f"SimilarityMatrix for {model}/{task}/{similarity_metric}",
+                )
         print("")
     print("SimilarityMatrix done.")
 
@@ -426,25 +430,19 @@ def run_count_significant_relationship(
     me_list = _ALL_ME
     for model in _ALL_MODELS:
         for task in tasks:
-            try:
-                rt = vb.ResultTemplateCountSignificantRelationship(
-                    model=model,
-                    task=task,  # type: ignore[arg-type]
-                    unlearning_algorithm_list=methods,  # type: ignore[arg-type]
-                    interference_entity_list=me_list,
-                    attribute_list=list(vb.task_to_attributes_of_interest.get(task, [])),
-                    upload_if_recomputed=upload_if_recomputed,
-                    save_outputs=True,
-                )
-                if _should_skip(rt, hf_files, upload_if_recomputed):
-                    continue
-                rt.compute()
-                print(f"CountSignificantRelationship {model}/{task} OK")
-            except Exception as e:
-                logger.warning(
-                    "CountSignificantRelationship failed for %s/%s: %s",
-                    model, task, e,
-                )
+            rt = vb.ResultTemplateCountSignificantRelationship(
+                model=model,
+                task=task,  # type: ignore[arg-type]
+                unlearning_algorithm_list=methods,  # type: ignore[arg-type]
+                interference_entity_list=me_list,
+                attribute_list=list(vb.task_to_attributes_of_interest.get(task, [])),
+                upload_if_recomputed=upload_if_recomputed,
+                save_outputs=True,
+            )
+            _compute_and_report(
+                rt, hf_files, upload_if_recomputed,
+                f"CountSignificantRelationship for {model}/{task}",
+            )
     print("CountSignificantRelationship done.")
 
 
@@ -476,28 +474,21 @@ def run_implicit_association_test(
             for unlearning_algorithm in methods:
                 for latent_embedding in _ALL_L:
                     for attr1, attr2 in attribute_pairs:
-                        try:
-                            rt = vb.ResultTemplateImplicitAssociationTest(  # type: ignore[arg-type]
-                                model=model,
-                                task=task,  # type: ignore[arg-type]
-                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                                attribute_1=attr1,
-                                attribute_2=attr2,
-                                latent_embedding=latent_embedding,
-                                upload_if_recomputed=upload_if_recomputed,
-                                save_outputs=True,
-                            )
-                            if _should_skip(rt, hf_files, upload_if_recomputed):
-                                continue
-                            rt.compute()
-                            print(".", end="", flush=True)
-                        except Exception as e:
-                            logger.warning(
-                                "ImplicitAssociationTest failed for "
-                                "%s/%s/%s/%s/%s/%s: %s",
-                                model, task, unlearning_algorithm,
-                                latent_embedding, attr1, attr2, e,
-                            )
+                        rt = vb.ResultTemplateImplicitAssociationTest(  # type: ignore[arg-type]
+                            model=model,
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                            attribute_1=attr1,
+                            attribute_2=attr2,
+                            latent_embedding=latent_embedding,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
+                        )
+                        _compute_and_report(
+                            rt, hf_files, upload_if_recomputed,
+                            f"ImplicitAssociationTest for {model}/{task}/{unlearning_algorithm}/"
+                            f"{latent_embedding}/{attr1}/{attr2}",
+                        )
     print("ImplicitAssociationTest done.")
 
 
@@ -527,6 +518,9 @@ def run_interference_visual_summary(
     tasks: List[str],
     methods: List[str],
     entity_count: int = 100,
+    hf_files: FrozenSet[str] = frozenset(),
+    upload_if_recomputed: bool = False,
+    mp_list: List[vb.type_mp] = _ALL_MP,
 ) -> None:
     """InterferenceVisualSummary: (model, task, unlearning_algorithm, mp, entity_index).
 
@@ -536,26 +530,22 @@ def run_interference_visual_summary(
     """
     for task in tasks:
         for unlearning_algorithm in methods:
-            for interference_pair in _ALL_MP:
+            for interference_pair in mp_list:
                 for entity_index in range(entity_count):
-                    try:
-                        rt = vb.ResultTemplateInterferenceVisualSummary(  # type: ignore[arg-type]
-                            task=task,  # type: ignore[arg-type]
-                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                            interference_pair=interference_pair,
-                            entity_index=entity_index,
-                            seed=42,
-                            save_outputs=True,
-                        )
-                        rt.compute()
-                        print(".", end="", flush=True)
-                    except Exception as e:
-                        logger.warning(
-                            "InterferenceVisualSummary failed for "
-                            "%s/%s/%s entity=%d: %s",
-                            task, unlearning_algorithm,
-                            interference_pair, entity_index, e,
-                        )
+                    rt = vb.ResultTemplateInterferenceVisualSummary(  # type: ignore[arg-type]
+                        task=task,  # type: ignore[arg-type]
+                        unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                        interference_pair=interference_pair,
+                        entity_index=entity_index,
+                        seed=42,
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
+                    )
+                    _compute_and_report(
+                        rt, hf_files, upload_if_recomputed,
+                        f"InterferenceVisualSummary for {task}/{unlearning_algorithm}/"
+                        f"{interference_pair} entity={entity_index}",
+                    )
                 print("")
     print("InterferenceVisualSummary done.")
 
@@ -575,24 +565,18 @@ def run_method_comparison_by_metric_entity(
     for model in _ALL_MODELS:
         for task in tasks:
             for interference_entity in me_list:
-                try:
-                    rt = vb.ResultTemplateMethodComparisonByMetricEntity(
-                        model=model,
-                        task=task,  # type: ignore[arg-type]
-                        interference_entity=interference_entity,
-                        unlearning_algorithm_list=methods,  # type: ignore[arg-type]
-                        upload_if_recomputed=upload_if_recomputed,
-                        save_outputs=True,
-                    )
-                    if _should_skip(rt, hf_files, upload_if_recomputed):
-                        continue
-                    rt.compute()
-                    print(".", end="", flush=True)
-                except Exception as e:
-                    logger.warning(
-                        "MethodComparisonByMetricEntity failed for %s/%s/%s: %s",
-                        model, task, interference_entity, e,
-                    )
+                rt = vb.ResultTemplateMethodComparisonByMetricEntity(
+                    model=model,
+                    task=task,  # type: ignore[arg-type]
+                    interference_entity=interference_entity,
+                    unlearning_algorithm_list=methods,  # type: ignore[arg-type]
+                    upload_if_recomputed=upload_if_recomputed,
+                    save_outputs=True,
+                )
+                _compute_and_report(
+                    rt, hf_files, upload_if_recomputed,
+                    f"MethodComparisonByMetricEntity for {model}/{task}/{interference_entity}",
+                )
         print("")
     print("MethodComparisonByMetricEntity done.")
 
@@ -617,24 +601,18 @@ def run_embedding_unlearning_profile(
             for method in methods:
                 for row in metadata:
                     entity = row["name"]
-                    try:
-                        rt = vb.ResultTemplateEmbeddingUnlearningProfile(
-                            model=model,
-                            task=task,  # type: ignore[arg-type]
-                            unlearning_algorithm=method,  # type: ignore[arg-type]
-                            entity=entity,
-                            upload_if_recomputed=upload_if_recomputed,
-                            save_outputs=True,
-                        )
-                        if _should_skip(rt, hf_files, upload_if_recomputed):
-                            continue
-                        rt.compute()
-                        print(".", end="", flush=True)
-                    except Exception as e:
-                        logger.warning(
-                            "EmbeddingUnlearningProfile failed for %s/%s/%s/%s: %s",
-                            model, task, method, entity, e,
-                        )
+                    rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                        model=model,
+                        task=task,  # type: ignore[arg-type]
+                        unlearning_algorithm=method,  # type: ignore[arg-type]
+                        entity=entity,
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
+                    )
+                    _compute_and_report(
+                        rt, hf_files, upload_if_recomputed,
+                        f"EmbeddingUnlearningProfile for {model}/{task}/{method}/{entity}",
+                    )
                 print("")
     print("EmbeddingUnlearningProfile done.")
 
@@ -652,23 +630,17 @@ def run_embedding_forgetting_efficiency(
     for model in _ALL_MODELS:
         for task in tasks:
             for method in methods:
-                try:
-                    rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
-                        model=model,
-                        task=task,  # type: ignore[arg-type]
-                        unlearning_algorithm=method,  # type: ignore[arg-type]
-                        upload_if_recomputed=upload_if_recomputed,
-                        save_outputs=True,
-                    )
-                    if _should_skip(rt, hf_files, upload_if_recomputed):
-                        continue
-                    rt.compute()
-                    print(".", end="", flush=True)
-                except Exception as e:
-                    logger.warning(
-                        "EmbeddingForgettingEfficiency failed for %s/%s/%s: %s",
-                        model, task, method, e,
-                    )
+                rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
+                    model=model,
+                    task=task,  # type: ignore[arg-type]
+                    unlearning_algorithm=method,  # type: ignore[arg-type]
+                    upload_if_recomputed=upload_if_recomputed,
+                    save_outputs=True,
+                )
+                _compute_and_report(
+                    rt, hf_files, upload_if_recomputed,
+                    f"EmbeddingForgettingEfficiency for {model}/{task}/{method}",
+                )
         print("")
     print("EmbeddingForgettingEfficiency done.")
 
@@ -686,8 +658,11 @@ ALL_RT_NAMES = [
     "countsignificantrelationship",
     "implicitassociationtest",
     # "minimumcutinterference" — skipped (too many combos, on-demand only)
-    # "unlearningvisualsummary" — requires full HF dataset download; risk of throttle
-    # "interferencevisualsummary" — requires full HF dataset download; risk of throttle
+    # "unlearningvisualsummary" — excluded: ResultTemplateUnlearningVisualSummary is an
+    #   unimplemented stub (no _serialize_parameters/_compute_from_scratch/plot; calling
+    #   .compute() raises NotImplementedError). It is also not used anywhere in Forgety's
+    #   entity-browsing flow. Confirmed out of scope 2026-07-13.
+    "interferencevisualsummary",
     "methodcomparisonbymetricentity",
     "embeddingunlearningprofile",
     "embeddingforgettingefficiency",
@@ -898,6 +873,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--mp",
+        nargs="+",
+        default=_ALL_MP,
+        choices=_ALL_MP,
+        metavar="METRIC",
+        help="Per-pair interference metric(s) to include (default: all 5).",
+    )
+    parser.add_argument(
         "--entity-count",
         type=int,
         default=100,
@@ -989,13 +972,13 @@ def main() -> None:
                 run_metric_metric_alignment(tasks, methods, hf_files, upload)
 
             elif rt_name == "metricsimilarityalignment":
-                run_metric_similarity_alignment(tasks, methods, hf_files, upload)
+                run_metric_similarity_alignment(tasks, methods, hf_files, upload, mp_list=args.mp)
 
             elif rt_name == "metricsimilarityalignmentmulti":
-                run_metric_similarity_alignment_multi(tasks, methods, hf_files, upload)
+                run_metric_similarity_alignment_multi(tasks, methods, hf_files, upload, mp_list=args.mp)
 
             elif rt_name == "interferencematrix":
-                run_interference_matrix(tasks, methods, hf_files, upload)
+                run_interference_matrix(tasks, methods, hf_files, upload, mp_list=args.mp)
 
             elif rt_name == "similaritymatrix":
                 run_similarity_matrix(tasks, hf_files, upload)
@@ -1014,7 +997,8 @@ def main() -> None:
 
             elif rt_name == "interferencevisualsummary":
                 run_interference_visual_summary(
-                    tasks, methods, entity_count=args.entity_count
+                    tasks, methods, entity_count=args.entity_count,
+                    hf_files=hf_files, upload_if_recomputed=upload, mp_list=args.mp,
                 )
 
             elif rt_name == "methodcomparisonbymetricentity":
