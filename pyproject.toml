@@ -28,6 +28,8 @@ classifiers = [
 ]
 keywords = ["machine unlearning", "machine learning", "deep learning", "computer vision"]
 packages = [{ include = "vision_unlearning" }]
+# PEP 561: ship the py.typed marker so type checkers use this package's inline annotations.
+include = [{ path = "vision_unlearning/py.typed", format = ["sdist", "wheel"] }]
 exclude = ["tests", "docs", "examples"]
 
 [tool.poetry.dependencies]
