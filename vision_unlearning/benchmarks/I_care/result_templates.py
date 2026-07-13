@@ -43,6 +43,7 @@ except ImportError:
     shap = None  # type: ignore[assignment]
 
 from vision_unlearning.integrations.huggingface import (
+    get_hf_token_from_env,
     huggingface_dataset_file_exists,
     huggingface_dataset_file_download,
     huggingface_dataset_upload,
@@ -173,7 +174,7 @@ class ResultTemplate(BaseModel):
             return False
 
     def compute(self) -> dict:
-        hf_token: Optional[str] = os.getenv('HF_TOKEN')
+        hf_token: Optional[str] = get_hf_token_from_env()
         data: Any
         if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:

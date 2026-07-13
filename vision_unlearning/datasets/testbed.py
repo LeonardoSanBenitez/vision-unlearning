@@ -695,18 +695,18 @@ class GeneratedDataset(BaseModel):
         str
             The local folder path to the (now complete) dataset.
         """
-        hf_token: Optional[str] = os.getenv('HF_TOKEN')
-
         # 1. Local
         if not self.recompute_if_exists and self.exists(seeds, prompts):
             return self.folder_path
 
         # 2. Remote (HuggingFace)
         from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
+            get_hf_token_from_env,
             huggingface_dataset_exists,
             huggingface_dataset_download,
             huggingface_dataset_upload,
         )
+        hf_token: Optional[str] = get_hf_token_from_env()
         if not self.recompute_if_exists and huggingface_dataset_exists(
             self.remote_repository_name,
             self.hf_config_name,
@@ -717,7 +717,10 @@ class GeneratedDataset(BaseModel):
                 folder_datasets=os.path.join(self.base_folder, 'datasets'),
                 dataset_repository=self.remote_repository_name,
                 dataset_config=self.hf_config_name,
-                token=hf_token or '',
+                # None (not "") when unset: an empty string becomes an illegal
+                # 'Authorization: Bearer ' header and breaks unauthenticated
+                # downloads from public repositories.
+                token=hf_token,
                 path_in_repo=self.hf_path_in_repo,
             )
             assert self.exists(seeds, prompts), (

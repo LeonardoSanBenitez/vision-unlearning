@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from typing import Optional
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -1193,6 +1194,45 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
             self.assertEqual(
                 download_kwargs.get('path_in_repo'), expected_path,
                 "huggingface_dataset_download must use hf_path_in_repo (datasets/ prefix)",
+            )
+
+    def test_download_token_is_none_when_hf_token_unset(self) -> None:
+        """Without HF_TOKEN, the download must receive token=None, not token="":
+        an empty string becomes an illegal 'Authorization: Bearer ' header and breaks
+        unauthenticated downloads from public repositories.
+
+        Regression test for the same bug already fixed in InterferencePerEntity.compute()
+        and ResultTemplate.compute() (vision-unlearning commit c189e56) — this is the one
+        remaining occurrence, on GeneratedDataset's heavy-generation download path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42]
+            prompts = ['An image of a griffon bruxellois dog']
+            ds = GeneratedDataset(task='breeds', base_folder=tmp)
+
+            def fake_download(folder_datasets: str, dataset_repository: str,
+                              dataset_config: str, token: Optional[str],
+                              path_in_repo: Optional[str] = None) -> None:
+                self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='off')
+
+            mock_exists = MagicMock(return_value=True)
+
+            with patch.dict('os.environ', {}, clear=False):
+                os.environ.pop('HF_TOKEN', None)
+                with patch(
+                    'vision_unlearning.integrations.huggingface.huggingface_dataset_exists',
+                    mock_exists,
+                ):
+                    with patch(
+                        'vision_unlearning.integrations.huggingface.huggingface_dataset_download',
+                        side_effect=fake_download,
+                    ) as mock_download:
+                        result = ds.compute(seeds=seeds, prompts=prompts)
+
+            self.assertEqual(result, ds.folder_path)
+            download_kwargs = mock_download.call_args.kwargs
+            self.assertIsNone(
+                download_kwargs.get('token'),
+                "download must receive token=None, not token='', when HF_TOKEN is unset",
             )
 
     def test_compute_skips_hf_when_local_data_present(self) -> None:
