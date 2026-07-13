@@ -113,22 +113,29 @@ class TestShouldSkip:
 
 
 class TestComputeAndReport:
+    """``_compute_and_report`` takes a zero-argument ``rt_factory`` (not an already-built
+    RT) precisely so that construction errors are caught by the same handler as
+    ``compute()`` errors -- see ``test_logs_and_continues_on_construction_failure``.
+    """
+
     def test_local_hit_skips_compute(self, tmp_path: Any, capsys: Any) -> None:
         local = tmp_path / "present.json"
         local.write_text("{}")
         rt = _FakeRT(local_path=str(local))
-        _compute_and_report(cast(Any, rt), frozenset(), False, "context")
+        _compute_and_report(lambda: cast(Any, rt), frozenset(), False, "context")
         assert rt.compute_called is False
         assert capsys.readouterr().out == ""
 
     def test_hf_hit_skips_compute(self, tmp_path: Any) -> None:
         rt = _FakeRT(local_path=str(tmp_path / "missing.json"), remote_path="results/Fake/x.json")
-        _compute_and_report(cast(Any, rt), frozenset({"results/Fake/x.json"}), False, "context")
+        _compute_and_report(
+            lambda: cast(Any, rt), frozenset({"results/Fake/x.json"}), False, "context"
+        )
         assert rt.compute_called is False
 
     def test_computes_and_prints_marker_on_success(self, tmp_path: Any, capsys: Any) -> None:
         rt = _FakeRT(local_path=str(tmp_path / "missing.json"))
-        _compute_and_report(cast(Any, rt), frozenset(), False, "context")
+        _compute_and_report(lambda: cast(Any, rt), frozenset(), False, "context")
         assert rt.compute_called is True
         assert capsys.readouterr().out == "."
 
@@ -140,15 +147,25 @@ class TestComputeAndReport:
 
         rt = _FakeRT(local_path=str(tmp_path / "missing.json"), compute_fn=_boom)
         with caplog.at_level(logging.WARNING):
-            _compute_and_report(cast(Any, rt), frozenset(), False, "my-context")
+            _compute_and_report(lambda: cast(Any, rt), frozenset(), False, "my-context")
         assert "my-context failed: boom" in caplog.text
+
+    def test_logs_and_continues_on_construction_failure(self, caplog: Any) -> None:
+        """A failure while building the RT (e.g. pydantic validation) must be caught
+        by the same handler as a compute() failure, not propagate and abort the run."""
+        def _factory() -> Any:
+            raise ValueError("bad constructor args")
+
+        with caplog.at_level(logging.WARNING):
+            _compute_and_report(_factory, frozenset(), False, "my-context")
+        assert "my-context failed: bad constructor args" in caplog.text
 
     def test_recomputes_when_upload_if_recomputed_but_not_yet_on_hf(
         self, tmp_path: Any
     ) -> None:
         """upload_if_recomputed alone (no local, no HF hit) does not shortcut compute()."""
         rt = _FakeRT(local_path=str(tmp_path / "missing.json"))
-        _compute_and_report(cast(Any, rt), frozenset(), True, "context")
+        _compute_and_report(lambda: cast(Any, rt), frozenset(), True, "context")
         assert rt.compute_called is True
 
 

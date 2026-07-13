@@ -46,7 +46,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-from typing import FrozenSet, List, Optional, cast, get_args
+from typing import Callable, FrozenSet, List, Optional, cast, get_args
 
 logging.basicConfig(
     level=logging.INFO,
@@ -151,23 +151,30 @@ def _should_skip(
 
 
 def _compute_and_report(
-    rt: "vb.ResultTemplate",  # type: ignore[name-defined]
+    rt_factory: Callable[[], "vb.ResultTemplate"],  # type: ignore[name-defined]
     hf_files: FrozenSet[str],
     upload_if_recomputed: bool,
     error_context: str,
 ) -> None:
-    """Skip if the result already exists locally or on HuggingFace; otherwise compute it.
+    """Construct and skip/compute one RT, warning and continuing on any failure.
 
-    Centralizes the skip-check, compute, progress marker, and warn-and-continue behavior
-    every RT runner needs, so upload/skip semantics cannot be forgotten case-by-case.
+    Centralizes the construct, skip-check, compute, progress marker, and
+    warn-and-continue behavior every RT runner needs, so upload/skip semantics cannot
+    be forgotten case-by-case. ``rt_factory`` is a zero-argument callable rather than an
+    already-built RT so that construction errors (e.g. pydantic validation) are caught
+    by the same handler as compute() errors, instead of aborting the whole CLI run.
+    Callers pass a lambda closing over the current loop variables; since
+    ``rt_factory()`` is invoked synchronously (not deferred/stored), the closures are
+    evaluated immediately and are not subject to the late-binding-in-loops pitfall.
     """
     try:
+        rt = rt_factory()
         if _should_skip(rt, hf_files, upload_if_recomputed):
             return
         rt.compute()
         print(".", end="", flush=True)
     except Exception as exc:
-        logger.warning("%s failed: %s", error_context, exc)
+        logger.warning("%s failed: %s", error_context, exc, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -187,17 +194,17 @@ def run_metric_metric_alignment(
             for unlearning_algorithm in methods:
                 for i, me1 in enumerate(me_list):
                     for me2 in me_list[i + 1:]:
-                        rt = vb.ResultTemplateMetricMetricAlignment(  # type: ignore[arg-type]
-                            model=model,
-                            task=task,  # type: ignore[arg-type]
-                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                            interference_entity_1=me1,
-                            interference_entity_2=me2,
-                            upload_if_recomputed=upload_if_recomputed,
-                            save_outputs=True,
-                        )
                         _compute_and_report(
-                            rt, hf_files, upload_if_recomputed,
+                            lambda: vb.ResultTemplateMetricMetricAlignment(  # type: ignore[arg-type]
+                                model=model,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                                interference_entity_1=me1,
+                                interference_entity_2=me2,
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
+                            ),
+                            hf_files, upload_if_recomputed,
                             f"MetricMetricAlignment for {model}/{task}/{unlearning_algorithm}/{me1}/{me2}",
                         )
                 print("")
@@ -217,17 +224,17 @@ def run_metric_similarity_alignment(
             for unlearning_algorithm in methods:
                 for interference_pair in mp_list:
                     for similarity_metric in _ALL_S:
-                        rt = vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
-                            model=model,
-                            task=task,  # type: ignore[arg-type]
-                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                            interference_pair=interference_pair,
-                            similarity_metric=similarity_metric,
-                            upload_if_recomputed=upload_if_recomputed,
-                            save_outputs=True,
-                        )
                         _compute_and_report(
-                            rt, hf_files, upload_if_recomputed,
+                            lambda: vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
+                                model=model,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                                interference_pair=interference_pair,
+                                similarity_metric=similarity_metric,
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
+                            ),
+                            hf_files, upload_if_recomputed,
                             f"MetricSimilarityAlignment for {model}/{task}/{unlearning_algorithm}/"
                             f"{interference_pair}/{similarity_metric}",
                         )
@@ -258,20 +265,20 @@ def run_metric_similarity_alignment_multi(
                 for interference_pair in mp_list:
                     for similarity_metric_list in similarity_sets:
                         for regression_algorithm in regression_algorithms:
-                            rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
-                                model=model,
-                                task=task,  # type: ignore[arg-type]
-                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                                interference_pair=interference_pair,
-                                similarity_metric_list=similarity_metric_list,
-                                include_emitter_forget_quality=True,
-                                include_baseline_quality=True,
-                                regression_algorithm=regression_algorithm,  # type: ignore[arg-type]
-                                upload_if_recomputed=upload_if_recomputed,
-                                save_outputs=True,
-                            )
                             _compute_and_report(
-                                rt, hf_files, upload_if_recomputed,
+                                lambda: vb.ResultTemplateMetricSimilarityAlignmentMulti(
+                                    model=model,
+                                    task=task,  # type: ignore[arg-type]
+                                    unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                                    interference_pair=interference_pair,
+                                    similarity_metric_list=similarity_metric_list,
+                                    include_emitter_forget_quality=True,
+                                    include_baseline_quality=True,
+                                    regression_algorithm=regression_algorithm,  # type: ignore[arg-type]
+                                    upload_if_recomputed=upload_if_recomputed,
+                                    save_outputs=True,
+                                ),
+                                hf_files, upload_if_recomputed,
                                 f"MetricSimilarityAlignmentMulti for {model}/{task}/"
                                 f"{unlearning_algorithm}/{interference_pair}/"
                                 f"{similarity_metric_list}/{regression_algorithm}",
@@ -292,16 +299,16 @@ def run_interference_matrix(
         for task in tasks:
             for unlearning_algorithm in methods:
                 for interference_pair in mp_list:
-                    rt = vb.ResultTemplateInterferenceMatrix(  # type: ignore[arg-type]
-                        model=model,
-                        task=task,  # type: ignore[arg-type]
-                        unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                        interference_pair=interference_pair,
-                        upload_if_recomputed=upload_if_recomputed,
-                        save_outputs=True,
-                    )
                     _compute_and_report(
-                        rt, hf_files, upload_if_recomputed,
+                        lambda: vb.ResultTemplateInterferenceMatrix(  # type: ignore[arg-type]
+                            model=model,
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                            interference_pair=interference_pair,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
+                        ),
+                        hf_files, upload_if_recomputed,
                         f"InterferenceMatrix for {model}/{task}/{unlearning_algorithm}/{interference_pair}",
                     )
                 print("")
@@ -317,15 +324,15 @@ def run_similarity_matrix(
     for model in _ALL_MODELS:
         for task in tasks:
             for similarity_metric in _ALL_S:
-                rt = vb.ResultTemplateSimilarityMatrix(
-                    model=model,
-                    task=task,  # type: ignore[arg-type]
-                    similarity_metric=similarity_metric,
-                    upload_if_recomputed=upload_if_recomputed,
-                    save_outputs=True,
-                )
                 _compute_and_report(
-                    rt, hf_files, upload_if_recomputed,
+                    lambda: vb.ResultTemplateSimilarityMatrix(
+                        model=model,
+                        task=task,  # type: ignore[arg-type]
+                        similarity_metric=similarity_metric,
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
+                    ),
+                    hf_files, upload_if_recomputed,
                     f"SimilarityMatrix for {model}/{task}/{similarity_metric}",
                 )
         print("")
@@ -430,17 +437,17 @@ def run_count_significant_relationship(
     me_list = _ALL_ME
     for model in _ALL_MODELS:
         for task in tasks:
-            rt = vb.ResultTemplateCountSignificantRelationship(
-                model=model,
-                task=task,  # type: ignore[arg-type]
-                unlearning_algorithm_list=methods,  # type: ignore[arg-type]
-                interference_entity_list=me_list,
-                attribute_list=list(vb.task_to_attributes_of_interest.get(task, [])),
-                upload_if_recomputed=upload_if_recomputed,
-                save_outputs=True,
-            )
             _compute_and_report(
-                rt, hf_files, upload_if_recomputed,
+                lambda: vb.ResultTemplateCountSignificantRelationship(
+                    model=model,
+                    task=task,  # type: ignore[arg-type]
+                    unlearning_algorithm_list=methods,  # type: ignore[arg-type]
+                    interference_entity_list=me_list,
+                    attribute_list=list(vb.task_to_attributes_of_interest.get(task, [])),
+                    upload_if_recomputed=upload_if_recomputed,
+                    save_outputs=True,
+                ),
+                hf_files, upload_if_recomputed,
                 f"CountSignificantRelationship for {model}/{task}",
             )
     print("CountSignificantRelationship done.")
@@ -474,18 +481,18 @@ def run_implicit_association_test(
             for unlearning_algorithm in methods:
                 for latent_embedding in _ALL_L:
                     for attr1, attr2 in attribute_pairs:
-                        rt = vb.ResultTemplateImplicitAssociationTest(  # type: ignore[arg-type]
-                            model=model,
-                            task=task,  # type: ignore[arg-type]
-                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                            attribute_1=attr1,
-                            attribute_2=attr2,
-                            latent_embedding=latent_embedding,
-                            upload_if_recomputed=upload_if_recomputed,
-                            save_outputs=True,
-                        )
                         _compute_and_report(
-                            rt, hf_files, upload_if_recomputed,
+                            lambda: vb.ResultTemplateImplicitAssociationTest(  # type: ignore[arg-type]
+                                model=model,
+                                task=task,  # type: ignore[arg-type]
+                                unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                                attribute_1=attr1,
+                                attribute_2=attr2,
+                                latent_embedding=latent_embedding,
+                                upload_if_recomputed=upload_if_recomputed,
+                                save_outputs=True,
+                            ),
+                            hf_files, upload_if_recomputed,
                             f"ImplicitAssociationTest for {model}/{task}/{unlearning_algorithm}/"
                             f"{latent_embedding}/{attr1}/{attr2}",
                         )
@@ -532,17 +539,17 @@ def run_interference_visual_summary(
         for unlearning_algorithm in methods:
             for interference_pair in mp_list:
                 for entity_index in range(entity_count):
-                    rt = vb.ResultTemplateInterferenceVisualSummary(  # type: ignore[arg-type]
-                        task=task,  # type: ignore[arg-type]
-                        unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
-                        interference_pair=interference_pair,
-                        entity_index=entity_index,
-                        seed=42,
-                        upload_if_recomputed=upload_if_recomputed,
-                        save_outputs=True,
-                    )
                     _compute_and_report(
-                        rt, hf_files, upload_if_recomputed,
+                        lambda: vb.ResultTemplateInterferenceVisualSummary(  # type: ignore[arg-type]
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                            interference_pair=interference_pair,
+                            entity_index=entity_index,
+                            seed=42,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
+                        ),
+                        hf_files, upload_if_recomputed,
                         f"InterferenceVisualSummary for {task}/{unlearning_algorithm}/"
                         f"{interference_pair} entity={entity_index}",
                     )
@@ -565,16 +572,16 @@ def run_method_comparison_by_metric_entity(
     for model in _ALL_MODELS:
         for task in tasks:
             for interference_entity in me_list:
-                rt = vb.ResultTemplateMethodComparisonByMetricEntity(
-                    model=model,
-                    task=task,  # type: ignore[arg-type]
-                    interference_entity=interference_entity,
-                    unlearning_algorithm_list=methods,  # type: ignore[arg-type]
-                    upload_if_recomputed=upload_if_recomputed,
-                    save_outputs=True,
-                )
                 _compute_and_report(
-                    rt, hf_files, upload_if_recomputed,
+                    lambda: vb.ResultTemplateMethodComparisonByMetricEntity(
+                        model=model,
+                        task=task,  # type: ignore[arg-type]
+                        interference_entity=interference_entity,
+                        unlearning_algorithm_list=methods,  # type: ignore[arg-type]
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
+                    ),
+                    hf_files, upload_if_recomputed,
                     f"MethodComparisonByMetricEntity for {model}/{task}/{interference_entity}",
                 )
         print("")
@@ -601,16 +608,16 @@ def run_embedding_unlearning_profile(
             for method in methods:
                 for row in metadata:
                     entity = row["name"]
-                    rt = vb.ResultTemplateEmbeddingUnlearningProfile(
-                        model=model,
-                        task=task,  # type: ignore[arg-type]
-                        unlearning_algorithm=method,  # type: ignore[arg-type]
-                        entity=entity,
-                        upload_if_recomputed=upload_if_recomputed,
-                        save_outputs=True,
-                    )
                     _compute_and_report(
-                        rt, hf_files, upload_if_recomputed,
+                        lambda: vb.ResultTemplateEmbeddingUnlearningProfile(
+                            model=model,
+                            task=task,  # type: ignore[arg-type]
+                            unlearning_algorithm=method,  # type: ignore[arg-type]
+                            entity=entity,
+                            upload_if_recomputed=upload_if_recomputed,
+                            save_outputs=True,
+                        ),
+                        hf_files, upload_if_recomputed,
                         f"EmbeddingUnlearningProfile for {model}/{task}/{method}/{entity}",
                     )
                 print("")
@@ -630,15 +637,15 @@ def run_embedding_forgetting_efficiency(
     for model in _ALL_MODELS:
         for task in tasks:
             for method in methods:
-                rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
-                    model=model,
-                    task=task,  # type: ignore[arg-type]
-                    unlearning_algorithm=method,  # type: ignore[arg-type]
-                    upload_if_recomputed=upload_if_recomputed,
-                    save_outputs=True,
-                )
                 _compute_and_report(
-                    rt, hf_files, upload_if_recomputed,
+                    lambda: vb.ResultTemplateEmbeddingForgettingEfficiency(
+                        model=model,
+                        task=task,  # type: ignore[arg-type]
+                        unlearning_algorithm=method,  # type: ignore[arg-type]
+                        upload_if_recomputed=upload_if_recomputed,
+                        save_outputs=True,
+                    ),
+                    hf_files, upload_if_recomputed,
                     f"EmbeddingForgettingEfficiency for {model}/{task}/{method}",
                 )
         print("")
