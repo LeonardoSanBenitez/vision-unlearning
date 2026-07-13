@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite
 from vision_unlearning.integrations.huggingface import (
+    get_hf_token_from_env,
     huggingface_dataset_file_exists,
     huggingface_dataset_file_download,
     huggingface_dataset_file_upload,
@@ -168,7 +169,7 @@ class InterferencePerEntity(BaseModel):
         )
 
     def compute(self) -> List[Dict[str, Any]]:
-        hf_token: Optional[str] = os.getenv('HF_TOKEN')
+        hf_token: Optional[str] = get_hf_token_from_env()
         data: Any
         if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
             with open(self._get_data_path_local(), "r", encoding="utf-8") as f:

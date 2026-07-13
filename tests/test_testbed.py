@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from typing import Optional
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -1209,7 +1210,8 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
             ds = GeneratedDataset(task='breeds', base_folder=tmp)
 
             def fake_download(folder_datasets: str, dataset_repository: str,
-                              dataset_config: str, token: str, path_in_repo: str = None) -> None:  # type: ignore[assignment]
+                              dataset_config: str, token: Optional[str],
+                              path_in_repo: Optional[str] = None) -> None:
                 self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='off')
 
             mock_exists = MagicMock(return_value=True)

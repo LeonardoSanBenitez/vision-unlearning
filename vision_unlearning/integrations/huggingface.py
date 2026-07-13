@@ -13,6 +13,19 @@ from vision_unlearning.utils.logger import get_logger
 logger = get_logger('integrations')
 
 
+def get_hf_token_from_env() -> Optional[str]:
+    '''
+    Read the HF_TOKEN environment variable, normalizing falsy values to None.
+
+    Returns None both when HF_TOKEN is genuinely unset and when it is set to an
+    empty string. Callers that build a `token` kwarg from this value can then pass
+    it straight through: `None` is the correct way to request anonymous access to a
+    public repository, while an empty string is sent as a literal (invalid)
+    `Authorization: Bearer` header and breaks unauthenticated downloads.
+    '''
+    return os.getenv('HF_TOKEN') or None
+
+
 def huggingface_model_upload(
     folder_models: str,
     model_repository: str,
