@@ -216,9 +216,11 @@ def run_metric_similarity_alignment(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
-    mp_list: List[vb.type_mp] = _ALL_MP,
+    mp_list: Optional[List[vb.type_mp]] = None,
 ) -> None:
     """MetricSimilarityAlignment: (model, task, unlearning_algorithm, mp, s)."""
+    if mp_list is None:
+        mp_list = _ALL_MP
     for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
@@ -247,7 +249,7 @@ def run_metric_similarity_alignment_multi(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
-    mp_list: List[vb.type_mp] = _ALL_MP,
+    mp_list: Optional[List[vb.type_mp]] = None,
 ) -> None:
     """MetricSimilarityAlignmentMulti: (model, task, unlearning_algorithm, mp, s_list, reg_algo).
 
@@ -255,6 +257,8 @@ def run_metric_similarity_alignment_multi(
     The combined run (clip+dino+jacc) is the primary analysis; the individual-metric
     runs (clip-only, dino-only, jacc-only) serve as within-model baselines.
     """
+    if mp_list is None:
+        mp_list = _ALL_MP
     all_metrics = _ALL_S
     regression_algorithms = _ALL_REG_ALGOS
     similarity_sets = [all_metrics]  # primary: all combined
@@ -292,9 +296,11 @@ def run_interference_matrix(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
-    mp_list: List[vb.type_mp] = _ALL_MP,
+    mp_list: Optional[List[vb.type_mp]] = None,
 ) -> None:
     """InterferenceMatrix: (model, task, unlearning_algorithm, interference_pair)."""
+    if mp_list is None:
+        mp_list = _ALL_MP
     for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
@@ -527,7 +533,7 @@ def run_interference_visual_summary(
     entity_count: int = 100,
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
-    mp_list: List[vb.type_mp] = _ALL_MP,
+    mp_list: Optional[List[vb.type_mp]] = None,
 ) -> None:
     """InterferenceVisualSummary: (model, task, unlearning_algorithm, mp, entity_index).
 
@@ -535,6 +541,8 @@ def run_interference_visual_summary(
         entity_count: how many entity indices to run (default 100, matching
                       the notebook's ``range(0, 100)``).
     """
+    if mp_list is None:
+        mp_list = _ALL_MP
     for task in tasks:
         for unlearning_algorithm in methods:
             for interference_pair in mp_list:
@@ -882,7 +890,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mp",
         nargs="+",
-        default=_ALL_MP,
+        default=list(_ALL_MP),
         choices=_ALL_MP,
         metavar="METRIC",
         help="Per-pair interference metric(s) to include (default: all 5).",
