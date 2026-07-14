@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Tuple, List, Dict, Optional, Any
+from typing import Literal, Tuple, List, Dict, Optional, Any, cast
 import json
 import os
 import re
@@ -13,6 +13,7 @@ import seaborn as sns
 from pydantic import BaseModel
 
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.artifact import SingleFileArtifact
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite
 from vision_unlearning.integrations.huggingface import (
     get_hf_token_from_env,
@@ -142,25 +143,16 @@ def save_interference_per_entity(
 
 
 
-# Every artifact should be abstracted by a OO class, instead of just a loosely connected set of functions
-# This class should also handle automatically fetching the underlying data from huggingface
-# For now both styles can coexist, but we should refactor all rest of code to use just OO
-# This follows basically the same logic as a RT... Maybe both should inherit from a class "Artifact" or something like that
-class InterferencePerEntity(BaseModel):
+# InterferencePerEntity is stored as a single JSON file and shares the local -> HuggingFace
+# -> from-scratch storage cascade with the Result Templates; both inherit that cascade from
+# SingleFileArtifact. The functional helpers below (get_interference_per_entity, ...) remain
+# available and coexist with this object-oriented interface.
+class InterferencePerEntity(SingleFileArtifact):
     task: type_task = 'people'
-    base_folder: str = 'assets'
-    remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
-    save_outputs: bool = True
-    recompute_if_exists: bool = False
-    upload_if_recomputed: bool = False
     # This class deprecates: save_interference_per_entity, get_interference_per_entity_path
 
     def _get_data_path_remote(self) -> str:
         return f'interference_per_entity_{self.task}.json'
-
-
-    def _get_data_path_local(self) -> str:
-        return os.path.join(self.base_folder, self._get_data_path_remote())
 
     def _compute_from_scratch(self) -> List[Dict[str, Any]]:
         raise NotImplementedError(
@@ -168,62 +160,16 @@ class InterferencePerEntity(BaseModel):
             "Provide a pre-computed file or fetch from HuggingFace."
         )
 
-    def compute(self) -> List[Dict[str, Any]]:
-        hf_token: Optional[str] = get_hf_token_from_env()
-        data: Any
-        if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        elif not self.recompute_if_exists and huggingface_dataset_file_exists(  # Remote
-            self.remote_repository_name,
-            self._get_data_path_remote(),
-            token=hf_token,
-        ):
-            #print('going the remote option', flush=True)
-            huggingface_dataset_file_download(
-                folder_datasets=self.base_folder,
-                dataset_repository=self.remote_repository_name,
-                file_path=self._get_data_path_remote(),
-                # None (not "") when unset: an empty string becomes an illegal
-                # 'Authorization: Bearer ' header and breaks unauthenticated
-                # downloads from public repositories.
-                token=hf_token,
-            )
-            assert os.path.exists(self._get_data_path_local())
-            #print('downloaded', flush=True)
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        else:  # Compute from scratch
-            data = self._compute_from_scratch()
-            if self.save_outputs:
-                os.makedirs(os.path.dirname(self._get_data_path_local()), exist_ok=True)
-                with open(self._get_data_path_local(), "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-            # Upload to HF if requested
-            if self.upload_if_recomputed:
-                assert self.save_outputs, (
-                    "upload_if_recomputed=True requires save_outputs=True "
-                    "(no file to upload when save_outputs=False)."
-                )
-                assert hf_token, (
-                    "upload_if_recomputed=True but HF_TOKEN is not set. "
-                    "Set HF_TOKEN environment variable before calling compute()."
-                )
-                logger.info(
-                    "Uploading recomputed InterferencePerEntity to HF: %s",
-                    self._get_data_path_remote(),
-                )
-                huggingface_dataset_file_upload(
-                    file_path=self._get_data_path_local(),
-                    dataset_repository=self.remote_repository_name,
-                    dataset_path=self._get_data_path_remote(),
-                    token=hf_token,
-                )
-                logger.info("Upload complete: %s", self._get_data_path_remote())
+    def _validate(self, data: Any) -> None:
         assert type(data) == list, f"Expected a dict in the json file, but got {type(data)}"
         assert len(data) > 0  # == 100
         assert all(isinstance(item, dict) for item in data)
-        return data
+
+    def compute(self) -> List[Dict[str, Any]]:
+        """Resolve the per-entity interference summary from local disk, HuggingFace, or from
+        scratch. The storage cascade lives in SingleFileArtifact; this method only pins the
+        return type."""
+        return cast(List[Dict[str, Any]], self._resolve())
 
 
 

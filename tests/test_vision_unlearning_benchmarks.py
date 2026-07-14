@@ -39,6 +39,7 @@ from matplotlib.figure import Figure  # noqa: E402
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
+import vision_unlearning.artifact as _artifact_mod  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -543,8 +544,9 @@ def no_remote(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force every HF existence check to False so compute() never hits the
     network and always takes the compute-from-scratch branch."""
     monkeypatch.setattr(vb, "huggingface_dataset_file_exists", lambda *a, **k: False)
-    # Also patch at the call site in result_templates (where the function is locally bound)
-    monkeypatch.setattr(_rt_mod, "huggingface_dataset_file_exists", lambda *a, **k: False)
+    # Also patch at the cascade call site in vision_unlearning.artifact, where the storage
+    # hooks look up the HuggingFace helpers.
+    monkeypatch.setattr(_artifact_mod, "huggingface_dataset_file_exists", lambda *a, **k: False)
 
 
 class TestComputeFromScratchMocked:
@@ -1169,7 +1171,7 @@ class TestResultTemplateUploadIfRecomputed:
         """upload_if_recomputed=True: huggingface_dataset_file_upload is called."""
         rt = _FakeRT(base_folder=str(tmp_path), upload_if_recomputed=True)
         monkeypatch.setattr(
-            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
 
         upload_calls: List[Any] = []
@@ -1177,7 +1179,7 @@ class TestResultTemplateUploadIfRecomputed:
         def fake_upload(**kw: Any) -> None:
             upload_calls.append(kw)
 
-        monkeypatch.setattr(_rt_mod, "huggingface_dataset_file_upload", fake_upload)
+        monkeypatch.setattr(_artifact_mod, "huggingface_dataset_file_upload", fake_upload)
 
         with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
             data = rt.compute()
@@ -1193,12 +1195,12 @@ class TestResultTemplateUploadIfRecomputed:
         """upload_if_recomputed=False (default): no upload even after scratch."""
         rt = _FakeRT(base_folder=str(tmp_path), upload_if_recomputed=False)
         monkeypatch.setattr(
-            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
 
         upload_calls: List[Any] = []
         monkeypatch.setattr(
-            _rt_mod,
+            _artifact_mod,
             "huggingface_dataset_file_upload",
             lambda **kw: upload_calls.append(kw),
         )
@@ -1218,7 +1220,7 @@ class TestResultTemplateUploadIfRecomputed:
             save_outputs=False,
         )
         monkeypatch.setattr(
-            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
             with pytest.raises(AssertionError, match="save_outputs"):
@@ -1230,7 +1232,7 @@ class TestResultTemplateUploadIfRecomputed:
         """upload_if_recomputed=True without HF_TOKEN raises AssertionError."""
         rt = _FakeRT(base_folder=str(tmp_path), upload_if_recomputed=True)
         monkeypatch.setattr(
-            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.delenv("HF_TOKEN", raising=False)
         with pytest.raises(AssertionError, match="HF_TOKEN"):
@@ -1262,7 +1264,7 @@ class TestResultTemplateRemotePathAndToken:
         unauthenticated downloads from public repositories."""
         rt = _FakeRT(base_folder=str(tmp_path))
         monkeypatch.setattr(
-            _rt_mod, "huggingface_dataset_file_exists", lambda *a, **kw: True
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: True
         )
 
         download_calls: List[Any] = []
@@ -1274,7 +1276,7 @@ class TestResultTemplateRemotePathAndToken:
             with open(local_path, "w", encoding="utf-8") as f:
                 json.dump({"metadata": {"RT": "Fake"}, "result": {"value": 42}}, f)
 
-        monkeypatch.setattr(_rt_mod, "huggingface_dataset_file_download", fake_download)
+        monkeypatch.setattr(_artifact_mod, "huggingface_dataset_file_download", fake_download)
         monkeypatch.delenv("HF_TOKEN", raising=False)
 
         data = rt.compute()

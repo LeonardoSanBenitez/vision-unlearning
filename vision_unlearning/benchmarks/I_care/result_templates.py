@@ -19,7 +19,7 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.stats import f_oneway, kruskal, linregress, pearsonr, spearmanr
-from typing import List, Dict, Any, Literal
+from typing import List, Dict, Any, Literal, cast
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -57,6 +57,7 @@ from vision_unlearning.datasets.testbed import (
     get_off_image_path,
 )
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.artifact import SingleFileArtifact
 from vision_unlearning.benchmarks.I_care.configuration import (
     type_model,
     type_task,
@@ -124,12 +125,7 @@ def _display_unlearning_algorithm(method: str) -> str:
     return _UNLEARNING_ALGORITHM_DISPLAY.get(method, method)
 
 
-class ResultTemplate(BaseModel):
-    recompute_if_exists: bool = False
-    save_outputs: bool = True
-    upload_if_recomputed: bool = False
-    base_folder: str = 'assets'
-    remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
+class ResultTemplate(SingleFileArtifact):
 
     
     def _serialize_parameters(self) -> str:
@@ -142,9 +138,6 @@ class ResultTemplate(BaseModel):
         # _compute_from_scratch).
         return f"results/{self.__class__.__name__.replace('ResultTemplate', '')}/{self._serialize_parameters()}.json"
 
-    def _get_data_path_local(self) -> str:
-        return os.path.join(self.base_folder, self._get_data_path_remote())
-
     @classmethod
     def _fig_to_bytes(cls, fig: Figure) -> bytes:
         buffer = io.BytesIO()
@@ -156,74 +149,19 @@ class ResultTemplate(BaseModel):
     def _compute_from_scratch(self) -> dict | list:
         raise NotImplementedError()
 
-    def _hf_file_exists(self, hf_token: Optional[str]) -> bool:
-        """Check whether the result exists on HuggingFace, catching all network/auth errors.
-
-        Returns False on any exception so that a bad token or transient network error
-        causes compute() to fall through to _compute_from_scratch() rather than failing.
-        """
-        try:
-            return huggingface_dataset_file_exists(
-                self.remote_repository_name,
-                self._get_data_path_remote(),
-                token=hf_token,
-            )
-        except Exception as exc:
-            logger.debug("HF existence check failed for %s (falling through to local compute): %s",
-                         self._get_data_path_remote(), exc)
-            return False
-
-    def compute(self) -> dict:
-        hf_token: Optional[str] = get_hf_token_from_env()
-        data: Any
-        if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        elif not self.recompute_if_exists and self._hf_file_exists(hf_token):  # Remote
-            huggingface_dataset_file_download(
-                folder_datasets=self.base_folder,
-                dataset_repository=self.remote_repository_name,
-                file_path=self._get_data_path_remote(),
-                # None (not "") when unset: an empty string becomes an illegal
-                # 'Authorization: Bearer ' header and breaks unauthenticated
-                # downloads from public repositories.
-                token=hf_token,
-            )
-            assert os.path.exists(self._get_data_path_local())
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        else:  # Compute from scratch
-            data = self._compute_from_scratch()
-            if self.save_outputs:
-                os.makedirs(os.path.dirname(self._get_data_path_local()), exist_ok=True)
-                with open(self._get_data_path_local(), "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-            # Upload to HF if requested
-            if self.upload_if_recomputed:
-                assert self.save_outputs, (
-                    "upload_if_recomputed=True requires save_outputs=True "
-                    "(no file to upload when save_outputs=False)."
-                )
-                assert hf_token, (
-                    "upload_if_recomputed=True but HF_TOKEN is not set. "
-                    "Set HF_TOKEN environment variable before calling compute()."
-                )
-                logger.info(
-                    "Uploading recomputed RT result to HF: %s",
-                    self._get_data_path_remote(),
-                )
-                huggingface_dataset_file_upload(
-                    file_path=self._get_data_path_local(),
-                    dataset_repository=self.remote_repository_name,
-                    dataset_path=self._get_data_path_remote(),
-                    token=hf_token,
-                )
-                logger.info("Upload complete: %s", self._get_data_path_remote())
-
+    def _validate(self, data: Any) -> None:
         assert type(data) == dict, f"Expected a dict in the json file, but got {type(data)}"
         assert 'result' in data, f"Expected 'result' key in the json file, but got {list(data.keys())}"
         assert type(data['result']) in [dict, list], f"Expected 'result' to be a dict or list, but got {type(data['result'])}"
-        return data
+
+    def compute(self) -> dict:
+        """Resolve this result from local disk, HuggingFace, or by computing it from scratch.
+
+        The storage cascade (local -> remote -> from-scratch, with optional persist and
+        upload) lives in :class:`~vision_unlearning.artifact.SingleFileArtifact`; this method
+        only pins the return type.
+        """
+        return cast(dict, self._resolve())
 
 
 class ResultTemplateMetricMetricAlignment(ResultTemplate):

@@ -28,6 +28,7 @@ from matplotlib.figure import Figure  # noqa: E402
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 import vision_unlearning.benchmarks.I_care.metadata as _meta_mod  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
+import vision_unlearning.artifact as _artifact_mod  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +607,7 @@ class TestInterferencePerEntityUploadIfRecomputed:
             upload_if_recomputed=True,
         )
         monkeypatch.setattr(
-            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
 
@@ -615,7 +616,7 @@ class TestInterferencePerEntityUploadIfRecomputed:
         def fake_upload(**kw: Any) -> None:
             upload_calls.append(kw)
 
-        monkeypatch.setattr(_meta_mod, "huggingface_dataset_file_upload", fake_upload)
+        monkeypatch.setattr(_artifact_mod, "huggingface_dataset_file_upload", fake_upload)
 
         with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
             result = ipe.compute()
@@ -635,13 +636,13 @@ class TestInterferencePerEntityUploadIfRecomputed:
             upload_if_recomputed=False,
         )
         monkeypatch.setattr(
-            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
 
         upload_calls: List[Any] = []
         monkeypatch.setattr(
-            _meta_mod,
+            _artifact_mod,
             "huggingface_dataset_file_upload",
             lambda **kw: upload_calls.append(kw),
         )
@@ -662,7 +663,7 @@ class TestInterferencePerEntityUploadIfRecomputed:
             save_outputs=False,
         )
         monkeypatch.setattr(
-            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
         with patch.dict("os.environ", {"HF_TOKEN": "fake_token"}):
@@ -679,7 +680,7 @@ class TestInterferencePerEntityUploadIfRecomputed:
             upload_if_recomputed=True,
         )
         monkeypatch.setattr(
-            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(ipe, "_compute_from_scratch", lambda: list(_FAKE_IPE_DATA))
         monkeypatch.delenv("HF_TOKEN", raising=False)
@@ -694,7 +695,7 @@ class TestInterferencePerEntityUploadIfRecomputed:
         unauthenticated downloads from public repositories."""
         ipe = vb.InterferencePerEntity(task='people', base_folder=str(tmp_path))
         monkeypatch.setattr(
-            _meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: True
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: True
         )
 
         download_calls: List[Any] = []
@@ -706,7 +707,7 @@ class TestInterferencePerEntityUploadIfRecomputed:
             with open(local_path, "w", encoding="utf-8") as f:
                 json.dump(list(_FAKE_IPE_DATA), f)
 
-        monkeypatch.setattr(_meta_mod, "huggingface_dataset_file_download", fake_download)
+        monkeypatch.setattr(_artifact_mod, "huggingface_dataset_file_download", fake_download)
         monkeypatch.delenv("HF_TOKEN", raising=False)
 
         result = ipe.compute()

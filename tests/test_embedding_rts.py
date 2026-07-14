@@ -780,11 +780,12 @@ class TestEmbeddingForgettingEfficiencyCompute:
     def test_missing_ipe_raises(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """No IPE file at all → InterferencePerEntity.compute() raises (no local, no HF)."""
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
-        import vision_unlearning.benchmarks.I_care.metadata as meta_mod
+        import vision_unlearning.artifact as artifact_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": 400, "uce": 0, "munba": 200}})
-        # Patch HF check to return False so it falls through to compute_from_scratch
-        monkeypatch.setattr(meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False)
+        # Patch the cascade's HF existence check to False so InterferencePerEntity.compute()
+        # falls through to _compute_from_scratch (which raises).
+        monkeypatch.setattr(artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False)
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task="people",
             unlearning_algorithm="distil",
