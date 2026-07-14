@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Literal, Tuple, List, Dict, Optional, Any
+from typing import Literal, Tuple, List, Dict, Optional, Any, cast
 import json
 import re
 import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, PrivateAttr
 
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.artifact import Artifact
 
 
 logger = get_logger('testbed')
@@ -330,7 +331,7 @@ def get_off_image_path(
 # helper functions coexist; prefer GeneratedDataset for new code.
 
 
-class GeneratedDataset(BaseModel):
+class GeneratedDataset(Artifact):
     """Abstraction over generated image dataset folders.
 
     Represents exactly one dataset folder — either the shared task-level
@@ -363,10 +364,15 @@ class GeneratedDataset(BaseModel):
     target: Optional[str] = None          # None → shared baseline (task-level)
     method: Optional[_type_method] = None  # None → baseline dataset
     num_train_epochs: Optional[int] = None
-    base_folder: str = 'assets'
-    remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
-    recompute_if_exists: bool = False
-    upload_if_recomputed: bool = False
+    # base_folder, remote_repository_name, recompute_if_exists, upload_if_recomputed and
+    # save_outputs are inherited from Artifact. save_outputs is unused here: image
+    # generation writes the folder directly, so _persist_local is a no-op.
+
+    # Runtime arguments for one compute() call, stashed so the (nullary) storage hooks can
+    # read them.
+    _pending_seeds: List[int] = PrivateAttr(default_factory=list)
+    _pending_prompts: List[str] = PrivateAttr(default_factory=list)
+    _pending_batch_size: int = PrivateAttr(default=16)
 
     @model_validator(mode='after')
     def _validate_consistency(self) -> 'GeneratedDataset':
@@ -695,70 +701,83 @@ class GeneratedDataset(BaseModel):
         str
             The local folder path to the (now complete) dataset.
         """
-        # 1. Local
-        if not self.recompute_if_exists and self.exists(seeds, prompts):
-            return self.folder_path
+        self._pending_seeds = seeds
+        self._pending_prompts = prompts
+        self._pending_batch_size = batch_size
+        return cast(str, self._resolve())
 
-        # 2. Remote (HuggingFace)
+    # ------------------------------------------------------------------
+    # Artifact storage hooks (folder-of-images shape)
+    # ------------------------------------------------------------------
+    def _exists_local(self) -> bool:
+        return self.exists(self._pending_seeds, self._pending_prompts)
+
+    def _exists_remote(self, hf_token: Optional[str]) -> bool:
+        # Unguarded on purpose: unlike a cheap single-file recompute, regenerating a whole
+        # image dataset is expensive, so a transient network error should surface rather than
+        # silently trigger a from-scratch regeneration.
         from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
-            get_hf_token_from_env,
             huggingface_dataset_exists,
-            huggingface_dataset_download,
-            huggingface_dataset_upload,
         )
-        hf_token: Optional[str] = get_hf_token_from_env()
-        if not self.recompute_if_exists and huggingface_dataset_exists(
+        return huggingface_dataset_exists(
             self.remote_repository_name,
             self.hf_config_name,
             token=hf_token,
             path_in_repo=self.hf_path_in_repo,
-        ):
-            huggingface_dataset_download(
-                folder_datasets=os.path.join(self.base_folder, 'datasets'),
-                dataset_repository=self.remote_repository_name,
-                dataset_config=self.hf_config_name,
-                # None (not "") when unset: an empty string becomes an illegal
-                # 'Authorization: Bearer ' header and breaks unauthenticated
-                # downloads from public repositories.
-                token=hf_token,
-                path_in_repo=self.hf_path_in_repo,
-            )
-            assert self.exists(seeds, prompts), (
-                f"HuggingFace download completed but dataset is still incomplete: "
-                f"{self.folder_path}"
-            )
-            return self.folder_path
+        )
 
-        # 3. Compute from scratch
-        result = self._compute_from_scratch(seeds, prompts, batch_size=batch_size)
+    def _pull_remote(self, hf_token: Optional[str]) -> None:
+        from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
+            huggingface_dataset_download,
+        )
+        huggingface_dataset_download(
+            folder_datasets=os.path.join(self.base_folder, 'datasets'),
+            dataset_repository=self.remote_repository_name,
+            dataset_config=self.hf_config_name,
+            # None (not "") when unset: an empty string becomes an illegal
+            # 'Authorization: Bearer ' header and breaks unauthenticated
+            # downloads from public repositories.
+            token=hf_token,
+            path_in_repo=self.hf_path_in_repo,
+        )
+
+    def _load_local(self) -> str:
+        return self.folder_path
+
+    def _produce_from_scratch(self) -> str:
+        result = self._compute_from_scratch(
+            self._pending_seeds, self._pending_prompts, batch_size=self._pending_batch_size
+        )
         assert result == self.folder_path, (
             "_compute_from_scratch() must return self.folder_path"
         )
-        assert self.exists(seeds, prompts), (
+        assert self.exists(self._pending_seeds, self._pending_prompts), (
             f"_compute_from_scratch() completed but dataset is still incomplete: "
             f"{self.folder_path}"
         )
+        return result
 
-        # Upload to HF if requested
-        if self.upload_if_recomputed:
-            assert hf_token, (
-                "upload_if_recomputed=True but HF_TOKEN is not set. "
-                "Set HF_TOKEN environment variable before calling compute()."
-            )
-            logger.info(
-                "Uploading recomputed dataset to HF: %s -> %s",
-                self.hf_config_name, self.hf_path_in_repo,
-            )
-            huggingface_dataset_upload(
-                folder_datasets=os.path.join(self.base_folder, 'datasets'),
-                dataset_repository=self.remote_repository_name,
-                dataset_config=self.hf_config_name,
-                token=hf_token,
-                path_in_repo=self.hf_path_in_repo,
-            )
-            logger.info("Upload complete: %s", self.hf_path_in_repo)
+    def _persist_local(self, data: Any) -> None:
+        return None  # image generation writes the folder directly; nothing to persist
 
-        return self.folder_path
+    def _push_remote(self, hf_token: Optional[str]) -> None:
+        # _resolve only calls _push_remote after asserting a token is present.
+        assert hf_token is not None
+        from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
+            huggingface_dataset_upload,
+        )
+        logger.info(
+            "Uploading recomputed dataset to HF: %s -> %s",
+            self.hf_config_name, self.hf_path_in_repo,
+        )
+        huggingface_dataset_upload(
+            folder_datasets=os.path.join(self.base_folder, 'datasets'),
+            dataset_repository=self.remote_repository_name,
+            dataset_config=self.hf_config_name,
+            token=hf_token,
+            path_in_repo=self.hf_path_in_repo,
+        )
+        logger.info("Upload complete: %s", self.hf_path_in_repo)
 
     # ------------------------------------------------------------------
     # Off-image path with fallback (class-level utility)
