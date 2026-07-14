@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from pydantic import BaseModel, model_validator, PrivateAttr
 
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.artifact import Artifact
+from vision_unlearning.artifact import Artifact, SingleFileArtifact
 
 
 logger = get_logger('testbed')
@@ -89,21 +89,49 @@ def get_target_overwrite(
 ##########################################
 # Metadata filtered
 ##########################################
+def _metadata_filtered_filename(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+) -> str:
+    return f"metadata_{task}_2_enriched_filtered.json"
+
+
 def get_metadata_filtered_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
 ) -> str:
-    return os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json")
+    return os.path.join(base_folder, _metadata_filtered_filename(task))
+
+
+class MetadataFiltered(SingleFileArtifact):
+    """Object-oriented interface over the filtered task metadata file.
+
+    Complements the get_metadata_filtered / save_metadata_filtered helpers by adding the
+    shared local -> HuggingFace -> (not-computed-on-demand) storage cascade, so a caller can
+    fetch the metadata from HuggingFace when it is absent locally.
+    """
+    task: Literal['scenes', 'objects', 'breeds', 'people'] = 'people'
+
+    def _get_data_path_remote(self) -> str:
+        return _metadata_filtered_filename(self.task)
+
+    def _compute_from_scratch(self) -> List[Dict[str, Any]]:
+        raise NotImplementedError(
+            "MetadataFiltered is produced by the data-preparation pipeline, not computed on "
+            "demand. Provide the local file or fetch it from HuggingFace."
+        )
+
+    def _validate(self, data: Any) -> None:
+        assert isinstance(data, list)
+
+    def compute(self) -> List[Dict[str, Any]]:
+        return cast(List[Dict[str, Any]], self._resolve())
 
 
 def get_metadata_filtered(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets'
 ) -> List[Dict[str, Any]]:
-    with open(get_metadata_filtered_path(task, base_folder=base_folder), "r", encoding="utf-8") as f:
-        metadata_filtered = json.load(f)
-    assert isinstance(metadata_filtered, list)
-    return metadata_filtered
+    return MetadataFiltered(task=task, base_folder=base_folder).compute()
 
 
 def save_metadata_filtered(

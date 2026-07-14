@@ -34,6 +34,15 @@ logger = get_logger('I_care')
 ##########################################
 # Metadata files - interference_per_pair
 ##########################################
+def _interference_per_pair_filename(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    index: int,
+    method: Literal['munba', 'uce', 'distil'],
+    num_train_epochs: int,
+) -> str:
+    return f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json'
+
+
 def get_interference_per_pair_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
@@ -41,7 +50,7 @@ def get_interference_per_pair_path(
     num_train_epochs: int,
     base_folder: str = 'assets',
 ) -> str:
-    return os.path.join(base_folder, 'datasets', f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json')
+    return os.path.join(base_folder, 'datasets', _interference_per_pair_filename(task, index, method, num_train_epochs))
 
 
 def get_interference_per_pair(
@@ -108,6 +117,36 @@ def get_interference_per_pair_inverse(
     assert len(interference_per_pair_inverse) <= max_identities
     return interference_per_pair_inverse
 
+
+class InterferencePerPair(SingleFileArtifact):
+    """Object-oriented interface over a single per-pair interference file.
+
+    Wraps interferences_caused_by_{task}_{index}_{method}_{epochs}.json and adds the shared
+    local -> HuggingFace -> (not-computed-on-demand) storage cascade. Complements the
+    get_interference_per_pair / exists_interference_per_pair / save_interference_per_pair
+    helpers, which remain the fast local-only path.
+    """
+    task: type_task = 'people'
+    index: int
+    method: type_unlearning_algorithm
+    num_train_epochs: int
+    max_identities: int = 100
+
+    def _get_data_path_remote(self) -> str:
+        return f"datasets/{_interference_per_pair_filename(self.task, self.index, self.method, self.num_train_epochs)}"
+
+    def _compute_from_scratch(self) -> Dict[str, Dict[str, float]]:
+        raise NotImplementedError(
+            "InterferencePerPair is produced by the interference pipeline, not computed on "
+            "demand. Provide the local file or fetch it from HuggingFace."
+        )
+
+    def _validate(self, data: Any) -> None:
+        assert isinstance(data, dict)
+        assert len(data) == self.max_identities
+
+    def compute(self) -> Dict[str, Dict[str, float]]:
+        return cast(Dict[str, Dict[str, float]], self._resolve())
 
 
 ##########################################

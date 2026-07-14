@@ -1696,3 +1696,88 @@ class TestCountSignificantRelationshipPlot:
             data, group_by="unlearning_algorithm", return_fig=True
         )
         assert out is None
+
+
+class TestMetadataFilteredArtifact:
+    """MetadataFiltered wraps the filtered task metadata file with the shared storage cascade,
+    and get_metadata_filtered delegates to it."""
+
+    def test_remote_path(self) -> None:
+        from vision_unlearning.datasets.testbed import MetadataFiltered
+        mf = MetadataFiltered(task='people')
+        assert mf._get_data_path_remote() == 'metadata_people_2_enriched_filtered.json'
+
+    def test_local_hit(self, tmp_path: Any) -> None:
+        from vision_unlearning.datasets.testbed import MetadataFiltered
+        mf = MetadataFiltered(task='people', base_folder=str(tmp_path))
+        with open(mf._get_data_path_local(), 'w', encoding='utf-8') as f:
+            json.dump([{'name': 'a'}], f)
+        assert mf.compute() == [{'name': 'a'}]
+
+    def test_get_metadata_filtered_delegates_to_artifact(self, tmp_path: Any) -> None:
+        from vision_unlearning.datasets import testbed as _tb
+        path = os.path.join(str(tmp_path), 'metadata_people_2_enriched_filtered.json')
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump([{'name': 'a'}, {'name': 'b'}], f)
+        assert _tb.get_metadata_filtered('people', base_folder=str(tmp_path)) == [
+            {'name': 'a'}, {'name': 'b'}
+        ]
+
+    def test_missing_everywhere_raises_not_implemented(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from vision_unlearning.datasets.testbed import MetadataFiltered
+        monkeypatch.setattr(
+            _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: False
+        )
+        mf = MetadataFiltered(task='people', base_folder=str(tmp_path))
+        with pytest.raises(NotImplementedError):
+            mf.compute()
+
+
+class TestInterferencePerPairArtifact:
+    """InterferencePerPair wraps a single per-pair interference file with the shared cascade;
+    it complements (does not replace) get_interference_per_pair."""
+
+    def test_remote_path(self) -> None:
+        ipp = _meta_mod.InterferencePerPair(
+            task='people', index=3, method='distil', num_train_epochs=400
+        )
+        assert ipp._get_data_path_remote() == (
+            'datasets/interferences_caused_by_people_3_distil_400.json'
+        )
+
+    def test_local_hit(self, tmp_path: Any) -> None:
+        ipp = _meta_mod.InterferencePerPair(
+            task='people', index=0, method='distil', num_train_epochs=400,
+            max_identities=2, base_folder=str(tmp_path),
+        )
+        os.makedirs(os.path.dirname(ipp._get_data_path_local()), exist_ok=True)
+        payload = {'a': {'rmse': 1.0}, 'b': {'rmse': 2.0}}
+        with open(ipp._get_data_path_local(), 'w', encoding='utf-8') as f:
+            json.dump(payload, f)
+        assert ipp.compute() == payload
+
+    def test_validate_rejects_wrong_length(self, tmp_path: Any) -> None:
+        ipp = _meta_mod.InterferencePerPair(
+            task='people', index=0, method='distil', num_train_epochs=400,
+            max_identities=5, base_folder=str(tmp_path),
+        )
+        os.makedirs(os.path.dirname(ipp._get_data_path_local()), exist_ok=True)
+        with open(ipp._get_data_path_local(), 'w', encoding='utf-8') as f:
+            json.dump({'a': {'rmse': 1.0}}, f)  # only 1 entry, expected 5
+        with pytest.raises(AssertionError):
+            ipp.compute()
+
+    def test_missing_everywhere_raises_not_implemented(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: False
+        )
+        ipp = _meta_mod.InterferencePerPair(
+            task='people', index=0, method='distil', num_train_epochs=400,
+            base_folder=str(tmp_path),
+        )
+        with pytest.raises(NotImplementedError):
+            ipp.compute()
