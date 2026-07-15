@@ -85,14 +85,10 @@ def _draw_bracket(
     ax.text((x1 + x2) / 2, y + h + 0.1, label, ha="center", va="bottom", fontsize=6.5)
 
 
-def _load_sr_grid() -> pd.DataFrame:
+def _load_sr_grid(sr_grid_dir: str) -> pd.DataFrame:
     """Load the reconciled SR grid (sr_grid_reconciled.csv); falls back to sr_grid.csv."""
-    reconciled = os.path.join(
-        "reports", "AttributeInterference_analysis", "sr_grid_reconciled.csv"
-    )
-    fallback = os.path.join(
-        "reports", "AttributeInterference_analysis", "sr_grid.csv"
-    )
+    reconciled = os.path.join(sr_grid_dir, "sr_grid_reconciled.csv")
+    fallback = os.path.join(sr_grid_dir, "sr_grid.csv")
     if os.path.exists(reconciled):
         df = pd.read_csv(reconciled)
         logger.info("SR grid: loaded %s (%d rows)", reconciled, len(df))
@@ -1323,6 +1319,16 @@ def parse_args() -> argparse.Namespace:
             "LaTeX \\includegraphics references (default: 'reports/paper_outputs')."
         ),
     )
+    parser.add_argument(
+        "--sr-grid-dir",
+        default=os.path.join("reports", "AttributeInterference_analysis"),
+        metavar="PATH",
+        help=(
+            "Directory holding the reconciled SR grid CSV (sr_grid_reconciled.csv, "
+            "produced by the AttributeInterference analysis) that the significance "
+            "summary figures read (default: 'reports/AttributeInterference_analysis')."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1337,7 +1343,7 @@ def main() -> None:
     # SR grid — shared by figures 1–4
     sr_df: Optional[pd.DataFrame] = None
     try:
-        sr_df = _load_sr_grid()
+        sr_df = _load_sr_grid(args.sr_grid_dir)
     except FileNotFoundError as exc:
         logger.error("SR grid unavailable: %s", exc)
 
