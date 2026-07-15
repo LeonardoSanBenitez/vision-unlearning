@@ -74,6 +74,36 @@ def _make_embedding_records(
 
 
 def _write_baseline_file(tmp_path: Any, task: str, method: str, epochs: int) -> str:
+    """Write the canonical, method-agnostic baseline embedding file.
+
+    The baseline is produced by the original model with no unlearning, so its name carries
+    no method or epoch (embeddings_{task}_original.json) — the only name the RTs read now
+    that the per-method fallback has been removed.
+    """
+    rng = np.random.default_rng(0)
+    fname = f"embeddings_{task}_original.json"
+    path = str(tmp_path / "datasets" / fname)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = {
+        "metadata": {
+            "task": task, "forgotten_entity": "original",
+            "method": method, "num_train_epochs": epochs,
+            "lora_state": "off", "embedding_model": "dinov2_vits14", "embedding_dim": DIM,
+        },
+        "embeddings": _make_embedding_records(ENTITIES, DIM, rng, "off", FORGOTTEN_ENTITY),
+    }
+    with open(path, "w") as f:
+        json.dump(data, f)
+    return path
+
+
+def _write_baseline_file_legacy(tmp_path: Any, task: str, method: str, epochs: int) -> str:
+    """Write the OBSOLETE per-method baseline name.
+
+    Retained solely to feed the negative test that proves the per-method fallback was
+    removed: with only this file present (and no canonical file), the RT must fail to find
+    a baseline.
+    """
     rng = np.random.default_rng(0)
     fname = f"embeddings_{task}_original_{method}_{epochs:03d}.json"
     path = str(tmp_path / "datasets" / fname)
@@ -537,6 +567,52 @@ class TestEmbeddingUnlearningProfileCompute:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
 
 
+class TestBaselinePerMethodObliteration:
+    """The obsolete per-method baseline name is unrepresentable and no longer read.
+
+    Guards the deliberate, authorized backward-compatibility break: the baseline embedding
+    depends only on task/model/embedding-function, never on an unlearning method or epoch.
+    """
+
+    def test_baseline_embeddings_interface_has_no_method_or_epoch(self) -> None:
+        """B1 — interface shape: BaselineEmbeddings cannot carry a method/epoch.
+
+        This is what makes the wrong name *unrepresentable* rather than merely unused: the
+        artifact has no field through which a method or epoch could enter the baseline path.
+        """
+        from vision_unlearning.benchmarks.I_care.metadata import BaselineEmbeddings
+        fields = set(BaselineEmbeddings.model_fields)
+        for forbidden in ("unlearning_algorithm", "method", "epochs", "num_train_epochs"):
+            assert forbidden not in fields, (
+                f"BaselineEmbeddings must not expose '{forbidden}' — the baseline is "
+                f"method/epoch-agnostic."
+            )
+
+    def test_baseline_per_method_fallback_removed(self, tmp_path: Any) -> None:
+        """B2 — negative test for the break: only the obsolete per-method file present.
+
+        With the canonical embeddings_{task}_original.json absent and ONLY the old
+        embeddings_{task}_original_{method}_{epochs}.json present, the RT must raise (it no
+        longer falls back to the per-method name). Nothing else in the suite would catch a
+        quiet re-introduction of that fallback.
+        """
+        task, method, epochs = "people", "distil", 400
+        _write_baseline_file_legacy(tmp_path, task, method, epochs)  # old name only
+        _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        original_epochs = rt_mod.unlearning_algorithm_to_epochs
+        rt_mod.unlearning_algorithm_to_epochs = {"people": {"distil": epochs, "uce": 0, "munba": 200}}
+        try:
+            rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                task=task, unlearning_algorithm=method, entity=FORGOTTEN_ENTITY,
+                base_folder=str(tmp_path), save_outputs=False,
+            )
+            with pytest.raises(FileNotFoundError, match="Baseline embedding file not found"):
+                rt._compute_from_scratch()
+        finally:
+            rt_mod.unlearning_algorithm_to_epochs = original_epochs
+
+
 class TestEmbeddingUnlearningProfileClipDiffNormalization:
     """Test that clip_diff is populated when IPE names use underscores but embedding labels use spaces."""
 
@@ -558,7 +634,11 @@ class TestEmbeddingUnlearningProfileClipDiffNormalization:
         # "original" is the baseline; each entity file uses the space-delimited name directly.
         for fname_suffix in ["original", *entities_with_spaces]:
             rng2 = np.random.default_rng(hash(fname_suffix) % (2**31))
-            fname = f"embeddings_{task}_{fname_suffix}_{method}_{epochs:03d}.json"
+            if fname_suffix == "original":
+                # Baseline is method-agnostic (no method/epoch in the name).
+                fname = f"embeddings_{task}_original.json"
+            else:
+                fname = f"embeddings_{task}_{fname_suffix}_{method}_{epochs:03d}.json"
             path = str(tmp_path / "datasets" / fname)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             records = []

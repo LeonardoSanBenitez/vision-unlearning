@@ -77,6 +77,8 @@ from vision_unlearning.benchmarks.I_care.configuration import (
 from vision_unlearning.benchmarks.I_care.metadata import (
     choose_metric_column_interference_per_entity,
     InterferencePerEntity,
+    BaselineEmbeddings,
+    EntityEmbeddings,
     get_interference_per_pair,
     get_interference_per_pair_path,
     get_interference_per_entity_path,
@@ -2429,31 +2431,28 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
     # ------------------------------------------------------------------
 
     def _get_baseline_embedding_path(self) -> str:
-        """Path to the original-model baseline DINOv2 embedding file.
+        """Local path to the original-model baseline embedding file (method-agnostic).
 
-        Prefers the canonical method-agnostic file (embeddings_{task}_original.json);
-        falls back to the per-method file for backward compatibility.
+        Addressed through :class:`BaselineEmbeddings`, whose interface has no method/epoch
+        parameter, so the obsolete per-method baseline name cannot be produced here.
         """
-        canonical = os.path.join(
-            self.base_folder, "datasets", f"embeddings_{self.task}_original.json"
-        )
-        if os.path.exists(canonical):
-            return canonical
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        fname = (
-            f"embeddings_{self.task}_original"
-            f"_{self.unlearning_algorithm}_{epochs:03d}.json"
-        )
-        return os.path.join(self.base_folder, "datasets", fname)
+        return BaselineEmbeddings(
+            task=self.task,
+            model=self.model,
+            embedding_function=self.latent_embedding,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     def _get_entity_embedding_path(self, hf_entity_name: str) -> str:
-        """Path to the per-entity unlearned DINOv2 embedding file."""
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        fname = (
-            f"embeddings_{self.task}_{hf_entity_name}"
-            f"_{self.unlearning_algorithm}_{epochs:03d}.json"
-        )
-        return os.path.join(self.base_folder, "datasets", fname)
+        """Local path to the per-entity unlearned embedding file."""
+        return EntityEmbeddings(
+            task=self.task,
+            hf_entity=hf_entity_name,
+            unlearning_algorithm=self.unlearning_algorithm,
+            model=self.model,
+            embedding_function=self.latent_embedding,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     # ------------------------------------------------------------------
     # Static helpers
@@ -4259,23 +4258,25 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     # ------------------------------------------------------------------
 
     def _get_baseline_embedding_path(self) -> str:
-        # Prefer the canonical (method-agnostic) baseline file; fall back to the
-        # per-method file for backward compatibility (older datasets that shipped
-        # embeddings_{task}_original_{method}_{epochs:03d}.json instead).
-        canonical = os.path.join(
-            self.base_folder, "datasets", f"embeddings_{self.task}_original.json"
-        )
-        if os.path.exists(canonical):
-            return canonical
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        fname = f"embeddings_{self.task}_original_{self.unlearning_algorithm}_{epochs:03d}.json"
-        return os.path.join(self.base_folder, "datasets", fname)
+        """Local path to the original-model baseline embedding file (method-agnostic).
+
+        Addressed through :class:`BaselineEmbeddings`, whose interface has no method/epoch
+        parameter, so the obsolete per-method baseline name cannot be produced here.
+        """
+        return BaselineEmbeddings(
+            task=self.task,
+            model=self.model,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     def _get_entity_embedding_path(self) -> str:
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        hf_entity = self._resolve_hf_entity()
-        fname = f"embeddings_{self.task}_{hf_entity}_{self.unlearning_algorithm}_{epochs:03d}.json"
-        return os.path.join(self.base_folder, "datasets", fname)
+        return EntityEmbeddings(
+            task=self.task,
+            hf_entity=self._resolve_hf_entity(),
+            unlearning_algorithm=self.unlearning_algorithm,
+            model=self.model,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     @staticmethod
     def _mean_embeddings(raw: dict) -> "Dict[str, np.ndarray]":

@@ -5,8 +5,8 @@ Supports four similarity metrics (``--similarity`` flag):
     clip          CLIP-space cosine similarity.  The RT downloads the matrix from
                   HuggingFace when available; a from-scratch recompute requires a
                   GPU with a CLIP/SD model and is intentionally not wired here.
-    dino          DINOv2-ViT-S/14 cosine similarity computed from the baseline
-                  embedding file (``embeddings_{task}_original_distil_{epochs}.json``).
+    dino          DINOv2-ViT-S/14 cosine similarity computed from the method-agnostic
+                  baseline embedding file (``embeddings_{task}_original.json``).
                   CPU-only.
     jacc          Jaccard overlap of visual attributes from the task metadata.
                   CPU-only; writes a partial checkpoint after each row.
