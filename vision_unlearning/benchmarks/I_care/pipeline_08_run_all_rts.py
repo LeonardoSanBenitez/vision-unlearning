@@ -186,6 +186,7 @@ def run_metric_metric_alignment(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """MetricMetricAlignment: (model, task, unlearning_algorithm, me1, me2)."""
     me_list = _ALL_ME
@@ -203,6 +204,7 @@ def run_metric_metric_alignment(
                                 interference_entity_2=me2,
                                 upload_if_recomputed=upload_if_recomputed,
                                 save_outputs=True,
+                                base_folder=base_folder,
                             ),
                             hf_files, upload_if_recomputed,
                             f"MetricMetricAlignment for {model}/{task}/{unlearning_algorithm}/{me1}/{me2}",
@@ -217,6 +219,7 @@ def run_metric_similarity_alignment(
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
+    base_folder: str = "assets",
 ) -> None:
     """MetricSimilarityAlignment: (model, task, unlearning_algorithm, mp, s)."""
     if mp_list is None:
@@ -235,6 +238,7 @@ def run_metric_similarity_alignment(
                                 similarity_metric=similarity_metric,
                                 upload_if_recomputed=upload_if_recomputed,
                                 save_outputs=True,
+                                base_folder=base_folder,
                             ),
                             hf_files, upload_if_recomputed,
                             f"MetricSimilarityAlignment for {model}/{task}/{unlearning_algorithm}/"
@@ -250,6 +254,7 @@ def run_metric_similarity_alignment_multi(
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
+    base_folder: str = "assets",
 ) -> None:
     """MetricSimilarityAlignmentMulti: (model, task, unlearning_algorithm, mp, s_list, reg_algo).
 
@@ -281,6 +286,7 @@ def run_metric_similarity_alignment_multi(
                                     regression_algorithm=regression_algorithm,  # type: ignore[arg-type]
                                     upload_if_recomputed=upload_if_recomputed,
                                     save_outputs=True,
+                                    base_folder=base_folder,
                                 ),
                                 hf_files, upload_if_recomputed,
                                 f"MetricSimilarityAlignmentMulti for {model}/{task}/"
@@ -297,6 +303,7 @@ def run_interference_matrix(
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
+    base_folder: str = "assets",
 ) -> None:
     """InterferenceMatrix: (model, task, unlearning_algorithm, interference_pair)."""
     if mp_list is None:
@@ -313,6 +320,7 @@ def run_interference_matrix(
                             interference_pair=interference_pair,
                             upload_if_recomputed=upload_if_recomputed,
                             save_outputs=True,
+                            base_folder=base_folder,
                         ),
                         hf_files, upload_if_recomputed,
                         f"InterferenceMatrix for {model}/{task}/{unlearning_algorithm}/{interference_pair}",
@@ -325,6 +333,7 @@ def run_similarity_matrix(
     tasks: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """SimilarityMatrix: (model, task, similarity_metric)."""
     for model in _ALL_MODELS:
@@ -337,6 +346,7 @@ def run_similarity_matrix(
                         similarity_metric=similarity_metric,
                         upload_if_recomputed=upload_if_recomputed,
                         save_outputs=True,
+                        base_folder=base_folder,
                     ),
                     hf_files, upload_if_recomputed,
                     f"SimilarityMatrix for {model}/{task}/{similarity_metric}",
@@ -366,6 +376,7 @@ def run_significant_relationship(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """SignificantRelationshipCategorical and Numerical.
 
@@ -389,6 +400,7 @@ def run_significant_relationship(
                                 attribute=attribute,
                                 upload_if_recomputed=upload_if_recomputed,
                                 save_outputs=True,
+                                base_folder=base_folder,
                             )
                             if _should_skip(rt_cat, hf_files, upload_if_recomputed):
                                 continue
@@ -403,6 +415,7 @@ def run_significant_relationship(
                                     attribute=attribute,
                                     upload_if_recomputed=upload_if_recomputed,
                                     save_outputs=True,
+                                    base_folder=base_folder,
                                 )
                                 if _should_skip(rt_num, hf_files, upload_if_recomputed):
                                     continue
@@ -435,6 +448,7 @@ def run_count_significant_relationship(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """CountSignificantRelationship: one call per (model, task).
 
@@ -452,6 +466,7 @@ def run_count_significant_relationship(
                     attribute_list=list(vb.task_to_attributes_of_interest.get(task, [])),
                     upload_if_recomputed=upload_if_recomputed,
                     save_outputs=True,
+                    base_folder=base_folder,
                 ),
                 hf_files, upload_if_recomputed,
                 f"CountSignificantRelationship for {model}/{task}",
@@ -464,6 +479,7 @@ def run_implicit_association_test(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """ImplicitAssociationTest: (model, task, unlearning_algorithm, a1, a2, l).
 
@@ -497,6 +513,7 @@ def run_implicit_association_test(
                                 latent_embedding=latent_embedding,
                                 upload_if_recomputed=upload_if_recomputed,
                                 save_outputs=True,
+                                base_folder=base_folder,
                             ),
                             hf_files, upload_if_recomputed,
                             f"ImplicitAssociationTest for {model}/{task}/{unlearning_algorithm}/"
@@ -505,7 +522,11 @@ def run_implicit_association_test(
     print("ImplicitAssociationTest done.")
 
 
-def run_unlearning_visual_summary(tasks: List[str], methods: List[str]) -> None:
+def run_unlearning_visual_summary(
+    tasks: List[str],
+    methods: List[str],
+    base_folder: str = "assets",
+) -> None:
     """UnlearningVisualSummary: (model, task, unlearning_algorithm)."""
     for model in _ALL_MODELS:
         for task in tasks:
@@ -515,6 +536,7 @@ def run_unlearning_visual_summary(tasks: List[str], methods: List[str]) -> None:
                         model=model,
                         task=task,  # type: ignore[arg-type]
                         unlearning_algorithm=unlearning_algorithm,  # type: ignore[arg-type]
+                        base_folder=base_folder,
                     )
                     rt.compute()
                     print(".", end="", flush=True)
@@ -534,6 +556,7 @@ def run_interference_visual_summary(
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
+    base_folder: str = "assets",
 ) -> None:
     """InterferenceVisualSummary: (model, task, unlearning_algorithm, mp, entity_index).
 
@@ -556,6 +579,7 @@ def run_interference_visual_summary(
                             seed=42,
                             upload_if_recomputed=upload_if_recomputed,
                             save_outputs=True,
+                            base_folder=base_folder,
                         ),
                         hf_files, upload_if_recomputed,
                         f"InterferenceVisualSummary for {task}/{unlearning_algorithm}/"
@@ -570,6 +594,7 @@ def run_method_comparison_by_metric_entity(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """MethodComparisonByMetricEntity: (model, task, interference_entity, [methods]).
 
@@ -588,6 +613,7 @@ def run_method_comparison_by_metric_entity(
                         unlearning_algorithm_list=methods,  # type: ignore[arg-type]
                         upload_if_recomputed=upload_if_recomputed,
                         save_outputs=True,
+                        base_folder=base_folder,
                     ),
                     hf_files, upload_if_recomputed,
                     f"MethodComparisonByMetricEntity for {model}/{task}/{interference_entity}",
@@ -601,6 +627,7 @@ def run_embedding_unlearning_profile(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """EmbeddingUnlearningProfile: (model, task, unlearning_algorithm, entity).
 
@@ -612,7 +639,7 @@ def run_embedding_unlearning_profile(
     from vision_unlearning.datasets.testbed import get_metadata_filtered
     for model in _ALL_MODELS:
         for task in tasks:
-            metadata = get_metadata_filtered(task)  # type: ignore[arg-type]
+            metadata = get_metadata_filtered(task, base_folder=base_folder)  # type: ignore[arg-type]
             for method in methods:
                 for row in metadata:
                     entity = row["name"]
@@ -624,6 +651,7 @@ def run_embedding_unlearning_profile(
                             entity=entity,
                             upload_if_recomputed=upload_if_recomputed,
                             save_outputs=True,
+                            base_folder=base_folder,
                         ),
                         hf_files, upload_if_recomputed,
                         f"EmbeddingUnlearningProfile for {model}/{task}/{method}/{entity}",
@@ -637,6 +665,7 @@ def run_embedding_forgetting_efficiency(
     methods: List[str],
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
+    base_folder: str = "assets",
 ) -> None:
     """EmbeddingForgettingEfficiency: (model, task, unlearning_algorithm).
 
@@ -652,6 +681,7 @@ def run_embedding_forgetting_efficiency(
                         unlearning_algorithm=method,  # type: ignore[arg-type]
                         upload_if_recomputed=upload_if_recomputed,
                         save_outputs=True,
+                        base_folder=base_folder,
                     ),
                     hf_files, upload_if_recomputed,
                     f"EmbeddingForgettingEfficiency for {model}/{task}/{method}",
@@ -915,6 +945,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--base-folder",
+        default="assets",
+        metavar="PATH",
+        help=(
+            "Path to the assets folder that holds the data the RTs consume and "
+            "the results/ tree they write to (default: 'assets' in the current "
+            "directory)."
+        ),
+    )
+    parser.add_argument(
         "--upload-if-recomputed",
         action="store_true",
         default=False,
@@ -964,6 +1004,7 @@ def main() -> None:
     tasks: List[str] = args.tasks
     methods: List[str] = args.methods
     upload: bool = args.upload_if_recomputed
+    base_folder: str = args.base_folder
 
     if args.action in ("run", "all"):
         rt_names = resolve_rt_names(args.rts)
@@ -984,46 +1025,53 @@ def main() -> None:
             logger.info("=== Starting: %s ===", rt_name)
 
             if rt_name == "metricmetricalignment":
-                run_metric_metric_alignment(tasks, methods, hf_files, upload)
+                run_metric_metric_alignment(tasks, methods, hf_files, upload, base_folder=base_folder)
 
             elif rt_name == "metricsimilarityalignment":
-                run_metric_similarity_alignment(tasks, methods, hf_files, upload, mp_list=args.mp)
+                run_metric_similarity_alignment(
+                    tasks, methods, hf_files, upload, mp_list=args.mp, base_folder=base_folder,
+                )
 
             elif rt_name == "metricsimilarityalignmentmulti":
-                run_metric_similarity_alignment_multi(tasks, methods, hf_files, upload, mp_list=args.mp)
+                run_metric_similarity_alignment_multi(
+                    tasks, methods, hf_files, upload, mp_list=args.mp, base_folder=base_folder,
+                )
 
             elif rt_name == "interferencematrix":
-                run_interference_matrix(tasks, methods, hf_files, upload, mp_list=args.mp)
+                run_interference_matrix(
+                    tasks, methods, hf_files, upload, mp_list=args.mp, base_folder=base_folder,
+                )
 
             elif rt_name == "similaritymatrix":
-                run_similarity_matrix(tasks, hf_files, upload)
+                run_similarity_matrix(tasks, hf_files, upload, base_folder=base_folder)
 
             elif rt_name == "significantrelationship":
-                run_significant_relationship(tasks, methods, hf_files, upload)
+                run_significant_relationship(tasks, methods, hf_files, upload, base_folder=base_folder)
 
             elif rt_name == "countsignificantrelationship":
-                run_count_significant_relationship(tasks, methods, hf_files, upload)
+                run_count_significant_relationship(tasks, methods, hf_files, upload, base_folder=base_folder)
 
             elif rt_name == "implicitassociationtest":
-                run_implicit_association_test(tasks, methods, hf_files, upload)
+                run_implicit_association_test(tasks, methods, hf_files, upload, base_folder=base_folder)
 
             elif rt_name == "unlearningvisualsummary":
-                run_unlearning_visual_summary(tasks, methods)
+                run_unlearning_visual_summary(tasks, methods, base_folder=base_folder)
 
             elif rt_name == "interferencevisualsummary":
                 run_interference_visual_summary(
                     tasks, methods, entity_count=args.entity_count,
                     hf_files=hf_files, upload_if_recomputed=upload, mp_list=args.mp,
+                    base_folder=base_folder,
                 )
 
             elif rt_name == "methodcomparisonbymetricentity":
-                run_method_comparison_by_metric_entity(tasks, methods, hf_files, upload)
+                run_method_comparison_by_metric_entity(tasks, methods, hf_files, upload, base_folder=base_folder)
 
             elif rt_name == "embeddingunlearningprofile":
-                run_embedding_unlearning_profile(tasks, methods, hf_files, upload)
+                run_embedding_unlearning_profile(tasks, methods, hf_files, upload, base_folder=base_folder)
 
             elif rt_name == "embeddingforgettingefficiency":
-                run_embedding_forgetting_efficiency(tasks, methods, hf_files, upload)
+                run_embedding_forgetting_efficiency(tasks, methods, hf_files, upload, base_folder=base_folder)
 
             else:
                 logger.warning("Unknown RT name after resolution: %s", rt_name)
@@ -1032,7 +1080,7 @@ def main() -> None:
 
     if args.action in ("aggregate", "all"):
         csv_path = aggregate_to_csv(
-            base_folder="assets",
+            base_folder=base_folder,
             output_path=args.csv_output,
         )
         logger.info("Aggregation complete: %s", csv_path)

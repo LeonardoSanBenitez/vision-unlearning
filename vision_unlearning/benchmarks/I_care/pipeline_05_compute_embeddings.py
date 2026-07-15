@@ -60,22 +60,20 @@ logger = logging.getLogger("compute_embeddings")
 HF_REPO = "LeonardoBenitez/VisionUnlearningEvaluationTestbeds"
 EMBEDDING_MODEL = "dinov2_vits14"
 EMBEDDING_DIM = 384
-BASE_FOLDER = "assets"
-PROGRESS_PATH = os.path.join(BASE_FOLDER, "embedding_progress.json")
 
 
 # ---------------------------------------------------------------------------
 # Progress tracking helpers (pure — safe to import / test without GPU)
 # ---------------------------------------------------------------------------
 
-def load_progress(progress_path: str = PROGRESS_PATH) -> Dict[str, str]:
+def load_progress(progress_path: str) -> Dict[str, str]:
     if os.path.exists(progress_path):
         with open(progress_path, "r", encoding="utf-8") as f:
             return json.load(f)  # type: ignore[no-any-return]
     return {}
 
 
-def save_progress(progress: Dict[str, str], progress_path: str = PROGRESS_PATH) -> None:
+def save_progress(progress: Dict[str, str], progress_path: str) -> None:
     with open(progress_path, "w", encoding="utf-8") as f:
         json.dump(progress, f, indent=2)
 
@@ -333,7 +331,7 @@ def run_session(
     upload_to_hf: bool,
     hf_token: str,
     base_folder: str,
-    progress_path: str = PROGRESS_PATH,
+    progress_path: str,
     embed_image_fn: Optional[Callable[[str], List[float]]] = None,
     hf_file_exists_fn: Callable[[str, str, str], bool] = huggingface_dataset_file_exists,
     hf_upload_fn: Optional[Callable[..., None]] = None,
@@ -563,7 +561,7 @@ if __name__ == "__main__":
             "Scan entities in range without computing any embeddings. "
             "For each entity × lora_state, reports: done / local / local_incomplete / "
             "hf_only / absent. Writes result to "
-            "assets/embedding_manifest_{task}_{method}_{epochs}.json and exits."
+            "{base_folder}/embedding_manifest_{task}_{method}_{epochs}.json and exits."
         ),
     )
     args = parser.parse_args()
@@ -576,8 +574,8 @@ if __name__ == "__main__":
     replace_if_exists: bool = args.replace_if_exists
     upload_to_hf: bool = not args.no_upload
     generate_dataset_seeds: List[int] = args.seeds
-    BASE_FOLDER = args.base_folder
-    PROGRESS_PATH = os.path.join(BASE_FOLDER, "embedding_progress.json")
+    base_folder = args.base_folder
+    progress_path = os.path.join(base_folder, "embedding_progress.json")
     force_device: Optional[str] = args.device
 
     # Default epochs per method
@@ -601,25 +599,25 @@ if __name__ == "__main__":
         "in the working directory."
     )
 
-    os.makedirs(os.path.join(BASE_FOLDER, "datasets"), exist_ok=True)
+    os.makedirs(os.path.join(base_folder, "datasets"), exist_ok=True)
 
     # --- Metadata ---
     metadata_local_path = os.path.join(
-        BASE_FOLDER, f"metadata_{task}_2_enriched_filtered.json"
+        base_folder, f"metadata_{task}_2_enriched_filtered.json"
     )
     metadata_hf_path = f"metadata_{task}_2_enriched_filtered.json"
 
     if not os.path.exists(metadata_local_path):
         logger.info("Downloading metadata from HF: %s", metadata_hf_path)
         huggingface_dataset_file_download(
-            folder_datasets=BASE_FOLDER,
+            folder_datasets=base_folder,
             dataset_repository=HF_REPO,
             file_path=metadata_hf_path,
             token=HF_TOKEN,
         )
 
     metadata_filtered: List[Dict[str, Any]] = get_metadata_filtered(
-        task, base_folder=BASE_FOLDER
+        task, base_folder=base_folder
     )
     logger.info("Loaded %d entities from metadata.", len(metadata_filtered))
 
@@ -663,17 +661,17 @@ if __name__ == "__main__":
             max_identities=max_identities,
             metadata_filtered=metadata_with_hf_name,
             lora_states=lora_states_for_manifest,
-            base_folder=BASE_FOLDER,
+            base_folder=base_folder,
             hf_repo=HF_REPO,
             hf_token=HF_TOKEN,
             seeds=generate_dataset_seeds,
             prompts=prompts,
         )
         manifest_path = os.path.join(
-            BASE_FOLDER,
+            base_folder,
             f"embedding_manifest_{task}_{method}_{num_train_epochs:03d}.json",
         )
-        os.makedirs(BASE_FOLDER, exist_ok=True)
+        os.makedirs(base_folder, exist_ok=True)
         with open(manifest_path, "w", encoding="utf-8") as _mf:
             json.dump(manifest_entries, _mf, indent=2)
         logger.info("Manifest written: %s (%d entries)", manifest_path, len(manifest_entries))
@@ -728,7 +726,7 @@ if __name__ == "__main__":
         return feat.squeeze().tolist()  # type: ignore[attr-defined]
 
     # --- Main loop ---
-    progress = load_progress(PROGRESS_PATH)
+    progress = load_progress(progress_path)
 
     for index in range(index_start, index_start + max_identities):
         target: str = metadata_filtered[index]["name"]
@@ -758,7 +756,7 @@ if __name__ == "__main__":
                     "Dataset absent from HF, skipping entity: %s", dataset_config_name
                 )
                 progress[progress_key] = "skipped_no_dataset"
-                save_progress(progress, PROGRESS_PATH)
+                save_progress(progress, progress_path)
                 # Write status for absent entity before continuing (honours every-10 interval)
                 _entities_processed_absent = index - index_start + 1
                 _is_last_absent = _entities_processed_absent == max_identities
@@ -770,12 +768,12 @@ if __name__ == "__main__":
                         index=index,
                         max_identities=max_identities,
                         progress=progress,
-                        base_folder=BASE_FOLDER,
+                        base_folder=base_folder,
                     )
                 continue
             logger.info("Downloading dataset: %s", dataset_config_name)
             huggingface_dataset_download(
-                folder_datasets=os.path.join(BASE_FOLDER, "datasets"),
+                folder_datasets=os.path.join(base_folder, "datasets"),
                 dataset_repository=HF_REPO,
                 dataset_config=dataset_config_name,
                 token=HF_TOKEN,
@@ -791,12 +789,12 @@ if __name__ == "__main__":
             # The baseline is produced by the original model with no unlearning, so it carries
             # no method or epoch and is addressed by BaselineEmbeddings — never through the
             # per-entity, method/epoch-carrying path helpers.
-            _baseline = BaselineEmbeddings(task=task, base_folder=BASE_FOLDER)  # type: ignore[arg-type]
+            _baseline = BaselineEmbeddings(task=task, base_folder=base_folder)  # type: ignore[arg-type]
             baseline_output_path = _baseline._get_data_path_local()
             baseline_hf_path = _baseline._get_data_path_remote()
             baseline_progress_key = f"{task}/original"
 
-            shared_baseline_folder = get_shared_baseline_folder(task, base_folder=BASE_FOLDER)
+            shared_baseline_folder = get_shared_baseline_folder(task, base_folder=base_folder)
             if os.path.exists(shared_baseline_folder):
                 off_dataset_folder = shared_baseline_folder
                 off_source_label = "shared baseline folder"
@@ -823,14 +821,14 @@ if __name__ == "__main__":
                 replace_if_exists=replace_if_exists,
                 upload_to_hf=upload_to_hf,
                 hf_token=HF_TOKEN,
-                base_folder=BASE_FOLDER,
-                progress_path=PROGRESS_PATH,
+                base_folder=base_folder,
+                progress_path=progress_path,
                 embed_image_fn=embed_image,
             )
 
         # --- lora-ON embedding ---
         output_path = get_embedding_output_path(
-            task, target_hf_name, method, num_train_epochs, base_folder=BASE_FOLDER
+            task, target_hf_name, method, num_train_epochs, base_folder=base_folder
         )
         hf_path_entity = get_embedding_hf_path(task, target_hf_name, method, num_train_epochs)
 
@@ -852,8 +850,8 @@ if __name__ == "__main__":
             replace_if_exists=replace_if_exists,
             upload_to_hf=upload_to_hf,
             hf_token=HF_TOKEN,
-            base_folder=BASE_FOLDER,
-            progress_path=PROGRESS_PATH,
+            base_folder=base_folder,
+            progress_path=progress_path,
             embed_image_fn=embed_image,
         )
 
@@ -873,5 +871,5 @@ if __name__ == "__main__":
                 index=index,
                 max_identities=max_identities,
                 progress=progress,
-                base_folder=BASE_FOLDER,
+                base_folder=base_folder,
             )
