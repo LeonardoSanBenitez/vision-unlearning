@@ -58,6 +58,7 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     get_embedding_output_path,
     get_interference_per_entity_path,
     get_interference_per_pair_path,
+    BaselineEmbeddings,
 )
 from vision_unlearning.datasets.testbed import (
     exists_unlearned_dataset,
@@ -228,12 +229,12 @@ def enumerate_items(
             ))
 
         if "embeddings" in stages:
-            # Baseline embedding: method-agnostic (one per task), see pipeline_05 docstring.
+            # Baseline embedding: method-agnostic (one per task), addressed by BaselineEmbeddings.
             items.append(SyncItem(
                 stage="embeddings", task=task, name="original",
                 kind="file",
-                local_path=get_embedding_output_path(task, "original", "", 0, base_folder=base_folder),
-                remote_path=get_embedding_hf_path(task, "original", "", 0),
+                local_path=BaselineEmbeddings(task=task_t, base_folder=base_folder)._get_data_path_local(),  # type: ignore[arg-type]
+                remote_path=BaselineEmbeddings(task=task_t)._get_data_path_remote(),  # type: ignore[arg-type]
             ))
 
         for method in methods:

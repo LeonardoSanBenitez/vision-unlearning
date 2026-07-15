@@ -54,6 +54,8 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     choose_metric_column_interference_per_entity,
     get_embedding_output_path,
     get_embedding_hf_path,
+    BaselineEmbeddings,
+    EntityEmbeddings,
 )
 
 from vision_unlearning.datasets.testbed import (
@@ -172,6 +174,8 @@ __all__ = [
     "choose_metric_column_interference_per_entity",
     "get_embedding_output_path",
     "get_embedding_hf_path",
+    "BaselineEmbeddings",
+    "EntityEmbeddings",
     # metrics
     "find_worst_interfered",
     "metric_of_worst_interfered",
