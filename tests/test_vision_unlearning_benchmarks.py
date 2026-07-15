@@ -39,6 +39,7 @@ from matplotlib.figure import Figure  # noqa: E402
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
+import vision_unlearning.benchmarks.I_care.similarity as _sim_mod  # noqa: E402
 import vision_unlearning.artifact as _artifact_mod  # noqa: E402
 
 
@@ -589,7 +590,8 @@ class TestComputeFromScratchMocked:
         labels = ["a", "b", "c"]
         meta = _fake_metadata(labels)
         monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
-        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+        # Similarity binds get_metadata_filtered in similarity.py, so patch it there.
+        monkeypatch.setattr(_sim_mod, "get_metadata_filtered", lambda task, **k: meta)
 
         rt = vb.ResultTemplateSimilarityMatrix(
             task="people",
@@ -615,7 +617,8 @@ class TestComputeFromScratchMocked:
         labels = ["alpha", "beta", "gamma"]
         meta = _fake_metadata(labels)
         monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
-        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+        # Similarity binds get_metadata_filtered in similarity.py, so patch it there.
+        monkeypatch.setattr(_sim_mod, "get_metadata_filtered", lambda task, **k: meta)
 
         # Write a minimal fake embeddings file at the correct sub-path.
         # For task='people', distil epochs=400, the expected path is:

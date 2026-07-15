@@ -28,6 +28,7 @@ from matplotlib.figure import Figure  # noqa: E402
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 import vision_unlearning.benchmarks.I_care.metadata as _meta_mod  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
+import vision_unlearning.benchmarks.I_care.similarity as _sim_mod  # noqa: E402
 import vision_unlearning.artifact as _artifact_mod  # noqa: E402
 
 
@@ -100,9 +101,9 @@ class TestSimilarityMatrixDinoCompute:
             vb, "get_metadata_filtered",
             lambda task, **kw: [{"name": e} for e in entities],
         )
-        # Patch at the actual call site in result_templates (where the function is bound)
+        # Patch at the actual call site in similarity.py (where the Similarity artifact binds it)
         monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
+            _sim_mod, "get_metadata_filtered",
             lambda task, **kw: [{"name": e} for e in entities],
         )
         # Write a baseline embedding file in tmp_path/datasets/ (correct sub-path).
@@ -157,9 +158,9 @@ class TestSimilarityMatrixDinoCompute:
             vb, "get_metadata_filtered",
             lambda task, **kw: [{"name": e} for e in entities],
         )
-        # Patch at the actual call site in result_templates (where the function is bound)
+        # Patch at the actual call site in similarity.py (where the Similarity artifact binds it)
         monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
+            _sim_mod, "get_metadata_filtered",
             lambda task, **kw: [{"name": e} for e in entities],
         )
         rt = vb.ResultTemplateSimilarityMatrix(
@@ -190,9 +191,9 @@ class TestSimilarityMatrixDinoCompute:
             vb, "get_metadata_filtered",
             lambda task, **kw: [{"name": "Alice"}],
         )
-        # Patch at the actual call site in result_templates (where the function is bound)
+        # Patch at the actual call site in similarity.py (where the Similarity artifact binds it)
         monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
+            _sim_mod, "get_metadata_filtered",
             lambda task, **kw: [{"name": "Alice"}],
         )
         rt = vb.ResultTemplateSimilarityMatrix(
