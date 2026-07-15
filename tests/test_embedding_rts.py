@@ -67,7 +67,7 @@ def _make_embedding_records(
             records.append({
                 "prompted_entity": entity,
                 "seed": seed,
-                "prompt": f"a photo of {entity}",
+                "prompt": f"An image of {entity}",
                 "embedding": vec,
             })
     return records
@@ -613,6 +613,39 @@ class TestBaselinePerMethodObliteration:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
 
 
+class TestEmbeddingUnlearningProfileGrouping:
+    """The embedding mean groups records by ``prompt``, never by ``prompted_entity`` (§6)."""
+
+    def test_mean_embeddings_groups_by_prompt_not_prompted_entity(self) -> None:
+        """C — divergent-prompt: grouping must follow ``prompt``, not ``prompted_entity``.
+
+        Two records for the same entity share one prompt but carry DIFFERENT (inconsistent)
+        ``prompted_entity`` strings. Grouping by prompt yields one bucket for that entity
+        (correct); grouping by ``prompted_entity`` would split it into two — the §6 violation
+        this fix removes. Without divergence, both grouping keys agree and the test cannot
+        distinguish a correct fix from a broken one, which is why the fixture forces it.
+        """
+        raw = {
+            "embeddings": [
+                {"prompted_entity": "Alice", "seed": 0,
+                 "prompt": "An image of Alice", "embedding": [1.0, 0.0]},
+                # Same entity/prompt, deliberately inconsistent prompted_entity:
+                {"prompted_entity": "a photo of Alice", "seed": 1,
+                 "prompt": "An image of Alice", "embedding": [3.0, 0.0]},
+                {"prompted_entity": "Bob", "seed": 0,
+                 "prompt": "An image of Bob", "embedding": [0.0, 2.0]},
+            ]
+        }
+        means = _rt_mod.ResultTemplateEmbeddingUnlearningProfile._mean_embeddings(raw)
+        # Grouping by prompt → exactly two entities, keyed by the stripped canonical name.
+        assert set(means.keys()) == {"Alice", "Bob"}
+        # Alice's mean averages BOTH divergent-prompted_entity records: (1 + 3) / 2 = 2.
+        # Under the old prompted_entity grouping this would be [1.0, 0.0] and the key set
+        # would additionally contain "a photo of Alice".
+        assert means["Alice"].tolist() == [2.0, 0.0]
+        assert means["Bob"].tolist() == [0.0, 2.0]
+
+
 class TestEmbeddingUnlearningProfileClipDiffNormalization:
     """Test that clip_diff is populated when IPE names use underscores but embedding labels use spaces."""
 
@@ -648,7 +681,7 @@ class TestEmbeddingUnlearningProfileClipDiffNormalization:
                     # Large shift for the forgotten entity in its own file → ratio > 1
                     if fname_suffix == forgotten_entity_space and ent_space == forgotten_entity_space:
                         vec = [v * -10 for v in rng2.standard_normal(16).tolist()]
-                    records.append({"prompted_entity": ent_space, "seed": seed, "prompt": "x", "embedding": vec})
+                    records.append({"prompted_entity": ent_space, "seed": seed, "prompt": f"An image of {ent_space}", "embedding": vec})
             with open(path, "w") as f:
                 json.dump({"metadata": {"embedding_model": "dinov2_vits14"}, "embeddings": records}, f)
 

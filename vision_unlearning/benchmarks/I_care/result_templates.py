@@ -4280,11 +4280,20 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
 
     @staticmethod
     def _mean_embeddings(raw: dict) -> "Dict[str, np.ndarray]":
-        """Group embedding records by prompted_entity and compute mean per entity."""
+        """Mean embedding per entity, grouping records by their ``prompt`` field.
+
+        Per CONTRIBUTING_ICARE §6, records are grouped by the clean ``prompt`` field and
+        never by ``prompted_entity`` (whose formatting is inconsistent across tasks). The
+        entity key is recovered from the canonical prompt template ``"An image of {entity}"``,
+        so it is the same overwrite/HF entity form returned by ``_resolve_hf_entity`` and used
+        downstream — for well-formed data this yields the same partition as before, while
+        being robust to inconsistent ``prompted_entity`` strings.
+        """
         from collections import defaultdict
         buckets: Dict[str, List[List[float]]] = defaultdict(list)
         for entry in raw["embeddings"]:
-            buckets[entry["prompted_entity"]].append(entry["embedding"])
+            entity = entry["prompt"].removeprefix("An image of ")
+            buckets[entity].append(entry["embedding"])
         return {ent: np.mean(np.array(vecs), axis=0) for ent, vecs in buckets.items()}
 
     @staticmethod
