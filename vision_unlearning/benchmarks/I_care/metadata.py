@@ -302,9 +302,7 @@ class BaselineEmbeddings(SingleFileArtifact):
 
     The baseline is produced by the base model with no unlearning, so it depends only on the
     task, the base model, and the embedding function — never on an unlearning method or its
-    epoch count. The deliberate absence of any method/epoch field makes the obsolete
-    per-method baseline name (``embeddings_{task}_original_{method}_{epochs}.json``)
-    *unrepresentable* through this interface.
+    epoch count.
     """
     task: type_task = "people"
     model: type_model = "sd1.4"
