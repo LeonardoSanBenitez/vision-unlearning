@@ -3902,35 +3902,33 @@ def jacc_metric_score(entity_1: str, entity_2: str, metadata_filtered: List[Dict
     assert 0 <= similarity <= 1
     return similarity
 
-class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
-    """
-    *Similarities* between each possible combination of two *entities* within a *task*.
-    * **Arguments**: $m, t, s$
-    * **Result**: $|t| \times |t|$ real-valued tensor
-    * **Interpretation**: qualitative; visual patterns may be spotted, similarly to *InterferenceMatrix*.
+class Similarity(SingleFileArtifact):
+    """Pairwise 100x100 similarity matrix for one (task, similarity_metric).
+
+    Backs the canonical ``similarity_{s}_{task}.json`` (appendix ``ap:metadata``). This is
+    where the heavy per-metric computation lives — ``jacc`` inline with a ``.partial``
+    checkpoint, ``dino`` from the method-agnostic baseline DINOv2 embeddings, ``act`` from the
+    cross-attention fingerprints; ``ResultTemplateSimilarityMatrix`` is a thin reader over it.
+
+    The result is a list of 100 emitter-row records
+    ``{"emitter": <name>, <receiver_name>: <float>, ...}``, indexed by the metadataFiltered
+    ``name`` field (same keys the SimilarityMatrix result template has always used).
     """
     model: type_model = 'sd1.4'
-    task: type_task = 'scenes'
+    task: type_task = 'people'
     similarity_metric: type_s = 'clip'
-    metric_key_name: str = 'similarity_metric'
 
+    def _get_data_path_remote(self) -> str:
+        return f"similarity_{self.similarity_metric}_{self.task}.json"
 
-    def _serialize_parameters(self) -> str:
-        return f"{self.model}_{self.task}_{self.similarity_metric}"
-
-    def _get_partial_path_local(self):
+    def _get_partial_path_local(self) -> str:
         return self._get_data_path_local() + '.partial'
 
-    @classmethod
-    def plot_make_title(cls, data: dict) -> str:
-        rt_pretty = data['metadata']['RT'].replace('ResultTemplate', '')
-        task_pretty = data['metadata']['task'].title()
-        metric_pretty = f"{data['metadata'][data['metadata']['_metric_key_name']].replace('_', ' ').title()}"
-        title = f"{rt_pretty}\nTask: {task_pretty}\nMetric: {metric_pretty}"
-        return title
+    def _validate(self, data: Any) -> None:
+        assert isinstance(data, list)
+        assert all(isinstance(row, dict) and 'emitter' in row for row in data)
 
-
-    def _compute_from_scratch(self) -> dict:
+    def _compute_from_scratch(self) -> List[Dict[str, Any]]:
         metadata_filtered: List[Dict[str, Any]] = get_metadata_filtered(self.task)
         labels: List[str] = [e['name'] for e in metadata_filtered]
 
@@ -3938,18 +3936,15 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             raise NotImplementedError(
                 "CLIP similarity matrix not found locally or in HuggingFace Hub. "
                 "Recomputing from scratch requires a GPU with CLIP/SD 1.4 and is not "
-                "supported by this RT.  Either upload the precomputed matrix to HF or "
+                "supported here.  Either upload the precomputed matrix to HF or "
                 "run pipeline_02 with --similarity clip on a GPU machine."
             )
 
         elif self.similarity_metric == 'jacc':
-            # The partial file lives in the same directory as the final output.
-            # compute() creates that directory only after _compute_from_scratch() returns,
-            # so we must create it here before writing the first partial checkpoint.
+            # The partial checkpoint lives next to the canonical file.
             os.makedirs(os.path.dirname(self._get_partial_path_local()), exist_ok=True)
 
-            # Load partial
-            # 100x100 matrix
+            # 100x100 matrix; resume from a partial checkpoint if present.
             if os.path.exists(self._get_partial_path_local()) and not self.recompute_if_exists:
                 df_similarities = pd.read_json(self._get_partial_path_local(), orient='records')
                 df_similarities.set_index('emitter', inplace=True)
@@ -3957,28 +3952,26 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             else:
                 df_similarities = pd.DataFrame(index=labels, columns=labels)
 
-            # Calculate
             for entity_emitter, row_emitter in df_similarities.iterrows():
-                print(f'Analying similarities for entity_emitter={entity_emitter}')
                 for entity_receiver in row_emitter.index:
                     if pd.isna(df_similarities.loc[entity_emitter, entity_receiver]):  # type: ignore
                         similarity: float = jacc_metric_score(str(entity_emitter), str(entity_receiver), metadata_filtered)
                         df_similarities.loc[entity_emitter, entity_receiver] = similarity
 
-                # Save partial at the end of each row
+                # Checkpoint at the end of each row
                 df_similarities.reset_index(names='emitter').to_json(self._get_partial_path_local(), orient='records')
 
         elif self.similarity_metric == 'dino':
             from collections import defaultdict
-            distil_epochs = unlearning_algorithm_to_epochs[self.task]['distil']
+            # Baseline embeddings are produced by the original model and carry no method or
+            # epoch (the per-method baseline name is an obsolete artifact).
             embedding_path = os.path.join(
                 self.base_folder, 'datasets',
-                f'embeddings_{self.task}_original_distil_{distil_epochs:03d}.json'
+                f'embeddings_{self.task}_original.json'
             )
             assert os.path.exists(embedding_path), (
                 f"Baseline DINOv2 embeddings not found at {embedding_path}. "
-                f"Run 3_compute_embeddings.py --task {self.task} --method distil "
-                f"--max-identities 100 first."
+                f"Run pipeline_05 (compute embeddings) for the baseline first."
             )
             with open(embedding_path, encoding='utf-8') as f:
                 raw = json.load(f)
@@ -3986,10 +3979,9 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             # Build forward mapping: metadata_name -> expected prompt string.
             # The embedding file's 'prompt' field is "An image of {get_target_overwrite(...)[0]}"
             # and is consistent across tasks.  We key by prompt rather than 'prompted_entity'
-            # because 'prompted_entity' has inconsistent formatting across tasks (spaces vs
-            # underscores, article artifacts for scenes), whereas 'prompt' is clean.
-            # NOTE: get_target_overwrite's `method` parameter is not used in the transform,
-            # so any method value produces the same result.
+            # because 'prompted_entity' has inconsistent formatting across tasks, whereas
+            # 'prompt' is clean.  get_target_overwrite's `method` parameter is ignored by the
+            # transform, so any method value produces the same result.
             ent_list = [e['name'] for e in metadata_filtered]
             meta_to_prompt: Dict[str, str] = {
                 name: f"An image of {get_target_overwrite(self.task, 'distil', name)[0]}"
@@ -4032,49 +4024,60 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
             )
             df_similarities = compute_cosine_similarity_matrix(fingerprints, labels)
 
-        elif self.similarity_metric == 'weight_overlap':
-            # Cosine similarity of trained LoRA weight-change vectors (B@A, flattened across all
-            # cross-attention modules).  Only available for scenes/distil — the checkpoint is
-            # produced by analyze_weight_overlap_full.py.
-            # Checkpoint format: {"cosine_matrix": {entity_i: {entity_j: float}}, "norms": {...}}
-            _ckpt_candidates = [
-                os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)),
-                    '..', '..', '..', 'assets', 'results',
-                    f'weight_overlap_{self.task}100_checkpoint.json',
-                ),
-                os.path.join(self.base_folder, 'results',
-                             f'weight_overlap_{self.task}100_checkpoint.json'),
-            ]
-            _ckpt_path = next((p for p in _ckpt_candidates if os.path.exists(p)), None)
-            if _ckpt_path is None:
-                raise FileNotFoundError(
-                    f"weight_overlap checkpoint not found for task='{self.task}'. "
-                    f"Run analyze_weight_overlap_full.py to generate it. "
-                    f"Checked: {_ckpt_candidates}"
-                )
-            with open(_ckpt_path, encoding='utf-8') as _f:
-                _ckpt = json.load(_f)
-            _cos_matrix: Dict[str, Dict[str, float]] = _ckpt['cosine_matrix']
-            # Verify all metadata entities are present in the checkpoint
-            _missing = [e for e in labels if e not in _cos_matrix]
-            if _missing:
-                raise ValueError(
-                    f"weight_overlap checkpoint is missing {len(_missing)} entities: {_missing[:5]}"
-                )
-            df_similarities = pd.DataFrame(
-                {
-                    ei: {
-                        ej: (1.0 if ei == ej else _cos_matrix[ei][ej])
-                        for ej in labels
-                    }
-                    for ei in labels
-                },
-                index=labels,
-            ).T  # rows = emitters, columns = receivers
+        else:
+            raise NotImplementedError(
+                f"Unsupported similarity_metric={self.similarity_metric!r}"
+            )
 
-        # Return to be saved in its final form
-        data = {
+        return cast(
+            List[Dict[str, Any]],
+            df_similarities.reset_index(names='emitter').to_dict(orient='records'),
+        )
+
+    def compute(self) -> List[Dict[str, Any]]:
+        """Resolve the pairwise similarity matrix from local disk, HuggingFace, or compute it."""
+        return cast(List[Dict[str, Any]], self._resolve())
+
+
+class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
+    """
+    *Similarities* between each possible combination of two *entities* within a *task*.
+    * **Arguments**: $m, t, s$
+    * **Result**: $|t| \times |t|$ real-valued tensor
+    * **Interpretation**: qualitative; visual patterns may be spotted, similarly to *InterferenceMatrix*.
+
+    Thin reader over the :class:`Similarity` artifact (which owns the heavy per-metric
+    computation and caching); this class only adds the display metadata that ``plot`` needs.
+    """
+    model: type_model = 'sd1.4'
+    task: type_task = 'scenes'
+    similarity_metric: type_s = 'clip'
+    metric_key_name: str = 'similarity_metric'
+
+
+    def _serialize_parameters(self) -> str:
+        return f"{self.model}_{self.task}_{self.similarity_metric}"
+
+    @classmethod
+    def plot_make_title(cls, data: dict) -> str:
+        rt_pretty = data['metadata']['RT'].replace('ResultTemplate', '')
+        task_pretty = data['metadata']['task'].title()
+        metric_pretty = f"{data['metadata'][data['metadata']['_metric_key_name']].replace('_', ' ').title()}"
+        title = f"{rt_pretty}\nTask: {task_pretty}\nMetric: {metric_pretty}"
+        return title
+
+
+    def _compute_from_scratch(self) -> dict:
+        similarity_matrix = Similarity(
+            model=self.model,
+            task=self.task,
+            similarity_metric=self.similarity_metric,
+            base_folder=self.base_folder,
+            remote_repository_name=self.remote_repository_name,
+            recompute_if_exists=self.recompute_if_exists,
+            save_outputs=self.save_outputs,
+        ).compute()
+        return {
             'metadata': {
                 'RT': self.__class__.__name__,
                 'model': self.model,
@@ -4082,11 +4085,9 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
                 self.metric_key_name: self.similarity_metric,
                 '_metric_key_name': self.metric_key_name,
             },
-            'result': df_similarities.reset_index(names='emitter').to_dict(orient='records'),
+            'result': similarity_matrix,
         }
-        return data
 
- 
 
 class ResultTemplateMethodComparisonByMetricEntity(ResultTemplate):
     """

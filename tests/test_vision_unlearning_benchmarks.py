@@ -597,10 +597,9 @@ class TestComputeFromScratchMocked:
             save_outputs=False,
             base_folder=str(tmp_path),
         )
-        # The TEMP implementation always writes an incremental ``.partial``
-        # json (independent of save_outputs); its parent dir must exist.
-        # tmp_path is empty, so no stale partial is read -> fresh compute.
-        os.makedirs(os.path.dirname(rt._get_partial_path_local()), exist_ok=True)
+        # The Similarity artifact writes an incremental ``.partial`` checkpoint next to the
+        # canonical file and creates its own parent directory; tmp_path is empty, so no stale
+        # partial is read -> fresh compute.
         data = rt._compute_from_scratch()
         assert data["metadata"]["similarity_metric"] == "jacc"
         assert len(data["result"]) == len(labels)
@@ -620,10 +619,10 @@ class TestComputeFromScratchMocked:
 
         # Write a minimal fake embeddings file at the correct sub-path.
         # For task='people', distil epochs=400, the expected path is:
-        #   base_folder/datasets/embeddings_people_original_distil_400.json
+        #   base_folder/datasets/embeddings_people_original.json
         datasets_dir = tmp_path / "datasets"
         datasets_dir.mkdir()
-        emb_file = datasets_dir / "embeddings_people_original_distil_400.json"
+        emb_file = datasets_dir / "embeddings_people_original.json"
         rng = [1.0, 0.0, 0.0]
         # The code matches by 'prompt' field: "An image of {get_target_overwrite(...)[0]}"
         # For task='people', get_target_overwrite returns the name unchanged (spaces only).

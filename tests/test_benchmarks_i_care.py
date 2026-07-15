@@ -94,6 +94,9 @@ class TestSimilarityMatrixDinoCompute:
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
             vb, "get_metadata_filtered",
             lambda task, **kw: [{"name": e} for e in entities],
         )
@@ -103,7 +106,7 @@ class TestSimilarityMatrixDinoCompute:
             lambda task, **kw: [{"name": e} for e in entities],
         )
         # Write a baseline embedding file in tmp_path/datasets/ (correct sub-path).
-        emb_path = str(tmp_path / "datasets" / "embeddings_people_original_distil_400.json")
+        emb_path = str(tmp_path / "datasets" / "embeddings_people_original.json")
         _write_embedding_file(emb_path, entities)
 
         rt = vb.ResultTemplateSimilarityMatrix(
@@ -126,6 +129,9 @@ class TestSimilarityMatrixDinoCompute:
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
+        monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
         # Construct embeddings manually: Alpha has e0 direction, Beta has e1 direction.
         # Names must be >=3 chars (get_target_overwrite assertion).
         # For task='people', get_target_overwrite('people','distil','Alpha')[0] == 'Alpha',
@@ -143,7 +149,7 @@ class TestSimilarityMatrixDinoCompute:
         # Write embedding file in the correct sub-path (datasets/).
         datasets_dir = tmp_path / "datasets"
         datasets_dir.mkdir()
-        emb_path = str(datasets_dir / "embeddings_people_original_distil_400.json")
+        emb_path = str(datasets_dir / "embeddings_people_original.json")
         with open(emb_path, "w") as f:
             json.dump(embedding_data, f)
 
@@ -176,6 +182,9 @@ class TestSimilarityMatrixDinoCompute:
         """AssertionError when baseline embedding file is absent."""
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(
             vb, "get_metadata_filtered",
@@ -305,6 +314,9 @@ class TestMethodSpecificityCompute:
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
             vb.InterferencePerEntity, "compute", lambda self: fake_data
         )
 
@@ -331,6 +343,9 @@ class TestMethodSpecificityCompute:
 
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(
             vb.InterferencePerEntity, "compute", lambda self: fake_data
@@ -368,6 +383,9 @@ class TestMethodSpecificityCompute:
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
             vb.InterferencePerEntity, "compute", lambda self: fake_data
         )
 
@@ -397,6 +415,9 @@ class TestMethodSpecificityCompute:
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
             vb.InterferencePerEntity, "compute", lambda self: fake_data
         )
 
@@ -422,6 +443,9 @@ class TestMethodSpecificityPlot:
         """plot(..., return_fig=True) returns a (Figure, Axes) tuple."""
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
 
         data = {
@@ -1529,6 +1553,9 @@ class TestCountSignificantRelationshipCompute:
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
+        monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
 
     def test_grouped_dicts_populated(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
@@ -1617,6 +1644,9 @@ class TestCountSignificantRelationshipCompute:
         )
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
+        )
+        monkeypatch.setattr(
+            _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
 
         rt = _rt_mod.ResultTemplateCountSignificantRelationship(
@@ -1781,3 +1811,59 @@ class TestInterferencePerPairArtifact:
         )
         with pytest.raises(NotImplementedError):
             ipp.compute()
+
+
+class TestSimilarityArtifact:
+    """Similarity wraps the canonical similarity_{s}_{task}.json with the shared cascade and
+    owns the heavy per-metric computation; SimilarityMatrix is a thin reader over it."""
+
+    def test_remote_path(self) -> None:
+        sim = _rt_mod.Similarity(task='people', similarity_metric='dino')
+        assert sim._get_data_path_remote() == 'similarity_dino_people.json'
+
+    def test_local_hit_returns_matrix(self, tmp_path: Any) -> None:
+        sim = _rt_mod.Similarity(
+            task='people', similarity_metric='dino', base_folder=str(tmp_path)
+        )
+        matrix = [
+            {'emitter': 'Alice', 'Alice': 1.0, 'Bob': 0.3},
+            {'emitter': 'Bob', 'Alice': 0.3, 'Bob': 1.0},
+        ]
+        with open(sim._get_data_path_local(), 'w', encoding='utf-8') as f:
+            json.dump(matrix, f)
+        assert sim.compute() == matrix
+
+    def test_clip_recompute_raises(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: False
+        )
+        monkeypatch.setattr(
+            _rt_mod, 'get_metadata_filtered', lambda task, **k: [{'name': 'Alice'}]
+        )
+        sim = _rt_mod.Similarity(
+            task='people', similarity_metric='clip', base_folder=str(tmp_path)
+        )
+        with pytest.raises(NotImplementedError):
+            sim.compute()
+
+    def test_similarity_matrix_rt_reads_artifact(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The RT wraps the artifact's matrix with display metadata (thin reader)."""
+        matrix = [
+            {'emitter': 'Alice', 'Alice': 1.0, 'Bob': 0.3},
+            {'emitter': 'Bob', 'Alice': 0.3, 'Bob': 1.0},
+        ]
+        monkeypatch.setattr(
+            _rt_mod.Similarity, 'compute', lambda self: list(matrix)
+        )
+        rt = _rt_mod.ResultTemplateSimilarityMatrix(
+            task='people', similarity_metric='dino', base_folder=str(tmp_path),
+            save_outputs=False,
+        )
+        data = rt._compute_from_scratch()
+        assert data['metadata']['similarity_metric'] == 'dino'
+        assert data['metadata']['_metric_key_name'] == 'similarity_metric'
+        assert data['result'] == matrix
