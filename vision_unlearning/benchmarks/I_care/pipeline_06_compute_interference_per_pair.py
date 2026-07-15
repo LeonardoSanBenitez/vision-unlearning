@@ -23,7 +23,6 @@ logger = get_logger('unlearning_analysis')
 setup_loggers(modules_info=['unlearning'])
 
 HF_REPO = "LeonardoBenitez/VisionUnlearningEvaluationTestbeds"
-BASE_FOLDER = "assets"
 
 # ---------------------------------------------------------------------------
 # CLI args — override any of the defaults set in the param blocks below
@@ -41,6 +40,8 @@ _parser.add_argument("--limit-prompts", type=int, default=None)
 _parser.add_argument("--replace-if-exists", action="store_true", default=False)
 _parser.add_argument("--delete-dataset", action="store_true", default=False,
                      help="Delete local dataset folder after computation. Default is to KEEP the dataset.")
+_parser.add_argument("--base-folder", default="assets",
+                     help="Path to the assets folder (default: 'assets' in the current directory).")
 _args, _unknown = _parser.parse_known_args()
 
 # Load HF_TOKEN (needed for download; safe to skip if datasets are already local)
@@ -148,6 +149,7 @@ num_train_epochs: int = _args.num_train_epochs if _args.num_train_epochs is not 
 
 generate_dataset_seeds = _args.seeds if _args.seeds is not None else [42, 43, 44, 45]
 generate_dataset_limit_prompts: Optional[int] = _args.limit_prompts  # None means all
+base_folder: str = _args.base_folder
 
 logger.info(
     "Config: task=%s method=%s epochs=%d index_start=%d max_identities=%d",
@@ -157,7 +159,7 @@ logger.info(
 
 # No need to change anything from now on...
 
-metadata_filtered = get_metadata_filtered(task, base_folder=BASE_FOLDER)
+metadata_filtered = get_metadata_filtered(task, base_folder=base_folder)
 
 # Full prompt list (all entities, no truncation).  Used for:
 #   1. Ensuring the shared baseline is available locally before the entity loop.
@@ -177,7 +179,7 @@ all_prompts = [
 # After this call, GeneratedDataset.get_off_image_path() and evaluate_all_seeds()
 # can safely assume the shared baseline folder exists locally.
 logger.info("Ensuring shared baseline is available for task=%s ...", task)
-_baseline_ds = GeneratedDataset(task=task, base_folder=BASE_FOLDER)  # type: ignore[arg-type]
+_baseline_ds = GeneratedDataset(task=task, base_folder=base_folder)  # type: ignore[arg-type]
 _baseline_ds.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
 logger.info("Shared baseline ready: %s", _baseline_ds.folder_path)
 
@@ -197,8 +199,8 @@ def evaluate_one(prompt, seed, plot: bool = False) -> dict:
     # TODO can this be batched?
 
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)  # type: ignore[arg-type]
-    out_off = Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, seed, prompt))  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    out_off = Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, seed, prompt, base_folder=base_folder))  # type: ignore[arg-type]
     out_on = Image.open(ds_entity.file_path('on', seed, prompt))
 
     # Metrics
@@ -244,8 +246,8 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
     evaluate_one() per seed.
     """
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)  # type: ignore[arg-type]
-    imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt)) for s in seeds]  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt, base_folder=base_folder)) for s in seeds]  # type: ignore[arg-type]
     imgs_on = [Image.open(ds_entity.file_path('on', s, prompt)) for s in seeds]
 
     n = len(seeds)
@@ -301,11 +303,11 @@ for index in range(index_start, index_start + max_identities):
     # a recompute, there is no point downloading the entity dataset.  The download
     # for entities 0..(index_start-1) is a major source of HF 429 rate-limiting
     # on resume runs where those entities are already done.
-    if not replace_if_exists and os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs)):
+    if not replace_if_exists and os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder=base_folder)):
         logger.info(f'Skipping measuring scores for "{target}" since already exists')
         continue
 
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs)  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
     try:
         ds_entity.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
     except FileNotFoundError as exc:
@@ -340,7 +342,7 @@ for index in range(index_start, index_start + max_identities):
         # evaluate_all_seeds batches BRISQUE across all seeds in one GPU pass
         interference_per_pair[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
     print('-' * 50 + '\n' + '-' * 50)
-    save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs)
+    save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs, base_folder=base_folder)
 
     # Clean up local dataset to save disk space (only if --delete-dataset was passed)
     if _args.delete_dataset and os.path.exists(dataset_folder):

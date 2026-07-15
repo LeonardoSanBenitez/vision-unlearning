@@ -332,6 +332,7 @@ def run_session(
     replace_if_exists: bool,
     upload_to_hf: bool,
     hf_token: str,
+    base_folder: str,
     progress_path: str = PROGRESS_PATH,
     embed_image_fn: Optional[Callable[[str], List[float]]] = None,
     hf_file_exists_fn: Callable[[str, str, str], bool] = huggingface_dataset_file_exists,
@@ -384,7 +385,7 @@ def run_session(
                 hf_download_fn(dataset_config_name)
             else:
                 huggingface_dataset_download(
-                    folder_datasets=os.path.join(BASE_FOLDER, "datasets"),
+                    folder_datasets=os.path.join(base_folder, "datasets"),
                     dataset_repository=HF_REPO,
                     dataset_config=dataset_config_name,
                     token=hf_token,
@@ -822,6 +823,7 @@ if __name__ == "__main__":
                 replace_if_exists=replace_if_exists,
                 upload_to_hf=upload_to_hf,
                 hf_token=HF_TOKEN,
+                base_folder=BASE_FOLDER,
                 progress_path=PROGRESS_PATH,
                 embed_image_fn=embed_image,
             )
@@ -850,6 +852,7 @@ if __name__ == "__main__":
             replace_if_exists=replace_if_exists,
             upload_to_hf=upload_to_hf,
             hf_token=HF_TOKEN,
+            base_folder=BASE_FOLDER,
             progress_path=PROGRESS_PATH,
             embed_image_fn=embed_image,
         )
