@@ -5,7 +5,8 @@ This module provides:
   - load_dino_model(): load DINOv2 vits14 and return (model, transform, device) triple
   - embed_image_with_dino(): embed a single image using a pre-loaded DINOv2 model
   - compute_dino_image_similarity(): DINOv2 cosine similarity between two PIL images (for script 3)
-  - compute_mean_embeddings_by_prompt(): {prompt: mean_embedding} from an embedding file dict
+  - group_embeddings_by_prompt(): {prompt: un-normalised mean_embedding} — shared grouping core
+  - compute_mean_embeddings_by_prompt(): {prompt: L2-normalised mean_embedding} from an embedding file dict
   - compute_dino_diff_for_emitter(): {prompt: dino_diff} from on/off embedding files (for 3b script)
 
 Design notes:
@@ -309,13 +310,18 @@ def compute_dino_image_similarity(
     return float(np.dot(emb_off_np, emb_on_np) / (norm_off * norm_on))
 
 
-def compute_mean_embeddings_by_prompt(
+def group_embeddings_by_prompt(
     embedding_file: Dict[str, Any],
-) -> Dict[str, List[float]]:
-    """Return {prompt: L2-normalised mean embedding} from an embedding file dict.
+) -> Dict[str, Any]:
+    """Group embedding records by their ``prompt`` field and return the un-normalised,
+    element-wise mean embedding per group, keyed by the raw prompt string.
 
-    Aggregates all records that share the same ``prompt`` field (across seeds),
-    computes the element-wise mean, and L2-normalises the result.
+    This is the shared core reused by both readers of an embedding file:
+    ``compute_mean_embeddings_by_prompt`` (below, adds L2-normalisation, keeps the raw
+    prompt as key) and ``ResultTemplateEmbeddingUnlearningProfile._mean_embeddings``
+    (`result_templates.py`, keeps the un-normalised mean — required because its PCA is
+    sensitive to vector magnitude — and re-keys by the entity name recovered from the
+    canonical prompt template).
 
     Uses ``prompt`` (not ``prompted_entity``) as the canonical key, per
     ICARE guidelines (prompted_entity has inconsistent formatting across tasks).
@@ -325,8 +331,7 @@ def compute_mean_embeddings_by_prompt(
                         Each record must have ``"prompt"`` and ``"embedding"`` fields.
 
     Returns:
-        Dict mapping prompt string → 384-dim L2-normalised mean embedding.
-        Prompts with all-zero mean (degenerate) are omitted.
+        Dict mapping prompt string → 384-dim un-normalised mean embedding (np.ndarray).
     """
     import numpy as np
 
@@ -341,10 +346,34 @@ def compute_mean_embeddings_by_prompt(
             continue
         buckets[prompt_key].append(entry["embedding"])
 
+    return {
+        prompt: np.array(vecs, dtype=np.float32).mean(axis=0)
+        for prompt, vecs in buckets.items()
+    }
+
+
+def compute_mean_embeddings_by_prompt(
+    embedding_file: Dict[str, Any],
+) -> Dict[str, List[float]]:
+    """Return {prompt: L2-normalised mean embedding} from an embedding file dict.
+
+    Aggregates all records that share the same ``prompt`` field (across seeds),
+    computes the element-wise mean, and L2-normalises the result.
+
+    Args:
+        embedding_file: Parsed JSON dict with an ``"embeddings"`` list of records.
+                        Each record must have ``"prompt"`` and ``"embedding"`` fields.
+
+    Returns:
+        Dict mapping prompt string → 384-dim L2-normalised mean embedding.
+        Prompts with all-zero mean (degenerate) are omitted.
+    """
+    import numpy as np
+
+    raw_means = group_embeddings_by_prompt(embedding_file)
+
     result: Dict[str, List[float]] = {}
-    for prompt, vecs in buckets.items():
-        arr = np.array(vecs, dtype=np.float32)
-        mean_vec = arr.mean(axis=0)
+    for prompt, mean_vec in raw_means.items():
         norm = float(np.linalg.norm(mean_vec))
         if norm > 0:
             result[prompt] = (mean_vec / norm).tolist()

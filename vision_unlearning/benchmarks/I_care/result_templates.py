@@ -4100,13 +4100,17 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         so it is the same overwrite/HF entity form returned by ``_resolve_hf_entity`` and used
         downstream — for well-formed data this yields the same partition as before, while
         being robust to inconsistent ``prompted_entity`` strings.
+
+        Reuses ``embeddings.group_embeddings_by_prompt`` for the grouping core (the same
+        core used by ``compute_mean_embeddings_by_prompt``), keeping the un-normalised mean
+        this class's PCA depends on, and re-keying by the recovered entity name.
         """
-        from collections import defaultdict
-        buckets: Dict[str, List[List[float]]] = defaultdict(list)
-        for entry in raw["embeddings"]:
-            entity = entry["prompt"].removeprefix("An image of ")
-            buckets[entity].append(entry["embedding"])
-        return {ent: np.mean(np.array(vecs), axis=0) for ent, vecs in buckets.items()}
+        from vision_unlearning.benchmarks.I_care.embeddings import group_embeddings_by_prompt
+        raw_means = group_embeddings_by_prompt(raw)
+        return {
+            prompt.removeprefix("An image of "): mean_vec
+            for prompt, mean_vec in raw_means.items()
+        }
 
     @staticmethod
     def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
@@ -4830,184 +4834,6 @@ rt_name_to_params = {
     "EmbeddingUnlearningProfile": ["model", "task", "unlearning_algorithm", "entity"],
     "EmbeddingForgettingEfficiency": ["model", "task", "unlearning_algorithm"],
 }
-
-
-##########################################
-# Some old code... probably not used anymore...
-##########################################
-def display_interesting_interferences(
-    metadata_filtered: List[Dict[str, Any]],
-    interference_per_pair: Dict[str, Dict[str, float]],
-    index: int,
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
-    num_train_epochs: int,
-    metric: str,
-    is_worst_biggest: bool,
-    seed: int = 42,
-    save_path: Optional[str] = None,
-) -> None:
-    '''
-    Compared generated images for 9 identities: target, 4 worst (excluding target), 4 best
-    @param metadata_filtered: should be appropriate for this task (this is not verified inside the function)
-    @param interference_per_pair: should be appropriate for this task+index+method+num_train_epochs (this is not verified inside the function)
-    @param index: identities the target
-
-    The combination of task+index+method+num_train_epochs identifies a unique unlearned model
-    '''
-    target = metadata_filtered[index]['name']
-    all_names = list(interference_per_pair.keys())
-    metric_list = [(name, interference_per_pair[name][metric]) for name in all_names]  # list of (name, metric)
-
-    if is_worst_biggest:
-        metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1], reverse=True)  # worst first (largest)
-        metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1])  # best first (smallest)
-    else:
-        metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1])  # worst first (smallest)
-        metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1], reverse=True)  # best first (largest)
-    worst = [n for n, _ in metric_sorted_worst_first if n != target][:4]  # take 4 worst excluding target
-    best = [n for n, _ in metric_sorted_best_first if n != target and n not in worst][:4]  # take 4 best excluding target and avoiding duplicates
-    assert len(worst) == 4, f"Expected 4 worst interfered, got {len(worst)}"
-    assert len(best) == 4, f"Expected 4 best interfered, got {len(best)}"
-
-    fig, axes = plt.subplots(2, 9, figsize=(18, 4))
-    plt.subplots_adjust(wspace=0.01, hspace=0.01, top=0.88)
-
-    # load and plot
-    for row, state in enumerate(['off', 'on']):  # off = base model (row 0), on = unlearned (row 1)
-        for col, name in enumerate([target] + worst + best):
-            ax = axes[row, col]
-            ax.axis('off')
-            img_path = os.path.join(
-                get_generated_dataset_folder(task, method, num_train_epochs, get_target_overwrite(task, method, target)[0]),
-                get_generated_dataset_file(state, seed, f"An image of {get_target_overwrite(task, method, name)[0]}")  # type: ignore
-            )
-            ax.imshow(plt.imread(img_path))
-
-            if row == 0:
-                ax.set_title(get_target_overwrite(task, method, name)[0] + f'\n{interference_per_pair[name][metric]:.2f}', rotation=0, fontsize=9, pad=2, loc='center')
-
-    # vertical row labels (written upwards)
-    # compute vertical center of a row using one axis
-    def row_center(ax):
-        pos = ax.get_position()
-        return (pos.y0 + pos.y1) / 2
-
-    # compute x position for the left vertical label automatically from the leftmost axis position
-    left_pos = axes[0, 0].get_position()
-    left_x = left_pos.x0 - 0.01  # small offset to place label left of images
-    fig.text(left_x, row_center(axes[0, 0]), 'Original', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
-    fig.text(left_x, row_center(axes[1, 0]), 'Unlearned', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
-
-    # group labels: compute center positions for the three groups using axes positions
-    # groups: target (col 0), worst (cols 1-4), best (cols 5-8)
-    def col_center(fig, ax_left, ax_right):
-        pos_left = ax_left.get_position()
-        pos_right = ax_right.get_position()
-        return (pos_left.x0 + pos_right.x1) / 2
-
-    # place group labels slightly above the figure (use y>1 to match requested style)
-    fig.text(col_center(fig, axes[0, 0], axes[0, 0]), 0.98, "Target", ha="center", va="bottom", fontsize=12, weight="bold")
-    fig.text(col_center(fig, axes[0, 1], axes[0, 4]), 0.98, f"Worst interfered ({metric} {'↑' if is_worst_biggest else '↓'})", ha="center", va="bottom", fontsize=12, weight="bold")
-    fig.text(col_center(fig, axes[0, 5], axes[0, 8]), 0.98, f"Least interfered ({metric} {'↓' if is_worst_biggest else '↑'})", ha="center", va="bottom", fontsize=12, weight="bold")
-
-    # Draw 2 vertical bars separating these 3 groups
-    top_y = 1.0
-    bottom_y = axes[1, 0].get_position().y0 - 0.005
-
-    # x for boundary between Target (col 0) and Worst (col 1)
-    pos_a = axes[0, 0].get_position()
-    pos_b = axes[0, 1].get_position()
-    x_boundary_1 = (pos_a.x1 + pos_b.x0) / 2
-
-    # x for boundary between Worst (col 1-4) and Best (col 5-8)
-    pos_c = axes[0, 4].get_position()
-    pos_d = axes[0, 5].get_position()
-    x_boundary_2 = (pos_c.x1 + pos_d.x0) / 2
-
-    # draw bars
-    for x in (x_boundary_1, x_boundary_2):
-        line = Line2D([x, x], [bottom_y, top_y], transform=fig.transFigure, color='gray', linewidth=1.5, zorder=20)
-        fig.add_artist(line)
-
-    if save_path:
-        plt.savefig(save_path)
-    plt.show()
-
-
-def analyze_relationship_regression(
-    df: pd.DataFrame,
-    x: str,
-    y: str,
-    expected_positive: bool = True,
-    plot: bool = True
-) -> bool:
-    """
-    Test linear relationship between two numerical variables with significance test
-    and direction check.
-
-    Returns True only if:
-      (1) the slope is statistically significant (p < 0.05)
-      (2) the slope sign matches expectation.
-    """
-
-    xv = df[x].values
-    yv = df[y].values
-
-    res = linregress(xv, yv)
-
-    slope: float = float(res.slope)
-    pval: float = float(res.pvalue)
-
-    significant: bool = pval < 0.05
-    direction_matches: bool = (slope > 0 and expected_positive) or (slope < 0 and not expected_positive)
-
-    if plot:
-        # scatter
-        colors = plt.cm.tab20(np.arange(len(df)))  # type: ignore
-        for i, (idx, row) in enumerate(df.iterrows()):
-            plt.scatter(row[x], row[y], color=colors[i], label=idx)
-
-        # regression line
-        xx = np.linspace(xv.min(), xv.max(), 200)  # type: ignore
-        yy = slope * xx + res.intercept
-        plt.plot(xx, yy, linestyle="--")
-
-        plt.xlabel(x)
-        plt.ylabel(y)
-        plt.title(
-            f"Linear regression: slope={slope:.4f}, p={pval:.5f}"
-        )
-        plt.show()
-
-    return bool(significant and direction_matches)
-
-
-def analyze_relationship_category(df, metric: str, category: str, plot: bool = True) -> bool:
-    categories = df[category].unique()
-    metric_per_category = [df[df[category] == c][metric] for c in categories]
-    print(f'Analyzing {metric} across {category} ({categories})')
-
-    # Anova (assumes gaussian and equal variance)
-    anova_res = f_oneway(*metric_per_category)
-    anova_significant = anova_res.pvalue < 0.05
-    print(f"ANOVA F-statistic: {anova_res.statistic:.02}, p-value: {anova_res.pvalue:.05} ({'is' if anova_significant else 'is NOT'} statistically significant)")
-
-    # Kruskal-Wallis (dont assume gaussian nor equal variance)
-    # Alternative hypothesis (H₁): At least one group differs from the others.
-    kruskal_res = kruskal(*metric_per_category)
-    kruskal_significant: bool = kruskal_res.pvalue < 0.05
-    print(f"Kruskal-Wallis H-statistic: {kruskal_res.statistic:.02}, p-value: {kruskal_res.pvalue:.05} ({'is' if kruskal_significant else 'is NOT'} statistically significant)")
-
-    if plot:
-        sns.boxplot(x=category, y=metric, data=df, showfliers=False)
-        sns.stripplot(x=category, y=metric, data=df, color='black', alpha=0.5)
-        plt.axhline(0, linestyle='--', color='red')
-        plt.xticks(rotation=45, ha='right')
-        plt.title(f"Distribution of {metric.replace('_', ' ').title()} across {category.capitalize()}")
-        plt.show()
-
-    return anova_significant or kruskal_significant
 
 
 def analyze_relationship_numerical(
