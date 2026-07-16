@@ -723,23 +723,22 @@ class TestGetTargetPreprocessedCharacterization(unittest.TestCase):
     """Locks the CURRENT output of `get_target_preprocessed`, including its known bug, before
     that bug is fixed.
 
-    Cidral (2026-07-14, item F): `get_target_preprocessed` has a stale
-    ``# TODO THIS SHOULD FOLLOW THE RULES CURRENTLY CODED AT get_target_overwrite`` on its
-    people/breeds branches -- both are literal no-ops (``target_preprocessed = target``), unlike
-    `get_target_overwrite`'s corresponding preprocessing (underscore-to-space for people, an
-    article prepended for breeds). `get_target_overwrite` already has a characterization test
-    (`TestGetTargetOverwriteMethodInvariance` above); `get_target_preprocessed` had zero test
-    coverage before this class -- "keep the exact same behavior" (the user's explicit
-    instruction for this fix) is unverifiable without a locked "before" snapshot.
+    `get_target_preprocessed`'s people/breeds branches are literal no-ops
+    (``target_preprocessed = target``), unlike `get_target_overwrite`'s corresponding
+    preprocessing for the same tasks (underscore-to-space for people, an article prepended for
+    breeds) — the two functions disagree despite being intended to compute the same normalized
+    string. `get_target_overwrite` already has a characterization test
+    (`TestGetTargetOverwriteMethodInvariance` above); this class gives `get_target_preprocessed`
+    the same "before" snapshot, so a future fix to the no-op can be verified against locked
+    current behavior instead of an unverifiable "should be the same" claim.
 
-    This test intentionally documents the CURRENT (buggy) behavior. It is not yet used to gate a
-    fix: three live call sites were found to depend on today's shape (`testbed.py`'s deprecated
-    but still pipeline_02-called `calculate_similarity_clip`; `embeddings.py`'s
-    `prompted_entity` construction; `pipeline_07`'s embedding-specificity self-key lookup), and
-    `pipeline_05` has an explicit comment relying on the people branch returning underscores, not
-    spaces. Fixing the no-op without tracing all four is exactly the kind of "naming is
-    delicate" mistake the user warned about -- deferred to a dedicated pass, not bundled into
-    this cleanup task.
+    This test intentionally documents the CURRENT (buggy) behavior; it does not gate a fix. Live
+    call sites depend on today's shape (`embeddings.py`'s `prompted_entity` construction and
+    `pipeline_07`'s embedding-specificity self-key lookup — both are consistent with each other
+    since they apply the identical transform; `pipeline_05` has a comment relying on the people
+    branch returning underscores, not spaces). Fixing the no-op requires re-verifying every one of
+    those call sites for a behavior change, which is why it is deliberately deferred rather than
+    fixed here.
     """
 
     TASKS_AND_TARGETS = [

@@ -4,9 +4,6 @@ from typing import Literal, Tuple, List, Dict, Optional, Any, cast
 import json
 import re
 import os
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from pydantic import BaseModel, model_validator, PrivateAttr
 
 from vision_unlearning.utils.logger import get_logger
@@ -884,97 +881,3 @@ class GeneratedDataset(Artifact):
         )
 
 
-##########################################
-# Similarity
-##########################################
-def get_similarity_clip_path(  # deprecated, use ResultTemplateSimilarityMatrix._get_path
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    base_folder: str = 'assets',
-) -> str:
-    return os.path.join(base_folder, f"similarity_clip_{task}.json")  # TODO: this should be in the results folder
-
-
-def get_similarity_clip_df(  # deprecated, use ResultTemplateSimilarityMatrix._get_similarity_df
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    base_folder: str = 'assets',
-) -> pd.DataFrame:
-    df_similarities_clip = pd.read_json(get_similarity_clip_path(task, base_folder=base_folder), orient='records')
-    df_similarities_clip.set_index('emitter', inplace=True)
-    return df_similarities_clip
-
-
-def calculate_similarity_clip(  # deprecated, use ResultTemplateSimilarityMatrix._calculate
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    labels: List[str],
-    base_folder: str = 'assets',
-) -> pd.DataFrame:
-    # Lazy import: torchmetrics/torch only needed when this function is called.
-    from vision_unlearning.metrics.text_and_text import MetricTextTextSimilarity  # noqa: PLC0415
-    clip_text_metric = MetricTextTextSimilarity(metrics=['clip_text'])
-
-    # Load existing
-    if os.path.exists(get_similarity_clip_path(task, base_folder=base_folder)):
-        df_similarities_clip = get_similarity_clip_df(task, base_folder=base_folder)
-        assert df_similarities_clip.index.to_list() == labels
-    else:
-        df_similarities_clip = pd.DataFrame(index=labels, columns=labels)
-
-    # Calculate
-    for entity_emitter, row_emitter in df_similarities_clip.iterrows():
-        # break
-        print(f'Analying similarities for entity_emitter={entity_emitter}')
-        for entity_receiver in row_emitter.index:
-            if pd.isna(df_similarities_clip.loc[entity_emitter, entity_receiver]):  # type: ignore
-                similarity: float = clip_text_metric.score(
-                    get_target_preprocessed(task, str(entity_emitter)),
-                    get_target_preprocessed(task, str(entity_receiver)),
-                )['clip_text']
-                df_similarities_clip.loc[entity_emitter, entity_receiver] = similarity
-
-        # Save at the end of each row
-        df_similarities_clip.reset_index(names='emitter').to_json(get_similarity_clip_path(task, base_folder=base_folder), orient='records')
-
-    return df_similarities_clip
-
-
-def plot_heatmap(df, figsize=None, cmap="viridis", title="Heatmap"):  # deprecated, use ResultTemplateSimilarityMatrix._plot_heatmap
-    """
-    Plot a heatmap for a square DataFrame with all labels visible.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        A square DataFrame with same string labels for index and columns.
-    figsize : tuple
-        Figure size (width, height). Increase if labels overlap.
-    cmap : str
-        Colormap name for matplotlib.
-    """
-    if df.shape[0] != df.shape[1]:
-        raise ValueError("DataFrame must be square (same number of rows and columns).")
-    if not np.all(df.index == df.columns):
-        # logger.warning("Index and columns differ; continuing but axis labels may mismatch.")
-        raise ValueError("Index and columns must be the same")
-
-    df2 = df.dropna()
-    if figsize is None:
-        figsize = (int(0.2 * df2.shape[1]), int(0.18 * df2.shape[0]))
-
-    fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(df2.values, cmap=cmap, aspect='auto', interpolation='nearest')
-
-    # Colorbar
-    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.ax.tick_params(labelsize=6)
-
-    ax.set_xticks(np.arange(df2.shape[1]))
-    ax.set_yticks(np.arange(df2.shape[0]))
-    ax.set_xticklabels(df2.columns.to_list(), rotation=90, fontsize=5)
-    ax.set_yticklabels(df2.index.to_list(), fontsize=5)
-
-    ax.set_xlabel("Columns", fontsize=8)
-    ax.set_ylabel("Index", fontsize=8)
-    ax.set_title(title, fontsize=10)
-
-    plt.tight_layout(pad=0.5)
-    plt.show()
