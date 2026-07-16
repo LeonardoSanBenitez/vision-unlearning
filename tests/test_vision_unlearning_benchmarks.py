@@ -95,7 +95,7 @@ class TestConvertParamsFromGuiToBackend:
     def test_known_mappings(self) -> None:
         out = vb.convert_params_from_gui_to_backend(
             {
-                "unlearning_algorithm": "SPARE",
+                "unlearning_algorithm": "spare",
                 "task": "People",
                 "model": "Stable Diffusion 1.4",
                 "interference_pair": "RMSE",
@@ -490,8 +490,8 @@ class TestPlotFromFakeData:
         )
         assert isinstance(fig, Figure)
         legend_labels = [h.get_label() for h in ax.get_legend().legend_handles]
-        # Labels show publication display names (SPARE = distil, UCE = uce, Munba = munba)
-        assert set(legend_labels) == {"SPARE", "UCE", "Munba"}
+        # Labels show publication display names (spare = distil, UCE = uce, Munba = munba)
+        assert set(legend_labels) == {"spare", "UCE", "Munba"}
 
     def test_metric_similarity_alignment_multi_plot(self) -> None:
         # Build a tiny but real SHAP Explanation, serialize it the way the

@@ -40,7 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pipeline_10")
 
-# Paper method labels (distil = SPARE in published figures)
+# Paper method labels (distil = spare in published figures)
 METHOD_LABELS = {"distil": "spare", "munba": "munba", "uce": "uce"}
 ATTR_LABELS: dict = {
     "group": "Breed group",

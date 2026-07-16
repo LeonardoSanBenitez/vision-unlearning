@@ -734,7 +734,7 @@ L_REGISTRY: Dict[type_l, LSpec] = {
 _L_DISPLAY_ORDER: List[type_l] = ["clip_embedding", "dino_embedding"]
 
 ALGORITHM_REGISTRY: Dict[type_unlearning_algorithm, UnlearningAlgorithmSpec] = {
-    "distil": UnlearningAlgorithmSpec(name="distil", name_pretty="SPARE"),
+    "distil": UnlearningAlgorithmSpec(name="distil", name_pretty="spare"),
     "munba": UnlearningAlgorithmSpec(name="munba", name_pretty="Munba"),
     "uce": UnlearningAlgorithmSpec(name="uce", name_pretty="UCE"),
 }

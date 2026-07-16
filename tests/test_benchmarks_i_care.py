@@ -1170,7 +1170,7 @@ class TestInterferenceBySimilarityRankPlot:
         plt.close(fig)
 
     def test_title_uses_display_method_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Internal method name 'distil' must be shown as its display name 'SPARE'."""
+        """Internal method name 'distil' must be shown as its display name 'spare'."""
         _patch_msaone_matrices(monkeypatch)
         rt = _rt_mod.ResultTemplateInterferenceBySimilarityRank(
             unlearning_algorithm="distil", interference_pair="clip_diff",
@@ -1179,7 +1179,7 @@ class TestInterferenceBySimilarityRankPlot:
         )
         fig, ax = rt.plot(rt._compute_from_scratch(), return_fig=True)
         title = ax.get_title()
-        assert "SPARE" in title
+        assert "spare" in title
         assert "distil" not in title
         plt.close(fig)
 
@@ -1300,9 +1300,9 @@ class TestMostSimilarMostInterferedGridPlot:
         assert isinstance(fig, Figure)
         assert ax.get_xlabel() == "Task"
         assert ax.get_ylabel() == "Unlearning method"
-        # y-tick labels use display method names (uce -> UCE, distil -> SPARE)
+        # y-tick labels use display method names (uce -> UCE, distil -> spare)
         ytick_labels = [t.get_text() for t in ax.get_yticklabels()]
-        assert ytick_labels == ["UCE", "SPARE"]
+        assert ytick_labels == ["UCE", "spare"]
         # dense parameter-listing title: RT name first line, then comma-separated params (no braces,
         # no max-per-cell, no discursive explanation)
         title = ax.get_title()
