@@ -25,6 +25,9 @@ import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+# "No network" for every test in this file is now enforced suite-wide by the autouse
+# `_no_real_huggingface_by_default` fixture in `tests/conftest.py` -- no per-file fixture
+# needed here anymore.
 
 @pytest.fixture(autouse=True)
 def _close_figs() -> Any:
@@ -67,13 +70,43 @@ def _make_embedding_records(
             records.append({
                 "prompted_entity": entity,
                 "seed": seed,
-                "prompt": f"a photo of {entity}",
+                "prompt": f"An image of {entity}",
                 "embedding": vec,
             })
     return records
 
 
 def _write_baseline_file(tmp_path: Any, task: str, method: str, epochs: int) -> str:
+    """Write the canonical, method-agnostic baseline embedding file.
+
+    The baseline is produced by the original model with no unlearning, so its name carries
+    no method or epoch (embeddings_{task}_original.json) — the only name the RTs read now
+    that the per-method fallback has been removed.
+    """
+    rng = np.random.default_rng(0)
+    fname = f"embeddings_{task}_original.json"
+    path = str(tmp_path / "datasets" / fname)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = {
+        "metadata": {
+            "task": task, "forgotten_entity": "original",
+            "method": method, "num_train_epochs": epochs,
+            "lora_state": "off", "embedding_model": "dinov2_vits14", "embedding_dim": DIM,
+        },
+        "embeddings": _make_embedding_records(ENTITIES, DIM, rng, "off", FORGOTTEN_ENTITY),
+    }
+    with open(path, "w") as f:
+        json.dump(data, f)
+    return path
+
+
+def _write_baseline_file_legacy(tmp_path: Any, task: str, method: str, epochs: int) -> str:
+    """Write the OBSOLETE per-method baseline name.
+
+    Retained solely to feed the negative test that proves the per-method fallback was
+    removed: with only this file present (and no canonical file), the RT must fail to find
+    a baseline.
+    """
     rng = np.random.default_rng(0)
     fname = f"embeddings_{task}_original_{method}_{epochs:03d}.json"
     path = str(tmp_path / "datasets" / fname)
@@ -537,6 +570,85 @@ class TestEmbeddingUnlearningProfileCompute:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
 
 
+class TestBaselinePerMethodObliteration:
+    """The obsolete per-method baseline name is unrepresentable and no longer read.
+
+    Guards the deliberate, authorized backward-compatibility break: the baseline embedding
+    depends only on task/model/embedding-function, never on an unlearning method or epoch.
+    """
+
+    def test_baseline_embeddings_interface_has_no_method_or_epoch(self) -> None:
+        """B1 — interface shape: BaselineEmbeddings cannot carry a method/epoch.
+
+        This is what makes the wrong name *unrepresentable* rather than merely unused: the
+        artifact has no field through which a method or epoch could enter the baseline path.
+        """
+        from vision_unlearning.benchmarks.I_care.metadata import BaselineEmbeddings
+        fields = set(BaselineEmbeddings.model_fields)
+        for forbidden in ("unlearning_algorithm", "method", "epochs", "num_train_epochs"):
+            assert forbidden not in fields, (
+                f"BaselineEmbeddings must not expose '{forbidden}' — the baseline is "
+                f"method/epoch-agnostic."
+            )
+
+    def test_baseline_per_method_fallback_removed(self, tmp_path: Any) -> None:
+        """B2 — negative test for the break: only the obsolete per-method file present.
+
+        With the canonical embeddings_{task}_original.json absent and ONLY the old
+        embeddings_{task}_original_{method}_{epochs}.json present, the RT must raise (it no
+        longer falls back to the per-method name). Nothing else in the suite would catch a
+        quiet re-introduction of that fallback.
+        """
+        task, method, epochs = "people", "distil", 400
+        _write_baseline_file_legacy(tmp_path, task, method, epochs)  # old name only
+        _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
+        import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
+        original_epochs = rt_mod.unlearning_algorithm_to_epochs
+        rt_mod.unlearning_algorithm_to_epochs = {"people": {"distil": epochs, "uce": 0, "munba": 200}}
+        try:
+            rt = vb.ResultTemplateEmbeddingUnlearningProfile(
+                task=task, unlearning_algorithm=method, entity=FORGOTTEN_ENTITY,
+                base_folder=str(tmp_path), save_outputs=False,
+            )
+            with pytest.raises(FileNotFoundError, match="Baseline embedding file not found"):
+                rt._compute_from_scratch()
+        finally:
+            rt_mod.unlearning_algorithm_to_epochs = original_epochs
+
+
+class TestEmbeddingUnlearningProfileGrouping:
+    """The embedding mean groups records by ``prompt``, never by ``prompted_entity`` (§6)."""
+
+    def test_mean_embeddings_groups_by_prompt_not_prompted_entity(self) -> None:
+        """C — divergent-prompt: grouping must follow ``prompt``, not ``prompted_entity``.
+
+        Two records for the same entity share one prompt but carry DIFFERENT (inconsistent)
+        ``prompted_entity`` strings. Grouping by prompt yields one bucket for that entity
+        (correct); grouping by ``prompted_entity`` would split it into two — the §6 violation
+        this fix removes. Without divergence, both grouping keys agree and the test cannot
+        distinguish a correct fix from a broken one, which is why the fixture forces it.
+        """
+        raw = {
+            "embeddings": [
+                {"prompted_entity": "Alice", "seed": 0,
+                 "prompt": "An image of Alice", "embedding": [1.0, 0.0]},
+                # Same entity/prompt, deliberately inconsistent prompted_entity:
+                {"prompted_entity": "a photo of Alice", "seed": 1,
+                 "prompt": "An image of Alice", "embedding": [3.0, 0.0]},
+                {"prompted_entity": "Bob", "seed": 0,
+                 "prompt": "An image of Bob", "embedding": [0.0, 2.0]},
+            ]
+        }
+        means = _rt_mod.ResultTemplateEmbeddingUnlearningProfile._mean_embeddings(raw)
+        # Grouping by prompt → exactly two entities, keyed by the stripped canonical name.
+        assert set(means.keys()) == {"Alice", "Bob"}
+        # Alice's mean averages BOTH divergent-prompted_entity records: (1 + 3) / 2 = 2.
+        # Under the old prompted_entity grouping this would be [1.0, 0.0] and the key set
+        # would additionally contain "a photo of Alice".
+        assert means["Alice"].tolist() == [2.0, 0.0]
+        assert means["Bob"].tolist() == [0.0, 2.0]
+
+
 class TestEmbeddingUnlearningProfileClipDiffNormalization:
     """Test that clip_diff is populated when IPE names use underscores but embedding labels use spaces."""
 
@@ -558,7 +670,11 @@ class TestEmbeddingUnlearningProfileClipDiffNormalization:
         # "original" is the baseline; each entity file uses the space-delimited name directly.
         for fname_suffix in ["original", *entities_with_spaces]:
             rng2 = np.random.default_rng(hash(fname_suffix) % (2**31))
-            fname = f"embeddings_{task}_{fname_suffix}_{method}_{epochs:03d}.json"
+            if fname_suffix == "original":
+                # Baseline is method-agnostic (no method/epoch in the name).
+                fname = f"embeddings_{task}_original.json"
+            else:
+                fname = f"embeddings_{task}_{fname_suffix}_{method}_{epochs:03d}.json"
             path = str(tmp_path / "datasets" / fname)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             records = []
@@ -568,7 +684,7 @@ class TestEmbeddingUnlearningProfileClipDiffNormalization:
                     # Large shift for the forgotten entity in its own file → ratio > 1
                     if fname_suffix == forgotten_entity_space and ent_space == forgotten_entity_space:
                         vec = [v * -10 for v in rng2.standard_normal(16).tolist()]
-                    records.append({"prompted_entity": ent_space, "seed": seed, "prompt": "x", "embedding": vec})
+                    records.append({"prompted_entity": ent_space, "seed": seed, "prompt": f"An image of {ent_space}", "embedding": vec})
             with open(path, "w") as f:
                 json.dump({"metadata": {"embedding_model": "dinov2_vits14"}, "embeddings": records}, f)
 
@@ -780,11 +896,12 @@ class TestEmbeddingForgettingEfficiencyCompute:
     def test_missing_ipe_raises(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """No IPE file at all → InterferencePerEntity.compute() raises (no local, no HF)."""
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
-        import vision_unlearning.benchmarks.I_care.metadata as meta_mod
+        import vision_unlearning.artifact as artifact_mod
         monkeypatch.setattr(rt_mod, "unlearning_algorithm_to_epochs",
                             {"people": {"distil": 400, "uce": 0, "munba": 200}})
-        # Patch HF check to return False so it falls through to compute_from_scratch
-        monkeypatch.setattr(meta_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False)
+        # Patch the cascade's HF existence check to False so InterferencePerEntity.compute()
+        # falls through to _compute_from_scratch (which raises).
+        monkeypatch.setattr(artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False)
         rt = vb.ResultTemplateEmbeddingForgettingEfficiency(
             task="people",
             unlearning_algorithm="distil",

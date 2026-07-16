@@ -574,7 +574,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
             ds._compute_from_scratch(seeds, prompts)
 
             mock_model_folder.assert_called_once_with(
-                'people', 'distil', 400, 'Colin Powell', 'assets'
+                'people', 'distil', 400, 'Colin Powell', 'assets', 'sd1.4'
             )
             mock_gen.assert_called_once_with(
                 model_base_name='CompVis/stable-diffusion-v1-4',
@@ -717,6 +717,64 @@ class TestGetTargetOverwriteMethodInvariance(unittest.TestCase):
                         f"a mismatch here means off-image filenames would be wrong."
                     ),
                 )
+
+
+class TestGetTargetPreprocessedCharacterization(unittest.TestCase):
+    """Locks the CURRENT output of `get_target_preprocessed`, including its known bug, before
+    that bug is fixed.
+
+    `get_target_preprocessed`'s people/breeds branches are literal no-ops
+    (``target_preprocessed = target``), unlike `get_target_overwrite`'s corresponding
+    preprocessing for the same tasks (underscore-to-space for people, an article prepended for
+    breeds) — the two functions disagree despite being intended to compute the same normalized
+    string. `get_target_overwrite` already has a characterization test
+    (`TestGetTargetOverwriteMethodInvariance` above); this class gives `get_target_preprocessed`
+    the same "before" snapshot, so a future fix to the no-op can be verified against locked
+    current behavior instead of an unverifiable "should be the same" claim.
+
+    This test intentionally documents the CURRENT (buggy) behavior; it does not gate a fix. Live
+    call sites depend on today's shape (`embeddings.py`'s `prompted_entity` construction and
+    `pipeline_07`'s embedding-specificity self-key lookup — both are consistent with each other
+    since they apply the identical transform; `pipeline_05` has a comment relying on the people
+    branch returning underscores, not spaces). Fixing the no-op requires re-verifying every one of
+    those call sites for a behavior change, which is why it is deliberately deferred rather than
+    fixed here.
+    """
+
+    TASKS_AND_TARGETS = [
+        ('people', 'Colin_Powell'),
+        ('people', 'Brad_Pitt'),
+        ('breeds', 'poodle'),
+        ('breeds', 'Afghan hound'),
+        ('scenes', 'abbey'),
+        ('scenes', 'airport terminal'),
+    ]
+
+    def test_current_output_snapshot(self) -> None:
+        from vision_unlearning.datasets.testbed import get_target_preprocessed
+        expected = {
+            ('people', 'Colin_Powell'): 'Colin_Powell',  # BUG: no-op, underscores not converted
+            ('people', 'Brad_Pitt'): 'Brad_Pitt',  # BUG: no-op, underscores not converted
+            ('breeds', 'poodle'): 'poodle',  # BUG: no-op, no article prepended
+            ('breeds', 'Afghan hound'): 'Afghan hound',  # BUG: no-op, no article prepended
+            ('scenes', 'abbey'): 'an abbey scene',  # correct: article + " scene" suffix
+            ('scenes', 'airport terminal'): 'an airport terminal scene',  # correct
+        }
+        for task, target in self.TASKS_AND_TARGETS:
+            actual = get_target_preprocessed(task, target)  # type: ignore[arg-type]
+            self.assertEqual(
+                actual, expected[(task, target)],
+                msg=f"get_target_preprocessed({task!r}, {target!r}) changed from the locked snapshot",
+            )
+
+    def test_people_and_breeds_are_currently_no_ops(self) -> None:
+        """Documents the bug explicitly: for people/breeds, output == input, unlike scenes."""
+        from vision_unlearning.datasets.testbed import get_target_preprocessed
+        for task, target in [('people', 'Colin_Powell'), ('breeds', 'poodle')]:
+            self.assertEqual(get_target_preprocessed(task, target), target)  # type: ignore[arg-type]
+        # scenes is NOT a no-op today -- contrast case, so this class can't be satisfied by a
+        # trivial "always return input" stub.
+        self.assertNotEqual(get_target_preprocessed('scenes', 'abbey'), 'abbey')  # type: ignore[arg-type]
 
 
 class TestGeneratedDatasetComputeBatchSize(unittest.TestCase):

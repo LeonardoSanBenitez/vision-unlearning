@@ -19,7 +19,7 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.stats import f_oneway, kruskal, linregress, pearsonr, spearmanr
-from typing import List, Dict, Any, Literal
+from typing import List, Dict, Any, Literal, cast
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -57,6 +57,7 @@ from vision_unlearning.datasets.testbed import (
     get_off_image_path,
 )
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.artifact import SingleFileArtifact
 from vision_unlearning.benchmarks.I_care.configuration import (
     type_model,
     type_task,
@@ -76,6 +77,8 @@ from vision_unlearning.benchmarks.I_care.configuration import (
 from vision_unlearning.benchmarks.I_care.metadata import (
     choose_metric_column_interference_per_entity,
     InterferencePerEntity,
+    BaselineEmbeddings,
+    EntityEmbeddings,
     get_interference_per_pair,
     get_interference_per_pair_path,
     get_interference_per_entity_path,
@@ -92,6 +95,7 @@ from vision_unlearning.benchmarks.I_care.utils import (
     InvalidAttributeTypeError,
     InsufficientSamplesError,
 )
+from vision_unlearning.benchmarks.I_care.similarity import Similarity
 
 logger = get_logger('I_care')
 
@@ -115,21 +119,16 @@ def _short_entity_display(raw_name: str, max_chars: int = 24) -> str:
 
 # Backend (software) unlearning-algorithm name -> display name used in plots. The mapping is the
 # inverse of GUI_TO_BACKEND['unlearning_algorithm'] (the same software<->display mapping forgety uses,
-# e.g. distil -> SPARE). All plots must show the display name, never the internal software name.
+# e.g. distil -> spare). All plots must show the display name, never the internal software name.
 _UNLEARNING_ALGORITHM_DISPLAY = {v: k for k, v in GUI_TO_BACKEND['unlearning_algorithm'].items()}
 
 
 def _display_unlearning_algorithm(method: str) -> str:
-    """Map an internal unlearning-algorithm name (e.g. 'distil') to its plot display name (e.g. 'SPARE')."""
+    """Map an internal unlearning-algorithm name (e.g. 'distil') to its plot display name (e.g. 'spare')."""
     return _UNLEARNING_ALGORITHM_DISPLAY.get(method, method)
 
 
-class ResultTemplate(BaseModel):
-    recompute_if_exists: bool = False
-    save_outputs: bool = True
-    upload_if_recomputed: bool = False
-    base_folder: str = 'assets'
-    remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
+class ResultTemplate(SingleFileArtifact):
 
     
     def _serialize_parameters(self) -> str:
@@ -142,9 +141,6 @@ class ResultTemplate(BaseModel):
         # _compute_from_scratch).
         return f"results/{self.__class__.__name__.replace('ResultTemplate', '')}/{self._serialize_parameters()}.json"
 
-    def _get_data_path_local(self) -> str:
-        return os.path.join(self.base_folder, self._get_data_path_remote())
-
     @classmethod
     def _fig_to_bytes(cls, fig: Figure) -> bytes:
         buffer = io.BytesIO()
@@ -156,74 +152,19 @@ class ResultTemplate(BaseModel):
     def _compute_from_scratch(self) -> dict | list:
         raise NotImplementedError()
 
-    def _hf_file_exists(self, hf_token: Optional[str]) -> bool:
-        """Check whether the result exists on HuggingFace, catching all network/auth errors.
-
-        Returns False on any exception so that a bad token or transient network error
-        causes compute() to fall through to _compute_from_scratch() rather than failing.
-        """
-        try:
-            return huggingface_dataset_file_exists(
-                self.remote_repository_name,
-                self._get_data_path_remote(),
-                token=hf_token,
-            )
-        except Exception as exc:
-            logger.debug("HF existence check failed for %s (falling through to local compute): %s",
-                         self._get_data_path_remote(), exc)
-            return False
-
-    def compute(self) -> dict:
-        hf_token: Optional[str] = get_hf_token_from_env()
-        data: Any
-        if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        elif not self.recompute_if_exists and self._hf_file_exists(hf_token):  # Remote
-            huggingface_dataset_file_download(
-                folder_datasets=self.base_folder,
-                dataset_repository=self.remote_repository_name,
-                file_path=self._get_data_path_remote(),
-                # None (not "") when unset: an empty string becomes an illegal
-                # 'Authorization: Bearer ' header and breaks unauthenticated
-                # downloads from public repositories.
-                token=hf_token,
-            )
-            assert os.path.exists(self._get_data_path_local())
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        else:  # Compute from scratch
-            data = self._compute_from_scratch()
-            if self.save_outputs:
-                os.makedirs(os.path.dirname(self._get_data_path_local()), exist_ok=True)
-                with open(self._get_data_path_local(), "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-            # Upload to HF if requested
-            if self.upload_if_recomputed:
-                assert self.save_outputs, (
-                    "upload_if_recomputed=True requires save_outputs=True "
-                    "(no file to upload when save_outputs=False)."
-                )
-                assert hf_token, (
-                    "upload_if_recomputed=True but HF_TOKEN is not set. "
-                    "Set HF_TOKEN environment variable before calling compute()."
-                )
-                logger.info(
-                    "Uploading recomputed RT result to HF: %s",
-                    self._get_data_path_remote(),
-                )
-                huggingface_dataset_file_upload(
-                    file_path=self._get_data_path_local(),
-                    dataset_repository=self.remote_repository_name,
-                    dataset_path=self._get_data_path_remote(),
-                    token=hf_token,
-                )
-                logger.info("Upload complete: %s", self._get_data_path_remote())
-
+    def _validate(self, data: Any) -> None:
         assert type(data) == dict, f"Expected a dict in the json file, but got {type(data)}"
         assert 'result' in data, f"Expected 'result' key in the json file, but got {list(data.keys())}"
         assert type(data['result']) in [dict, list], f"Expected 'result' to be a dict or list, but got {type(data['result'])}"
-        return data
+
+    def compute(self) -> dict:
+        """Resolve this result from local disk, HuggingFace, or by computing it from scratch.
+
+        The storage cascade (local -> remote -> from-scratch, with optional persist and
+        upload) lives in :class:`~vision_unlearning.artifact.SingleFileArtifact`; this method
+        only pins the return type.
+        """
+        return cast(dict, self._resolve())
 
 
 class ResultTemplateMetricMetricAlignment(ResultTemplate):
@@ -1548,6 +1489,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                         seed=seed,
                         prompt=entity_prompt,
                         base_folder=self.base_folder,
+                        model=self.model,
                     )
                     img = Image.open(img_path).convert('RGB')
                     clip_scores.append(metric_clip_img.score(img, entity_prompt)['clip'])
@@ -2154,7 +2096,7 @@ class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate
         num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
         for name in source_names:
             idx = entity_to_index[name]
-            path = get_interference_per_pair_path(self.task, idx, self.unlearning_algorithm, num_train_epochs, self.base_folder)
+            path = get_interference_per_pair_path(self.task, idx, self.unlearning_algorithm, num_train_epochs, self.base_folder, self.model)
             if not os.path.exists(path):
                 raise FileNotFoundError(
                     f"Per-pair interference file missing for source entity '{name}' "
@@ -2168,7 +2110,7 @@ class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate
         phi_v_accum: Dict[str, List[float]] = {name: [] for name in labels}
         for source_name in source_names:
             source_idx = entity_to_index[source_name]
-            interference_per_pair = get_interference_per_pair(self.task, source_idx, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder)
+            interference_per_pair = get_interference_per_pair(self.task, source_idx, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder, model=self.model)
             for receiver_name in labels:
                 if self.exclude_diagonal and receiver_name == source_name:
                     continue
@@ -2491,31 +2433,28 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
     # ------------------------------------------------------------------
 
     def _get_baseline_embedding_path(self) -> str:
-        """Path to the original-model baseline DINOv2 embedding file.
+        """Local path to the original-model baseline embedding file (method-agnostic).
 
-        Prefers the canonical method-agnostic file (embeddings_{task}_original.json);
-        falls back to the per-method file for backward compatibility.
+        Addressed through :class:`BaselineEmbeddings`, whose interface has no method/epoch
+        parameter, so the obsolete per-method baseline name cannot be produced here.
         """
-        canonical = os.path.join(
-            self.base_folder, "datasets", f"embeddings_{self.task}_original.json"
-        )
-        if os.path.exists(canonical):
-            return canonical
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        fname = (
-            f"embeddings_{self.task}_original"
-            f"_{self.unlearning_algorithm}_{epochs:03d}.json"
-        )
-        return os.path.join(self.base_folder, "datasets", fname)
+        return BaselineEmbeddings(
+            task=self.task,
+            model=self.model,
+            embedding_function=self.latent_embedding,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     def _get_entity_embedding_path(self, hf_entity_name: str) -> str:
-        """Path to the per-entity unlearned DINOv2 embedding file."""
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        fname = (
-            f"embeddings_{self.task}_{hf_entity_name}"
-            f"_{self.unlearning_algorithm}_{epochs:03d}.json"
-        )
-        return os.path.join(self.base_folder, "datasets", fname)
+        """Local path to the per-entity unlearned embedding file."""
+        return EntityEmbeddings(
+            task=self.task,
+            hf_entity=hf_entity_name,
+            unlearning_algorithm=self.unlearning_algorithm,
+            model=self.model,
+            embedding_function=self.latent_embedding,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     # ------------------------------------------------------------------
     # Static helpers
@@ -3911,65 +3850,15 @@ class ResultTemplateInterferenceMatrix(ResultTemplateMatrix):
         }
         return data
 
-# TODO puit this somewher else
-def jacc_metric_score(entity_1: str, entity_2: str, metadata_filtered: List[Dict[str, Any]], entity_col: str = 'name') -> float:
-    """
-    Jaccard similarity between two entities, based on their attributes.
-    Each attribute (column) contributes between 0 and 1 to the similarity
-    We do not know the types and ranges of the attributes beforehand.
-    For each attribute, both values for the two entities must be non-NaN and of the same type, otherwise we ignore that attribute (contribution 0).
-    The calculation for each attribute is as follows:
-    * If the attribute is categorical (str or bool), the contribution is 1 if the two entities have the same value for that attribute, and 0 otherwise.
-    * If the attribute is numerical, and both values are between 0 and 1, the contribution is 1 - abs(value_1 - value_2)
-    * If the attribute is numerical, and both values are between 1 and 100, the contribution is 1 - abs(value_1 - value_2) / 100
-    * else, the contribution is 0 (we do not know how to handle it, so we ignore it)
-    """
-    # Get the rows corresponding to the two entities
-    row_1 = next((row for row in metadata_filtered if row[entity_col] == entity_1), None)
-    row_2 = next((row for row in metadata_filtered if row[entity_col] == entity_2), None)
-    if row_1 is None or row_2 is None:
-        raise ValueError(f"Entities {entity_1} and/or {entity_2} not found in metadata")
-    if set(row_1.keys()) != set(row_2.keys()):
-        raise ValueError(f"Entities {entity_1} and {entity_2} must have the same attributes")
-    
-    # Calculate similarity for each attribute
-    similarity = 0.0
-    valid_attributes = 0
-    for attr in row_1.keys():
-        value_1 = row_1[attr]
-        value_2 = row_2[attr]
-
-        if pd.isna(value_1) or pd.isna(value_2) or type(value_1) != type(value_2):
-            continue  # ignore this attribute
-
-        if isinstance(value_1, (str, bool)):
-            similarity += 1.0 if value_1 == value_2 else 0.0
-            valid_attributes += 1
-        elif isinstance(value_1, (int, float)):
-            if 0 <= value_1 <= 1 and 0 <= value_2 <= 1:
-                similarity += 1 - abs(value_1 - value_2)
-                valid_attributes += 1
-            elif 1 < value_1 <= 100 and 1 < value_2 <= 100:
-                similarity += 1 - abs(value_1 - value_2) / 100
-                valid_attributes += 1
-            else:
-                continue  # ignore this attribute
-        else:
-            continue  # ignore this attribute
-    similarity = similarity / valid_attributes if valid_attributes > 0 else 0.0
-
-    # Post checks
-    assert valid_attributes > 0, f"Expected at least one valid attribute for entities {entity_1} and {entity_2}, got {valid_attributes}."
-    assert type(similarity) == float
-    assert 0 <= similarity <= 1
-    return similarity
-
 class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
     """
     *Similarities* between each possible combination of two *entities* within a *task*.
     * **Arguments**: $m, t, s$
     * **Result**: $|t| \times |t|$ real-valued tensor
     * **Interpretation**: qualitative; visual patterns may be spotted, similarly to *InterferenceMatrix*.
+
+    Thin reader over the :class:`Similarity` artifact (which owns the heavy per-metric
+    computation and caching); this class only adds the display metadata that ``plot`` needs.
     """
     model: type_model = 'sd1.4'
     task: type_task = 'scenes'
@@ -3979,9 +3868,6 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
 
     def _serialize_parameters(self) -> str:
         return f"{self.model}_{self.task}_{self.similarity_metric}"
-
-    def _get_partial_path_local(self):
-        return self._get_data_path_local() + '.partial'
 
     @classmethod
     def plot_make_title(cls, data: dict) -> str:
@@ -3993,150 +3879,16 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
 
 
     def _compute_from_scratch(self) -> dict:
-        metadata_filtered: List[Dict[str, Any]] = get_metadata_filtered(self.task)
-        labels: List[str] = [e['name'] for e in metadata_filtered]
-
-        if self.similarity_metric == 'clip':
-            raise NotImplementedError(
-                "CLIP similarity matrix not found locally or in HuggingFace Hub. "
-                "Recomputing from scratch requires a GPU with CLIP/SD 1.4 and is not "
-                "supported by this RT.  Either upload the precomputed matrix to HF or "
-                "run pipeline_02 with --similarity clip on a GPU machine."
-            )
-
-        elif self.similarity_metric == 'jacc':
-            # The partial file lives in the same directory as the final output.
-            # compute() creates that directory only after _compute_from_scratch() returns,
-            # so we must create it here before writing the first partial checkpoint.
-            os.makedirs(os.path.dirname(self._get_partial_path_local()), exist_ok=True)
-
-            # Load partial
-            # 100x100 matrix
-            if os.path.exists(self._get_partial_path_local()) and not self.recompute_if_exists:
-                df_similarities = pd.read_json(self._get_partial_path_local(), orient='records')
-                df_similarities.set_index('emitter', inplace=True)
-                assert df_similarities.index.to_list() == labels
-            else:
-                df_similarities = pd.DataFrame(index=labels, columns=labels)
-
-            # Calculate
-            for entity_emitter, row_emitter in df_similarities.iterrows():
-                print(f'Analying similarities for entity_emitter={entity_emitter}')
-                for entity_receiver in row_emitter.index:
-                    if pd.isna(df_similarities.loc[entity_emitter, entity_receiver]):  # type: ignore
-                        similarity: float = jacc_metric_score(str(entity_emitter), str(entity_receiver), metadata_filtered)
-                        df_similarities.loc[entity_emitter, entity_receiver] = similarity
-
-                # Save partial at the end of each row
-                df_similarities.reset_index(names='emitter').to_json(self._get_partial_path_local(), orient='records')
-
-        elif self.similarity_metric == 'dino':
-            from collections import defaultdict
-            distil_epochs = unlearning_algorithm_to_epochs[self.task]['distil']
-            embedding_path = os.path.join(
-                self.base_folder, 'datasets',
-                f'embeddings_{self.task}_original_distil_{distil_epochs:03d}.json'
-            )
-            assert os.path.exists(embedding_path), (
-                f"Baseline DINOv2 embeddings not found at {embedding_path}. "
-                f"Run 3_compute_embeddings.py --task {self.task} --method distil "
-                f"--max-identities 100 first."
-            )
-            with open(embedding_path, encoding='utf-8') as f:
-                raw = json.load(f)
-
-            # Build forward mapping: metadata_name -> expected prompt string.
-            # The embedding file's 'prompt' field is "An image of {get_target_overwrite(...)[0]}"
-            # and is consistent across tasks.  We key by prompt rather than 'prompted_entity'
-            # because 'prompted_entity' has inconsistent formatting across tasks (spaces vs
-            # underscores, article artifacts for scenes), whereas 'prompt' is clean.
-            # NOTE: get_target_overwrite's `method` parameter is not used in the transform,
-            # so any method value produces the same result.
-            ent_list = [e['name'] for e in metadata_filtered]
-            meta_to_prompt: Dict[str, str] = {
-                name: f"An image of {get_target_overwrite(self.task, 'distil', name)[0]}"
-                for name in ent_list
-            }
-
-            # Group embeddings by prompt, compute mean unit-vector per entity
-            buckets: Dict[str, List[List[float]]] = defaultdict(list)
-            for entry in raw['embeddings']:
-                buckets[entry['prompt']].append(entry['embedding'])
-
-            entity_embeddings: Dict[str, np.ndarray] = {}
-            for meta_name in ent_list:
-                expected_prompt = meta_to_prompt[meta_name]
-                if expected_prompt not in buckets:
-                    raise ValueError(
-                        f"No embeddings found for '{meta_name}' "
-                        f"(expected prompt: '{expected_prompt}'). "
-                        f"First 3 available prompts: {list(buckets.keys())[:3]}"
-                    )
-                vecs = buckets[expected_prompt]
-                arr = np.array(vecs)
-                mean_vec = arr.mean(axis=0)
-                entity_embeddings[meta_name] = mean_vec / np.linalg.norm(mean_vec)
-
-            # Build N×N cosine similarity matrix (dot product of unit vectors)
-            mat = np.array([entity_embeddings[e] for e in ent_list])
-            sim_matrix = mat @ mat.T
-            df_similarities = pd.DataFrame(sim_matrix, index=ent_list, columns=ent_list)
-
-        elif self.similarity_metric == 'act':
-            from vision_unlearning.utils.mechanistic_interpretability import (
-                load_act_fingerprints,
-                compute_cosine_similarity_matrix,
-            )
-            fingerprints = load_act_fingerprints(
-                task=self.task,
-                model=self.model,
-                base_folder=self.base_folder,
-            )
-            df_similarities = compute_cosine_similarity_matrix(fingerprints, labels)
-
-        elif self.similarity_metric == 'weight_overlap':
-            # Cosine similarity of trained LoRA weight-change vectors (B@A, flattened across all
-            # cross-attention modules).  Only available for scenes/distil — the checkpoint is
-            # produced by analyze_weight_overlap_full.py.
-            # Checkpoint format: {"cosine_matrix": {entity_i: {entity_j: float}}, "norms": {...}}
-            _ckpt_candidates = [
-                os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)),
-                    '..', '..', '..', 'assets', 'results',
-                    f'weight_overlap_{self.task}100_checkpoint.json',
-                ),
-                os.path.join(self.base_folder, 'results',
-                             f'weight_overlap_{self.task}100_checkpoint.json'),
-            ]
-            _ckpt_path = next((p for p in _ckpt_candidates if os.path.exists(p)), None)
-            if _ckpt_path is None:
-                raise FileNotFoundError(
-                    f"weight_overlap checkpoint not found for task='{self.task}'. "
-                    f"Run analyze_weight_overlap_full.py to generate it. "
-                    f"Checked: {_ckpt_candidates}"
-                )
-            with open(_ckpt_path, encoding='utf-8') as _f:
-                _ckpt = json.load(_f)
-            _cos_matrix: Dict[str, Dict[str, float]] = _ckpt['cosine_matrix']
-            # Verify all metadata entities are present in the checkpoint
-            _missing = [e for e in labels if e not in _cos_matrix]
-            if _missing:
-                raise ValueError(
-                    f"weight_overlap checkpoint is missing {len(_missing)} entities: {_missing[:5]}"
-                )
-            df_similarities = pd.DataFrame(
-                {
-                    ei: {
-                        ej: (1.0 if ei == ej else _cos_matrix[ei][ej])
-                        for ej in labels
-                    }
-                    for ei in labels
-                },
-                index=labels,
-            ).T  # rows = emitters, columns = receivers
-
-        # Return to be saved in its final form
-        data = {
+        similarity_matrix = Similarity(
+            model=self.model,
+            task=self.task,
+            similarity_metric=self.similarity_metric,
+            base_folder=self.base_folder,
+            remote_repository_name=self.remote_repository_name,
+            recompute_if_exists=self.recompute_if_exists,
+            save_outputs=self.save_outputs,
+        ).compute()
+        return {
             'metadata': {
                 'RT': self.__class__.__name__,
                 'model': self.model,
@@ -4144,11 +3896,9 @@ class ResultTemplateSimilarityMatrix(ResultTemplateMatrix):
                 self.metric_key_name: self.similarity_metric,
                 '_metric_key_name': self.metric_key_name,
             },
-            'result': df_similarities.reset_index(names='emitter').to_dict(orient='records'),
+            'result': similarity_matrix,
         }
-        return data
 
- 
 
 class ResultTemplateMethodComparisonByMetricEntity(ResultTemplate):
     """
@@ -4195,7 +3945,7 @@ class ResultTemplateMethodComparisonByMetricEntity(ResultTemplate):
 
     def _compute_from_scratch(self) -> dict:
         interference_per_entity: List[Dict] = InterferencePerEntity(
-            task=self.task, base_folder=self.base_folder
+            task=self.task, base_folder=self.base_folder, model=self.model
         ).compute()
         df = pd.DataFrame(interference_per_entity)
         metric_cols = [c for c in df.columns if c.startswith('metric_')]
@@ -4320,32 +4070,47 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     # ------------------------------------------------------------------
 
     def _get_baseline_embedding_path(self) -> str:
-        # Prefer the canonical (method-agnostic) baseline file; fall back to the
-        # per-method file for backward compatibility (older datasets that shipped
-        # embeddings_{task}_original_{method}_{epochs:03d}.json instead).
-        canonical = os.path.join(
-            self.base_folder, "datasets", f"embeddings_{self.task}_original.json"
-        )
-        if os.path.exists(canonical):
-            return canonical
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        fname = f"embeddings_{self.task}_original_{self.unlearning_algorithm}_{epochs:03d}.json"
-        return os.path.join(self.base_folder, "datasets", fname)
+        """Local path to the original-model baseline embedding file (method-agnostic).
+
+        Addressed through :class:`BaselineEmbeddings`, whose interface has no method/epoch
+        parameter, so the obsolete per-method baseline name cannot be produced here.
+        """
+        return BaselineEmbeddings(
+            task=self.task,
+            model=self.model,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     def _get_entity_embedding_path(self) -> str:
-        epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
-        hf_entity = self._resolve_hf_entity()
-        fname = f"embeddings_{self.task}_{hf_entity}_{self.unlearning_algorithm}_{epochs:03d}.json"
-        return os.path.join(self.base_folder, "datasets", fname)
+        return EntityEmbeddings(
+            task=self.task,
+            hf_entity=self._resolve_hf_entity(),
+            unlearning_algorithm=self.unlearning_algorithm,
+            model=self.model,
+            base_folder=self.base_folder,
+        )._get_data_path_local()
 
     @staticmethod
     def _mean_embeddings(raw: dict) -> "Dict[str, np.ndarray]":
-        """Group embedding records by prompted_entity and compute mean per entity."""
-        from collections import defaultdict
-        buckets: Dict[str, List[List[float]]] = defaultdict(list)
-        for entry in raw["embeddings"]:
-            buckets[entry["prompted_entity"]].append(entry["embedding"])
-        return {ent: np.mean(np.array(vecs), axis=0) for ent, vecs in buckets.items()}
+        """Mean embedding per entity, grouping records by their ``prompt`` field.
+
+        Per CONTRIBUTING_ICARE §6, records are grouped by the clean ``prompt`` field and
+        never by ``prompted_entity`` (whose formatting is inconsistent across tasks). The
+        entity key is recovered from the canonical prompt template ``"An image of {entity}"``,
+        so it is the same overwrite/HF entity form returned by ``_resolve_hf_entity`` and used
+        downstream — for well-formed data this yields the same partition as before, while
+        being robust to inconsistent ``prompted_entity`` strings.
+
+        Reuses ``embeddings.group_embeddings_by_prompt`` for the grouping core (the same
+        core used by ``compute_mean_embeddings_by_prompt``), keeping the un-normalised mean
+        this class's PCA depends on, and re-keying by the recovered entity name.
+        """
+        from vision_unlearning.benchmarks.I_care.embeddings import group_embeddings_by_prompt
+        raw_means = group_embeddings_by_prompt(raw)
+        return {
+            prompt.removeprefix("An image of "): mean_vec
+            for prompt, mean_vec in raw_means.items()
+        }
 
     @staticmethod
     def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
@@ -4609,7 +4374,7 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         # Me clip_diffs are kept as fallback colouring (used by plot() if Mp unavailable).
         # embedding_specificity_ratio is read from IPE only — no inline fallback.
         # If IPE is absent or missing this entity's ratio, ratio_source = "not_available".
-        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder)
+        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder, model=self.model)
         clip_diff_by_entity: Dict[str, float] = {}
         embedding_specificity_ratio: float = float("nan")
         ratio_source: str = "not_available"
@@ -4665,7 +4430,14 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         entity_slug = self.entity.replace(" ", "_")
         try:
             meta = get_metadata_filtered(self.task, base_folder=self.base_folder)
-        except FileNotFoundError:
+        except (FileNotFoundError, NotImplementedError):
+            # FileNotFoundError: legacy direct-file-read path (should no longer occur).
+            # NotImplementedError: MetadataFiltered._compute_from_scratch's actual raise when
+            # the file is absent both locally and on HuggingFace (artifact.py cascade) -- this
+            # is the exception this call site was actually meant to catch; the mp_clip_diffs
+            # Mp-coloring feature below is optional (falls back to the Me aggregate, see the
+            # comment above), so a missing/unreachable metadata file must degrade gracefully
+            # here, not crash the whole RT.
             meta = []
         entity_idx_in_meta: Optional[int] = next(
             (i for i, m in enumerate(meta) if m["name"].replace(" ", "_") == entity_slug),
@@ -4898,7 +4670,7 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
         # Load interference_per_entity (required — contains pre-computed
         # embedding_specificity_ratio for each entity).
         ipe_data: List[Dict] = InterferencePerEntity(
-            task=self.task, base_folder=self.base_folder
+            task=self.task, base_folder=self.base_folder, model=self.model
         ).compute()
         df = pd.DataFrame(ipe_data)
         metric_cols = [c for c in df.columns if c.startswith('metric_')]
@@ -5069,184 +4841,6 @@ rt_name_to_params = {
     "EmbeddingUnlearningProfile": ["model", "task", "unlearning_algorithm", "entity"],
     "EmbeddingForgettingEfficiency": ["model", "task", "unlearning_algorithm"],
 }
-
-
-##########################################
-# Some old code... probably not used anymore...
-##########################################
-def display_interesting_interferences(
-    metadata_filtered: List[Dict[str, Any]],
-    interference_per_pair: Dict[str, Dict[str, float]],
-    index: int,
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
-    num_train_epochs: int,
-    metric: str,
-    is_worst_biggest: bool,
-    seed: int = 42,
-    save_path: Optional[str] = None,
-) -> None:
-    '''
-    Compared generated images for 9 identities: target, 4 worst (excluding target), 4 best
-    @param metadata_filtered: should be appropriate for this task (this is not verified inside the function)
-    @param interference_per_pair: should be appropriate for this task+index+method+num_train_epochs (this is not verified inside the function)
-    @param index: identities the target
-
-    The combination of task+index+method+num_train_epochs identifies a unique unlearned model
-    '''
-    target = metadata_filtered[index]['name']
-    all_names = list(interference_per_pair.keys())
-    metric_list = [(name, interference_per_pair[name][metric]) for name in all_names]  # list of (name, metric)
-
-    if is_worst_biggest:
-        metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1], reverse=True)  # worst first (largest)
-        metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1])  # best first (smallest)
-    else:
-        metric_sorted_worst_first = sorted(metric_list, key=lambda x: x[1])  # worst first (smallest)
-        metric_sorted_best_first = sorted(metric_list, key=lambda x: x[1], reverse=True)  # best first (largest)
-    worst = [n for n, _ in metric_sorted_worst_first if n != target][:4]  # take 4 worst excluding target
-    best = [n for n, _ in metric_sorted_best_first if n != target and n not in worst][:4]  # take 4 best excluding target and avoiding duplicates
-    assert len(worst) == 4, f"Expected 4 worst interfered, got {len(worst)}"
-    assert len(best) == 4, f"Expected 4 best interfered, got {len(best)}"
-
-    fig, axes = plt.subplots(2, 9, figsize=(18, 4))
-    plt.subplots_adjust(wspace=0.01, hspace=0.01, top=0.88)
-
-    # load and plot
-    for row, state in enumerate(['off', 'on']):  # off = base model (row 0), on = unlearned (row 1)
-        for col, name in enumerate([target] + worst + best):
-            ax = axes[row, col]
-            ax.axis('off')
-            img_path = os.path.join(
-                get_generated_dataset_folder(task, method, num_train_epochs, get_target_overwrite(task, method, target)[0]),
-                get_generated_dataset_file(state, seed, f"An image of {get_target_overwrite(task, method, name)[0]}")  # type: ignore
-            )
-            ax.imshow(plt.imread(img_path))
-
-            if row == 0:
-                ax.set_title(get_target_overwrite(task, method, name)[0] + f'\n{interference_per_pair[name][metric]:.2f}', rotation=0, fontsize=9, pad=2, loc='center')
-
-    # vertical row labels (written upwards)
-    # compute vertical center of a row using one axis
-    def row_center(ax):
-        pos = ax.get_position()
-        return (pos.y0 + pos.y1) / 2
-
-    # compute x position for the left vertical label automatically from the leftmost axis position
-    left_pos = axes[0, 0].get_position()
-    left_x = left_pos.x0 - 0.01  # small offset to place label left of images
-    fig.text(left_x, row_center(axes[0, 0]), 'Original', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
-    fig.text(left_x, row_center(axes[1, 0]), 'Unlearned', rotation=90, va='center', ha='center', fontsize=12, weight="bold")
-
-    # group labels: compute center positions for the three groups using axes positions
-    # groups: target (col 0), worst (cols 1-4), best (cols 5-8)
-    def col_center(fig, ax_left, ax_right):
-        pos_left = ax_left.get_position()
-        pos_right = ax_right.get_position()
-        return (pos_left.x0 + pos_right.x1) / 2
-
-    # place group labels slightly above the figure (use y>1 to match requested style)
-    fig.text(col_center(fig, axes[0, 0], axes[0, 0]), 0.98, "Target", ha="center", va="bottom", fontsize=12, weight="bold")
-    fig.text(col_center(fig, axes[0, 1], axes[0, 4]), 0.98, f"Worst interfered ({metric} {'↑' if is_worst_biggest else '↓'})", ha="center", va="bottom", fontsize=12, weight="bold")
-    fig.text(col_center(fig, axes[0, 5], axes[0, 8]), 0.98, f"Least interfered ({metric} {'↓' if is_worst_biggest else '↑'})", ha="center", va="bottom", fontsize=12, weight="bold")
-
-    # Draw 2 vertical bars separating these 3 groups
-    top_y = 1.0
-    bottom_y = axes[1, 0].get_position().y0 - 0.005
-
-    # x for boundary between Target (col 0) and Worst (col 1)
-    pos_a = axes[0, 0].get_position()
-    pos_b = axes[0, 1].get_position()
-    x_boundary_1 = (pos_a.x1 + pos_b.x0) / 2
-
-    # x for boundary between Worst (col 1-4) and Best (col 5-8)
-    pos_c = axes[0, 4].get_position()
-    pos_d = axes[0, 5].get_position()
-    x_boundary_2 = (pos_c.x1 + pos_d.x0) / 2
-
-    # draw bars
-    for x in (x_boundary_1, x_boundary_2):
-        line = Line2D([x, x], [bottom_y, top_y], transform=fig.transFigure, color='gray', linewidth=1.5, zorder=20)
-        fig.add_artist(line)
-
-    if save_path:
-        plt.savefig(save_path)
-    plt.show()
-
-
-def analyze_relationship_regression(
-    df: pd.DataFrame,
-    x: str,
-    y: str,
-    expected_positive: bool = True,
-    plot: bool = True
-) -> bool:
-    """
-    Test linear relationship between two numerical variables with significance test
-    and direction check.
-
-    Returns True only if:
-      (1) the slope is statistically significant (p < 0.05)
-      (2) the slope sign matches expectation.
-    """
-
-    xv = df[x].values
-    yv = df[y].values
-
-    res = linregress(xv, yv)
-
-    slope: float = float(res.slope)
-    pval: float = float(res.pvalue)
-
-    significant: bool = pval < 0.05
-    direction_matches: bool = (slope > 0 and expected_positive) or (slope < 0 and not expected_positive)
-
-    if plot:
-        # scatter
-        colors = plt.cm.tab20(np.arange(len(df)))  # type: ignore
-        for i, (idx, row) in enumerate(df.iterrows()):
-            plt.scatter(row[x], row[y], color=colors[i], label=idx)
-
-        # regression line
-        xx = np.linspace(xv.min(), xv.max(), 200)  # type: ignore
-        yy = slope * xx + res.intercept
-        plt.plot(xx, yy, linestyle="--")
-
-        plt.xlabel(x)
-        plt.ylabel(y)
-        plt.title(
-            f"Linear regression: slope={slope:.4f}, p={pval:.5f}"
-        )
-        plt.show()
-
-    return bool(significant and direction_matches)
-
-
-def analyze_relationship_category(df, metric: str, category: str, plot: bool = True) -> bool:
-    categories = df[category].unique()
-    metric_per_category = [df[df[category] == c][metric] for c in categories]
-    print(f'Analyzing {metric} across {category} ({categories})')
-
-    # Anova (assumes gaussian and equal variance)
-    anova_res = f_oneway(*metric_per_category)
-    anova_significant = anova_res.pvalue < 0.05
-    print(f"ANOVA F-statistic: {anova_res.statistic:.02}, p-value: {anova_res.pvalue:.05} ({'is' if anova_significant else 'is NOT'} statistically significant)")
-
-    # Kruskal-Wallis (dont assume gaussian nor equal variance)
-    # Alternative hypothesis (H₁): At least one group differs from the others.
-    kruskal_res = kruskal(*metric_per_category)
-    kruskal_significant: bool = kruskal_res.pvalue < 0.05
-    print(f"Kruskal-Wallis H-statistic: {kruskal_res.statistic:.02}, p-value: {kruskal_res.pvalue:.05} ({'is' if kruskal_significant else 'is NOT'} statistically significant)")
-
-    if plot:
-        sns.boxplot(x=category, y=metric, data=df, showfliers=False)
-        sns.stripplot(x=category, y=metric, data=df, color='black', alpha=0.5)
-        plt.axhline(0, linestyle='--', color='red')
-        plt.xticks(rotation=45, ha='right')
-        plt.title(f"Distribution of {metric.replace('_', ' ').title()} across {category.capitalize()}")
-        plt.show()
-
-    return anova_significant or kruskal_significant
 
 
 def analyze_relationship_numerical(
@@ -5508,19 +5102,3 @@ def analyze_correlation_between_pairwise_metrics(
     return pearson_significant or spearman_significant
 
 
-##########################################
-# Others
-##########################################
-def check_eval_results(eval_results, name, threshold: float, operator: Literal['gt', 'lt']) -> float:
-    '''
-    Check if the metric satisfy the EXPECTED threshold
-    '''
-    value = next(filter(lambda m: m.metric_name.startswith(name), eval_results)).metric_value
-    assert isinstance(value, float)
-    if operator == 'gt':
-        if not value > threshold:
-            logger.warning(f'Metric {name} suspiciously too low ({value}), maybe something went wrong with the training...')
-    else:
-        if not value < threshold:
-            logger.warning(f'Metric {name} suspiciously too high ({value}), maybe something went wrong with the training...')
-    return value

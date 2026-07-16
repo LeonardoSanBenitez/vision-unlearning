@@ -54,6 +54,8 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     choose_metric_column_interference_per_entity,
     get_embedding_output_path,
     get_embedding_hf_path,
+    BaselineEmbeddings,
+    EntityEmbeddings,
 )
 
 from vision_unlearning.datasets.testbed import (
@@ -79,6 +81,12 @@ from vision_unlearning.benchmarks.I_care.utils import (
     dict_to_explanation,
     InvalidAttributeTypeError,
     InsufficientSamplesError,
+    check_eval_results,
+)
+
+from vision_unlearning.benchmarks.I_care.similarity import (
+    Similarity,
+    jacc_metric_score,
 )
 
 from vision_unlearning.benchmarks.I_care.embeddings import (
@@ -122,14 +130,9 @@ from vision_unlearning.benchmarks.I_care.result_templates import (
     ResultTemplateEmbeddingForgettingEfficiency,
     rt_name_to_class,
     rt_name_to_params,
-    jacc_metric_score,
-    display_interesting_interferences,
-    analyze_relationship_regression,
-    analyze_relationship_category,
     analyze_relationship_numerical,
     analyze_relationship_categorical,
     analyze_correlation_between_pairwise_metrics,
-    check_eval_results,
 )
 
 __all__ = [
@@ -168,6 +171,8 @@ __all__ = [
     "choose_metric_column_interference_per_entity",
     "get_embedding_output_path",
     "get_embedding_hf_path",
+    "BaselineEmbeddings",
+    "EntityEmbeddings",
     # metrics
     "find_worst_interfered",
     "metric_of_worst_interfered",
@@ -213,10 +218,8 @@ __all__ = [
     "ResultTemplateEmbeddingForgettingEfficiency",
     "rt_name_to_class",
     "rt_name_to_params",
+    "Similarity",
     "jacc_metric_score",
-    "display_interesting_interferences",
-    "analyze_relationship_regression",
-    "analyze_relationship_category",
     "analyze_relationship_numerical",
     "analyze_relationship_categorical",
     "analyze_correlation_between_pairwise_metrics",

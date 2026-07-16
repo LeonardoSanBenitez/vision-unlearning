@@ -14,10 +14,14 @@ import base64
 import io
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 from PIL import Image
+
+from vision_unlearning.utils.logger import get_logger
+
+logger = get_logger('I_care')
 
 
 def _encode_image_file(img_path: str, max_dim: int = 1024) -> str:
@@ -84,3 +88,18 @@ class InvalidAttributeTypeError(ValueError):
 
 class InsufficientSamplesError(ValueError):
     pass
+
+
+def check_eval_results(eval_results, name, threshold: float, operator: Literal['gt', 'lt']) -> float:
+    '''
+    Check if the metric satisfy the EXPECTED threshold
+    '''
+    value = next(filter(lambda m: m.metric_name.startswith(name), eval_results)).metric_value
+    assert isinstance(value, float)
+    if operator == 'gt':
+        if not value > threshold:
+            logger.warning(f'Metric {name} suspiciously too low ({value}), maybe something went wrong with the training...')
+    else:
+        if not value < threshold:
+            logger.warning(f'Metric {name} suspiciously too high ({value}), maybe something went wrong with the training...')
+    return value

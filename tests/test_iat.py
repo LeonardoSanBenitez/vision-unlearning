@@ -107,6 +107,17 @@ def _write_embedding_file(
 
 
 def _write_baseline(tmp_path: Any, task: str = "people", method: str = "distil", epochs: int = 400) -> None:
+    # Canonical, method-agnostic baseline name — the only name the RT reads now that the
+    # per-method fallback has been removed.
+    fname = f"embeddings_{task}_original.json"
+    _write_embedding_file(
+        str(tmp_path / "datasets" / fname),
+        ENTITIES,
+    )
+
+
+def _write_baseline_legacy(tmp_path: Any, task: str = "people", method: str = "distil", epochs: int = 400) -> None:
+    """Write the OBSOLETE per-method baseline name, for the negative test only."""
     fname = f"embeddings_{task}_original_{method}_{epochs:03d}.json"
     _write_embedding_file(
         str(tmp_path / "datasets" / fname),
@@ -415,6 +426,20 @@ class TestComputeFromScratch:
         assert "iat_effect_size" in result
         assert "permutation_pvalue" in result
         assert "significant" in result
+
+    def test_baseline_per_method_fallback_removed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Negative test for the authorized compat break: with ONLY the obsolete per-method
+        baseline file present (no canonical embeddings_{task}_original.json), IAT must raise.
+        Proves the per-method fallback was removed here too, not only in EUP."""
+        self._setup_mocks(monkeypatch, tmp_path)
+        _write_baseline_legacy(tmp_path)  # old name only
+        _write_entity_files(tmp_path)
+
+        rt = _make_rt(tmp_path)
+        with pytest.raises(FileNotFoundError, match="Baseline DINOv2 embedding file not found"):
+            rt._compute_from_scratch()
 
     def test_b_matrix_values_are_in_minus1_to_1(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any

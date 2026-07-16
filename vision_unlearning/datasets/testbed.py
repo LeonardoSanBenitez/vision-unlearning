@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from typing import Literal, Tuple, List, Dict, Optional, Any
+from typing import Literal, Tuple, List, Dict, Optional, Any, cast
 import json
 import re
 import os
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, PrivateAttr
 
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.artifact import Artifact, SingleFileArtifact
 
 
 logger = get_logger('testbed')
@@ -19,6 +17,19 @@ logger = get_logger('testbed')
 # lower-level helper functions.
 _type_task = Literal['breeds', 'scenes', 'people']
 _type_method = Literal['distil', 'munba', 'uce']
+_type_model = Literal['sd1.4']
+
+
+def _model_segment(model: _type_model) -> str:
+    """Filename/folder segment for the base model.
+
+    ``sd1.4`` (the only produced model) returns an empty segment so every existing
+    dataset/model folder name is unchanged; any other base model adds a disambiguating
+    ``_{model}`` segment. Kept local — mirroring ``configuration.model_segment`` — so this
+    module stays decoupled from the ``benchmarks.I_care`` sub-package, exactly as the task
+    and method aliases above are. The two must stay in sync if a real second model is added.
+    """
+    return '' if model == 'sd1.4' else f'_{model}'
 
 
 ##########################################
@@ -88,21 +99,49 @@ def get_target_overwrite(
 ##########################################
 # Metadata filtered
 ##########################################
+def _metadata_filtered_filename(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+) -> str:
+    return f"metadata_{task}_2_enriched_filtered.json"
+
+
 def get_metadata_filtered_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
 ) -> str:
-    return os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json")
+    return os.path.join(base_folder, _metadata_filtered_filename(task))
+
+
+class MetadataFiltered(SingleFileArtifact):
+    """Object-oriented interface over the filtered task metadata file.
+
+    Complements the get_metadata_filtered / save_metadata_filtered helpers by adding the
+    shared local -> HuggingFace -> (not-computed-on-demand) storage cascade, so a caller can
+    fetch the metadata from HuggingFace when it is absent locally.
+    """
+    task: Literal['scenes', 'objects', 'breeds', 'people'] = 'people'
+
+    def _get_data_path_remote(self) -> str:
+        return _metadata_filtered_filename(self.task)
+
+    def _compute_from_scratch(self) -> List[Dict[str, Any]]:
+        raise NotImplementedError(
+            "MetadataFiltered is produced by the data-preparation pipeline, not computed on "
+            "demand. Provide the local file or fetch it from HuggingFace."
+        )
+
+    def _validate(self, data: Any) -> None:
+        assert isinstance(data, list)
+
+    def compute(self) -> List[Dict[str, Any]]:
+        return cast(List[Dict[str, Any]], self._resolve())
 
 
 def get_metadata_filtered(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets'
 ) -> List[Dict[str, Any]]:
-    with open(get_metadata_filtered_path(task, base_folder=base_folder), "r", encoding="utf-8") as f:
-        metadata_filtered = json.load(f)
-    assert isinstance(metadata_filtered, list)
-    return metadata_filtered
+    return MetadataFiltered(task=task, base_folder=base_folder).compute()
 
 
 def save_metadata_filtered(
@@ -153,9 +192,10 @@ def get_unlearned_model_folder(
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> str:
     # By convention, I'm passing here the NON preprocessed target
-    return os.path.join(base_folder, 'models', f"{task}_{target}_{method}_{num_train_epochs:03d}")
+    return os.path.join(base_folder, 'models', f"{task}_{target}_{method}_{num_train_epochs:03d}{_model_segment(model)}")
 
 
 def exists_unlearned_model(
@@ -164,8 +204,9 @@ def exists_unlearned_model(
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> bool:
-    model_path = get_unlearned_model_folder(task, method, num_train_epochs, target, base_folder=base_folder)
+    model_path = get_unlearned_model_folder(task, method, num_train_epochs, target, base_folder=base_folder, model=model)
     if method == 'uce':
         return os.path.exists(os.path.join(model_path, 'uce_sd_weights.safetensors'))
     else:
@@ -181,9 +222,10 @@ def get_generated_dataset_folder(
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> str:
     # By convention, I'm passing here the preprocessed target... TODO change?
-    return os.path.join(base_folder, "datasets", f"generated_{task}_{target}_{method}_{num_train_epochs:03d}")
+    return os.path.join(base_folder, "datasets", f"generated_{task}_{target}_{method}_{num_train_epochs:03d}{_model_segment(model)}")
 
 
 def get_generated_dataset_file(
@@ -227,6 +269,7 @@ def exists_unlearned_dataset(
 def get_shared_baseline_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> str:
     """Return the task-level shared baseline folder path.
 
@@ -237,7 +280,7 @@ def get_shared_baseline_folder(
 
     Convention: assets/datasets/generated_{task}_baseline/
     """
-    return os.path.join(base_folder, "datasets", f"generated_{task}_baseline")
+    return os.path.join(base_folder, "datasets", f"generated_{task}_baseline{_model_segment(model)}")
 
 
 def get_off_image_path(
@@ -250,6 +293,7 @@ def get_off_image_path(
     base_folder: str = 'assets',
     seeds: Optional[List[int]] = None,
     prompts: Optional[List[str]] = None,
+    model: _type_model = 'sd1.4',
 ) -> str:
     """Return the path to a baseline (lora_state='off') image for a given entity/seed/prompt.
 
@@ -288,7 +332,7 @@ def get_off_image_path(
         to the entity folder (backward-compatible).
     """
     # 1. Shared task-level baseline already present locally.
-    shared_folder = get_shared_baseline_folder(task, base_folder)
+    shared_folder = get_shared_baseline_folder(task, base_folder, model)
     if os.path.exists(shared_folder):
         path = os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
         if not os.path.exists(path):
@@ -309,14 +353,14 @@ def get_off_image_path(
         # Use the class directly since it is in the same module.
         # cast: task is narrowed to _type_task by the guard above.
         from typing import cast as _cast  # noqa: PLC0415
-        baseline_ds = GeneratedDataset(task=_cast(_type_task, task), base_folder=base_folder)
+        baseline_ds = GeneratedDataset(task=_cast(_type_task, task), base_folder=base_folder, model=model)
         baseline_ds.compute(seeds, prompts)
         # After compute() the shared folder should now exist locally.
         if os.path.exists(shared_folder):
             return os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
 
     # 3. Entity folder fallback (pre-refactor mixed on_* + off_* folder).
-    entity_folder = get_generated_dataset_folder(task, method, num_train_epochs, target, base_folder)
+    entity_folder = get_generated_dataset_folder(task, method, num_train_epochs, target, base_folder, model)
     return os.path.join(entity_folder, get_generated_dataset_file('off', seed, prompt))
 
 
@@ -330,7 +374,7 @@ def get_off_image_path(
 # helper functions coexist; prefer GeneratedDataset for new code.
 
 
-class GeneratedDataset(BaseModel):
+class GeneratedDataset(Artifact):
     """Abstraction over generated image dataset folders.
 
     Represents exactly one dataset folder — either the shared task-level
@@ -363,10 +407,16 @@ class GeneratedDataset(BaseModel):
     target: Optional[str] = None          # None → shared baseline (task-level)
     method: Optional[_type_method] = None  # None → baseline dataset
     num_train_epochs: Optional[int] = None
-    base_folder: str = 'assets'
-    remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
-    recompute_if_exists: bool = False
-    upload_if_recomputed: bool = False
+    model: _type_model = 'sd1.4'          # base image-generating model; sd1.4 → unchanged names
+    # base_folder, remote_repository_name, recompute_if_exists, upload_if_recomputed and
+    # save_outputs are inherited from Artifact. save_outputs is unused here: image
+    # generation writes the folder directly, so _persist_local is a no-op.
+
+    # Runtime arguments for one compute() call, stashed so the (nullary) storage hooks can
+    # read them.
+    _pending_seeds: List[int] = PrivateAttr(default_factory=list)
+    _pending_prompts: List[str] = PrivateAttr(default_factory=list)
+    _pending_batch_size: int = PrivateAttr(default=16)
 
     @model_validator(mode='after')
     def _validate_consistency(self) -> 'GeneratedDataset':
@@ -404,14 +454,14 @@ class GeneratedDataset(BaseModel):
           - get_generated_dataset_folder()
         """
         if self.is_baseline:
-            return get_shared_baseline_folder(self.task, self.base_folder)
+            return get_shared_baseline_folder(self.task, self.base_folder, self.model)
         # Entity dataset
         assert self.target is not None
         assert self.num_train_epochs is not None
         assert self.method is not None  # guaranteed by _validate_consistency
         method: _type_method = self.method
         return get_generated_dataset_folder(
-            self.task, method, self.num_train_epochs, self.target, self.base_folder
+            self.task, method, self.num_train_epochs, self.target, self.base_folder, self.model
         )
 
     @property
@@ -595,10 +645,10 @@ class GeneratedDataset(BaseModel):
             assert self.num_train_epochs is not None
 
             model_folder = get_unlearned_model_folder(
-                self.task, self.method, self.num_train_epochs, self.target, self.base_folder
+                self.task, self.method, self.num_train_epochs, self.target, self.base_folder, self.model
             )
             if not exists_unlearned_model(
-                self.task, self.method, self.num_train_epochs, self.target, self.base_folder
+                self.task, self.method, self.num_train_epochs, self.target, self.base_folder, self.model
             ):
                 raise FileNotFoundError(
                     f"Trained unlearned model not found at '{model_folder}'. "
@@ -695,70 +745,83 @@ class GeneratedDataset(BaseModel):
         str
             The local folder path to the (now complete) dataset.
         """
-        # 1. Local
-        if not self.recompute_if_exists and self.exists(seeds, prompts):
-            return self.folder_path
+        self._pending_seeds = seeds
+        self._pending_prompts = prompts
+        self._pending_batch_size = batch_size
+        return cast(str, self._resolve())
 
-        # 2. Remote (HuggingFace)
+    # ------------------------------------------------------------------
+    # Artifact storage hooks (folder-of-images shape)
+    # ------------------------------------------------------------------
+    def _exists_local(self) -> bool:
+        return self.exists(self._pending_seeds, self._pending_prompts)
+
+    def _exists_remote(self, hf_token: Optional[str]) -> bool:
+        # Unguarded on purpose: unlike a cheap single-file recompute, regenerating a whole
+        # image dataset is expensive, so a transient network error should surface rather than
+        # silently trigger a from-scratch regeneration.
         from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
-            get_hf_token_from_env,
             huggingface_dataset_exists,
-            huggingface_dataset_download,
-            huggingface_dataset_upload,
         )
-        hf_token: Optional[str] = get_hf_token_from_env()
-        if not self.recompute_if_exists and huggingface_dataset_exists(
+        return huggingface_dataset_exists(
             self.remote_repository_name,
             self.hf_config_name,
             token=hf_token,
             path_in_repo=self.hf_path_in_repo,
-        ):
-            huggingface_dataset_download(
-                folder_datasets=os.path.join(self.base_folder, 'datasets'),
-                dataset_repository=self.remote_repository_name,
-                dataset_config=self.hf_config_name,
-                # None (not "") when unset: an empty string becomes an illegal
-                # 'Authorization: Bearer ' header and breaks unauthenticated
-                # downloads from public repositories.
-                token=hf_token,
-                path_in_repo=self.hf_path_in_repo,
-            )
-            assert self.exists(seeds, prompts), (
-                f"HuggingFace download completed but dataset is still incomplete: "
-                f"{self.folder_path}"
-            )
-            return self.folder_path
+        )
 
-        # 3. Compute from scratch
-        result = self._compute_from_scratch(seeds, prompts, batch_size=batch_size)
+    def _pull_remote(self, hf_token: Optional[str]) -> None:
+        from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
+            huggingface_dataset_download,
+        )
+        huggingface_dataset_download(
+            folder_datasets=os.path.join(self.base_folder, 'datasets'),
+            dataset_repository=self.remote_repository_name,
+            dataset_config=self.hf_config_name,
+            # None (not "") when unset: an empty string becomes an illegal
+            # 'Authorization: Bearer ' header and breaks unauthenticated
+            # downloads from public repositories.
+            token=hf_token,
+            path_in_repo=self.hf_path_in_repo,
+        )
+
+    def _load_local(self) -> str:
+        return self.folder_path
+
+    def _produce_from_scratch(self) -> str:
+        result = self._compute_from_scratch(
+            self._pending_seeds, self._pending_prompts, batch_size=self._pending_batch_size
+        )
         assert result == self.folder_path, (
             "_compute_from_scratch() must return self.folder_path"
         )
-        assert self.exists(seeds, prompts), (
+        assert self.exists(self._pending_seeds, self._pending_prompts), (
             f"_compute_from_scratch() completed but dataset is still incomplete: "
             f"{self.folder_path}"
         )
+        return result
 
-        # Upload to HF if requested
-        if self.upload_if_recomputed:
-            assert hf_token, (
-                "upload_if_recomputed=True but HF_TOKEN is not set. "
-                "Set HF_TOKEN environment variable before calling compute()."
-            )
-            logger.info(
-                "Uploading recomputed dataset to HF: %s -> %s",
-                self.hf_config_name, self.hf_path_in_repo,
-            )
-            huggingface_dataset_upload(
-                folder_datasets=os.path.join(self.base_folder, 'datasets'),
-                dataset_repository=self.remote_repository_name,
-                dataset_config=self.hf_config_name,
-                token=hf_token,
-                path_in_repo=self.hf_path_in_repo,
-            )
-            logger.info("Upload complete: %s", self.hf_path_in_repo)
+    def _persist_local(self, data: Any) -> None:
+        return None  # image generation writes the folder directly; nothing to persist
 
-        return self.folder_path
+    def _push_remote(self, hf_token: Optional[str]) -> None:
+        # _resolve only calls _push_remote after asserting a token is present.
+        assert hf_token is not None
+        from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
+            huggingface_dataset_upload,
+        )
+        logger.info(
+            "Uploading recomputed dataset to HF: %s -> %s",
+            self.hf_config_name, self.hf_path_in_repo,
+        )
+        huggingface_dataset_upload(
+            folder_datasets=os.path.join(self.base_folder, 'datasets'),
+            dataset_repository=self.remote_repository_name,
+            dataset_config=self.hf_config_name,
+            token=hf_token,
+            path_in_repo=self.hf_path_in_repo,
+        )
+        logger.info("Upload complete: %s", self.hf_path_in_repo)
 
     # ------------------------------------------------------------------
     # Off-image path with fallback (class-level utility)
@@ -776,6 +839,7 @@ class GeneratedDataset(BaseModel):
         base_folder: str = 'assets',
         seeds: Optional[List[int]] = None,
         prompts: Optional[List[str]] = None,
+        model: _type_model = 'sd1.4',
     ) -> str:
         """Return the path to a baseline (lora_state='off') image.
 
@@ -813,100 +877,7 @@ class GeneratedDataset(BaseModel):
             base_folder=base_folder,
             seeds=seeds,
             prompts=prompts,
+            model=model,
         )
 
 
-##########################################
-# Similarity
-##########################################
-def get_similarity_clip_path(  # deprecated, use ResultTemplateSimilarityMatrix._get_path
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    base_folder: str = 'assets',
-) -> str:
-    return os.path.join(base_folder, f"similarity_clip_{task}.json")  # TODO: this should be in the results folder
-
-
-def get_similarity_clip_df(  # deprecated, use ResultTemplateSimilarityMatrix._get_similarity_df
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    base_folder: str = 'assets',
-) -> pd.DataFrame:
-    df_similarities_clip = pd.read_json(get_similarity_clip_path(task, base_folder=base_folder), orient='records')
-    df_similarities_clip.set_index('emitter', inplace=True)
-    return df_similarities_clip
-
-
-def calculate_similarity_clip(  # deprecated, use ResultTemplateSimilarityMatrix._calculate
-    task: Literal['scenes', 'objects', 'breeds', 'people'],
-    labels: List[str],
-    base_folder: str = 'assets',
-) -> pd.DataFrame:
-    # Lazy import: torchmetrics/torch only needed when this function is called.
-    from vision_unlearning.metrics.text_and_text import MetricTextTextSimilarity  # noqa: PLC0415
-    clip_text_metric = MetricTextTextSimilarity(metrics=['clip_text'])
-
-    # Load existing
-    if os.path.exists(get_similarity_clip_path(task, base_folder=base_folder)):
-        df_similarities_clip = get_similarity_clip_df(task, base_folder=base_folder)
-        assert df_similarities_clip.index.to_list() == labels
-    else:
-        df_similarities_clip = pd.DataFrame(index=labels, columns=labels)
-
-    # Calculate
-    for entity_emitter, row_emitter in df_similarities_clip.iterrows():
-        # break
-        print(f'Analying similarities for entity_emitter={entity_emitter}')
-        for entity_receiver in row_emitter.index:
-            if pd.isna(df_similarities_clip.loc[entity_emitter, entity_receiver]):  # type: ignore
-                similarity: float = clip_text_metric.score(
-                    get_target_preprocessed(task, str(entity_emitter)),
-                    get_target_preprocessed(task, str(entity_receiver)),
-                )['clip_text']
-                df_similarities_clip.loc[entity_emitter, entity_receiver] = similarity
-
-        # Save at the end of each row
-        df_similarities_clip.reset_index(names='emitter').to_json(get_similarity_clip_path(task, base_folder=base_folder), orient='records')
-
-    return df_similarities_clip
-
-
-def plot_heatmap(df, figsize=None, cmap="viridis", title="Heatmap"):  # deprecated, use ResultTemplateSimilarityMatrix._plot_heatmap
-    """
-    Plot a heatmap for a square DataFrame with all labels visible.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        A square DataFrame with same string labels for index and columns.
-    figsize : tuple
-        Figure size (width, height). Increase if labels overlap.
-    cmap : str
-        Colormap name for matplotlib.
-    """
-    if df.shape[0] != df.shape[1]:
-        raise ValueError("DataFrame must be square (same number of rows and columns).")
-    if not np.all(df.index == df.columns):
-        # logger.warning("Index and columns differ; continuing but axis labels may mismatch.")
-        raise ValueError("Index and columns must be the same")
-
-    df2 = df.dropna()
-    if figsize is None:
-        figsize = (int(0.2 * df2.shape[1]), int(0.18 * df2.shape[0]))
-
-    fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(df2.values, cmap=cmap, aspect='auto', interpolation='nearest')
-
-    # Colorbar
-    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.ax.tick_params(labelsize=6)
-
-    ax.set_xticks(np.arange(df2.shape[1]))
-    ax.set_yticks(np.arange(df2.shape[0]))
-    ax.set_xticklabels(df2.columns.to_list(), rotation=90, fontsize=5)
-    ax.set_yticklabels(df2.index.to_list(), fontsize=5)
-
-    ax.set_xlabel("Columns", fontsize=8)
-    ax.set_ylabel("Index", fontsize=8)
-    ax.set_title(title, fontsize=10)
-
-    plt.tight_layout(pad=0.5)
-    plt.show()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Tuple, List, Dict, Optional, Any
+from typing import Literal, Tuple, List, Dict, Optional, Any, cast
 import json
 import os
 import re
@@ -13,6 +13,8 @@ import seaborn as sns
 from pydantic import BaseModel
 
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.artifact import SingleFileArtifact
+from vision_unlearning.benchmarks.care import MetricEffectPerEntity, MetricEffectPerEntityPair
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite
 from vision_unlearning.integrations.huggingface import (
     get_hf_token_from_env,
@@ -24,6 +26,10 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     type_task,
     type_unlearning_algorithm,
     type_me,
+    type_model,
+    type_l,
+    model_segment,
+    unlearning_algorithm_to_epochs,
 )
 
 
@@ -33,14 +39,25 @@ logger = get_logger('I_care')
 ##########################################
 # Metadata files - interference_per_pair
 ##########################################
+def _interference_per_pair_filename(
+    task: Literal['scenes', 'objects', 'breeds', 'people'],
+    index: int,
+    method: Literal['munba', 'uce', 'distil'],
+    num_train_epochs: int,
+    model: type_model = 'sd1.4',
+) -> str:
+    return f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}{model_segment(model)}.json'
+
+
 def get_interference_per_pair_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> str:
-    return os.path.join(base_folder, 'datasets', f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json')
+    return os.path.join(base_folder, 'datasets', _interference_per_pair_filename(task, index, method, num_train_epochs, model))
 
 
 def get_interference_per_pair(
@@ -50,10 +67,11 @@ def get_interference_per_pair(
     num_train_epochs: int,
     max_identities: int = 100,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> Dict[str, Dict[str, float]]:
     # TODO: maybe this function should first check locally if the file exists, and if not, check in huggingface if the file exists there, and just then return an error if neighter?
-    assert os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder)), "Caused interferences by this entity were not computed yet"
-    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder), 'r') as f:
+    assert os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model)), "Caused interferences by this entity were not computed yet"
+    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model), 'r') as f:
         interference_per_pair = json.load(f)
     assert isinstance(interference_per_pair, dict)
     assert len(interference_per_pair) == max_identities
@@ -66,8 +84,9 @@ def exists_interference_per_pair(
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> bool:
-    return os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder))
+    return os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model))
 
 def save_interference_per_pair(
     interference_per_pair: Dict[str, Dict[str, float]],
@@ -76,10 +95,11 @@ def save_interference_per_pair(
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> None:
     assert isinstance(interference_per_pair, dict)
     assert len(interference_per_pair) > 0, "interference_per_pair should not be empty"
-    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder), 'w') as f:
+    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model), 'w') as f:
             json.dump(interference_per_pair, f)
 
 
@@ -91,13 +111,14 @@ def get_interference_per_pair_inverse(
     index_start: int = 0,
     max_identities: int = 100,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> Dict[str, Dict[str, float]]:
     metadata_filtered = get_metadata_filtered(task)
     target = metadata_filtered[index]['name']
 
     interference_per_pair_inverse = {}
     for idx_emitter in range(index_start, index_start + max_identities):
-        path = get_interference_per_pair_path(task, idx_emitter, method, num_train_epochs, base_folder)
+        path = get_interference_per_pair_path(task, idx_emitter, method, num_train_epochs, base_folder, model)
         if os.path.exists(path):  # Unlearning already performed
             with open(path, 'r') as f:
                 interference_per_pair_temp = json.load(f)
@@ -108,6 +129,38 @@ def get_interference_per_pair_inverse(
     return interference_per_pair_inverse
 
 
+class InterferencePerPair(MetricEffectPerEntityPair):
+    """Object-oriented interface over a single per-pair interference file.
+
+    Wraps interferences_caused_by_{task}_{index}_{method}_{epochs}.json and adds the shared
+    local -> HuggingFace -> (not-computed-on-demand) storage cascade. Complements the
+    get_interference_per_pair / exists_interference_per_pair / save_interference_per_pair
+    helpers, which remain the fast local-only path. "Interference" is I-CARE's concrete name
+    for the generic `MetricEffectPerEntityPair` shape (see `benchmarks/care.py`).
+    """
+    task: type_task = 'people'
+    index: int
+    method: type_unlearning_algorithm
+    num_train_epochs: int
+    max_identities: int = 100
+    model: type_model = 'sd1.4'
+
+    def _get_data_path_remote(self) -> str:
+        return f"datasets/{_interference_per_pair_filename(self.task, self.index, self.method, self.num_train_epochs, self.model)}"
+
+    def _compute_from_scratch(self) -> Dict[str, Dict[str, float]]:
+        raise NotImplementedError(
+            "InterferencePerPair is produced by the interference pipeline, not computed on "
+            "demand. Provide the local file or fetch it from HuggingFace."
+        )
+
+    def _validate(self, data: Any) -> None:
+        assert isinstance(data, dict)
+        assert len(data) == self.max_identities
+
+    def compute(self) -> Dict[str, Dict[str, float]]:
+        return cast(Dict[str, Dict[str, float]], self._resolve())
+
 
 ##########################################
 # Metadata files - interference_per_entity
@@ -115,17 +168,19 @@ def get_interference_per_pair_inverse(
 def get_interference_per_entity_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> str:
-    return os.path.join(base_folder, f"interference_per_entity_{task}.json")
+    return os.path.join(base_folder, f"interference_per_entity_{task}{model_segment(model)}.json")
 
 
 def get_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     max_identities: int = 100,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> List[Dict[str, Any]]:
-    assert os.path.exists(get_interference_per_entity_path(task, base_folder=base_folder))
-    with open(get_interference_per_entity_path(task, base_folder=base_folder), "r", encoding="utf-8") as f:
+    assert os.path.exists(get_interference_per_entity_path(task, base_folder=base_folder, model=model))
+    with open(get_interference_per_entity_path(task, base_folder=base_folder, model=model), "r", encoding="utf-8") as f:
         metadata_filtered = json.load(f)
     assert isinstance(metadata_filtered, list)
     assert len(metadata_filtered) == max_identities
@@ -136,31 +191,25 @@ def save_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     metadata_filtered: List[Dict[str, Any]],
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> None:
-    with open(get_interference_per_entity_path(task, base_folder=base_folder), "w", encoding="utf-8") as f:
+    with open(get_interference_per_entity_path(task, base_folder=base_folder, model=model), "w", encoding="utf-8") as f:
         json.dump(metadata_filtered, f, indent=4)
 
 
 
-# Every artifact should be abstracted by a OO class, instead of just a loosely connected set of functions
-# This class should also handle automatically fetching the underlying data from huggingface
-# For now both styles can coexist, but we should refactor all rest of code to use just OO
-# This follows basically the same logic as a RT... Maybe both should inherit from a class "Artifact" or something like that
-class InterferencePerEntity(BaseModel):
+# InterferencePerEntity is stored as a single JSON file and shares the local -> HuggingFace
+# -> from-scratch storage cascade with the Result Templates; both inherit that cascade from
+# SingleFileArtifact. The functional helpers below (get_interference_per_entity, ...) remain
+# available and coexist with this object-oriented interface. "Interference" is I-CARE's
+# concrete name for the generic `MetricEffectPerEntity` shape (see `benchmarks/care.py`).
+class InterferencePerEntity(MetricEffectPerEntity):
     task: type_task = 'people'
-    base_folder: str = 'assets'
-    remote_repository_name: str = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
-    save_outputs: bool = True
-    recompute_if_exists: bool = False
-    upload_if_recomputed: bool = False
+    model: type_model = 'sd1.4'
     # This class deprecates: save_interference_per_entity, get_interference_per_entity_path
 
     def _get_data_path_remote(self) -> str:
-        return f'interference_per_entity_{self.task}.json'
-
-
-    def _get_data_path_local(self) -> str:
-        return os.path.join(self.base_folder, self._get_data_path_remote())
+        return f'interference_per_entity_{self.task}{model_segment(self.model)}.json'
 
     def _compute_from_scratch(self) -> List[Dict[str, Any]]:
         raise NotImplementedError(
@@ -168,64 +217,29 @@ class InterferencePerEntity(BaseModel):
             "Provide a pre-computed file or fetch from HuggingFace."
         )
 
-    def compute(self) -> List[Dict[str, Any]]:
-        hf_token: Optional[str] = get_hf_token_from_env()
-        data: Any
-        if not self.recompute_if_exists and os.path.exists(self._get_data_path_local()):  # Local
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        elif not self.recompute_if_exists and huggingface_dataset_file_exists(  # Remote
-            self.remote_repository_name,
-            self._get_data_path_remote(),
-            token=hf_token,
-        ):
-            #print('going the remote option', flush=True)
-            huggingface_dataset_file_download(
-                folder_datasets=self.base_folder,
-                dataset_repository=self.remote_repository_name,
-                file_path=self._get_data_path_remote(),
-                # None (not "") when unset: an empty string becomes an illegal
-                # 'Authorization: Bearer ' header and breaks unauthenticated
-                # downloads from public repositories.
-                token=hf_token,
-            )
-            assert os.path.exists(self._get_data_path_local())
-            #print('downloaded', flush=True)
-            with open(self._get_data_path_local(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-        else:  # Compute from scratch
-            data = self._compute_from_scratch()
-            if self.save_outputs:
-                os.makedirs(os.path.dirname(self._get_data_path_local()), exist_ok=True)
-                with open(self._get_data_path_local(), "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-            # Upload to HF if requested
-            if self.upload_if_recomputed:
-                assert self.save_outputs, (
-                    "upload_if_recomputed=True requires save_outputs=True "
-                    "(no file to upload when save_outputs=False)."
-                )
-                assert hf_token, (
-                    "upload_if_recomputed=True but HF_TOKEN is not set. "
-                    "Set HF_TOKEN environment variable before calling compute()."
-                )
-                logger.info(
-                    "Uploading recomputed InterferencePerEntity to HF: %s",
-                    self._get_data_path_remote(),
-                )
-                huggingface_dataset_file_upload(
-                    file_path=self._get_data_path_local(),
-                    dataset_repository=self.remote_repository_name,
-                    dataset_path=self._get_data_path_remote(),
-                    token=hf_token,
-                )
-                logger.info("Upload complete: %s", self._get_data_path_remote())
+    def _validate(self, data: Any) -> None:
         assert type(data) == list, f"Expected a dict in the json file, but got {type(data)}"
         assert len(data) > 0  # == 100
         assert all(isinstance(item, dict) for item in data)
-        return data
+
+    def compute(self) -> List[Dict[str, Any]]:
+        """Resolve the per-entity interference summary from local disk, HuggingFace, or from
+        scratch. The storage cascade lives in SingleFileArtifact; this method only pins the
+        return type."""
+        return cast(List[Dict[str, Any]], self._resolve())
 
 
+
+
+def _me_column_fragment(interference_entity: type_me) -> str:
+    """Convert a `type_me` display name into the column-name fragment
+    `pipeline_07_compute_interference_per_entity.py` writes: lowercase, spaces to underscores.
+
+    `interference_entity` is guaranteed systematic by `configuration.generate_me_names()` (see
+    that function's docstring for the exact combinatorial structure); this is the one place that
+    knows how a `type_me` name maps to the column-name fragment built from it.
+    """
+    return interference_entity.lower().replace(' ', '_')
 
 
 def choose_metric_column_interference_per_entity(
@@ -234,24 +248,24 @@ def choose_metric_column_interference_per_entity(
     metric_cols: List[str],
 ) -> str:
     """
-    The columns of the interference per entity file are not named in a way that is easy to generate given `unlearning_algorithm` and `interference_entity`, so we need to search for the right one.
-    We assume there is only one match, and we assert it. If there are no matches or more than one match, we raise an error.
+    The columns of the interference per entity file embed an epoch count
+    (`metric_{unlearning_algorithm}_{epochs}_{fragment} ({direction_arrow})`) that this
+    function's caller does not know, so an exact column name cannot be constructed here — we
+    match every epoch and require exactly one hit. `interference_entity` itself is fully
+    systematic (see `configuration.generate_me_names()`), so the only genuinely unknown segment
+    is the epoch count.
 
-    The names look like this:
+    We assume there is only one match, and we assert it. If there are no matches or more than one
+    match, we raise an error.
+
+    Example column names this matches against:
         'metric_distil_400_emitter_minus_receiver_worst_interfered_ssim (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_brisque_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_clip_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_rmse (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_ssim (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_zero_clip_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_average_brisque_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_average_clip_diff (↑)',
-       'metric_uce_000_emitter_minus_receiver_average_rmse (↓)',
-       'metric_munba_100_emitter_minus_receiver_average_ssim (↑)',
-    
-    TODO: these names are defined in `4. Compute interference per entity.ipynb`. There should be a central way of defining them.
+        'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_brisque_diff (↓)',
+        'metric_uce_000_emitter_minus_receiver_average_rmse (↓)',
+        'metric_munba_100_emitter_minus_receiver_average_ssim (↑)',
     """
-    pattern = f"metric_{unlearning_algorithm}_[^_]*_{interference_entity.lower().replace(' ', '_')} .*"
+    fragment = _me_column_fragment(interference_entity)
+    pattern = f"metric_{unlearning_algorithm}_[^_]*_{fragment} .*"
     matching_cols = [col for col in metric_cols if re.match(pattern, col)]
     if len(matching_cols) == 0:
         raise ValueError(f'No metric column found for unlearning_algorithm={unlearning_algorithm} and interference_entity={interference_entity}')
@@ -265,34 +279,118 @@ def choose_metric_column_interference_per_entity(
 ##########################################
 def get_embedding_output_path(
     task: str,
-    target_preprocessed: str,
+    hf_entity: str,
     method: str,
     num_train_epochs: int,
     base_folder: str = "assets",
+    model: type_model = "sd1.4",
 ) -> str:
-    """Local path for the output JSON.
+    """Local path for a per-entity (unlearned) embedding file.
 
-    Baseline embeddings (target_preprocessed == 'original') use a method-agnostic
-    name because they embed generated_{task}_baseline/ which has no method or epoch.
-    Per-entity embeddings include method and epoch.
+    The method-agnostic baseline is addressed by :class:`BaselineEmbeddings`; it has no
+    method or epoch, so it must never be built through this method/epoch-carrying interface.
     """
-    if target_preprocessed == "original":
-        filename = f"embeddings_{task}_original.json"
-    else:
-        filename = f"embeddings_{task}_{target_preprocessed}_{method}_{num_train_epochs:03d}.json"
+    filename = f"embeddings_{task}_{hf_entity}_{method}_{num_train_epochs:03d}{model_segment(model)}.json"
     return os.path.join(base_folder, "datasets", filename)
 
 
 def get_embedding_hf_path(
     task: str,
-    target_preprocessed: str,
+    hf_entity: str,
     method: str,
     num_train_epochs: int,
+    model: type_model = "sd1.4",
 ) -> str:
-    """HF repo path (no leading slash) for the output JSON."""
-    if target_preprocessed == "original":
-        return f"datasets/embeddings_{task}_original.json"
-    return f"datasets/embeddings_{task}_{target_preprocessed}_{method}_{num_train_epochs:03d}.json"
+    """HuggingFace repo path (no leading slash) for a per-entity (unlearned) embedding file.
+
+    The method-agnostic baseline is addressed by :class:`BaselineEmbeddings`.
+    """
+    return f"datasets/embeddings_{task}_{hf_entity}_{method}_{num_train_epochs:03d}{model_segment(model)}.json"
+
+
+def _embedding_function_suffix(embedding_function: type_l) -> str:
+    """Filename segment for the embedding function.
+
+    ``dino_embedding`` (the only function currently produced) keeps the historical
+    method-agnostic name unchanged; any other function adds a disambiguating segment so
+    files never collide. The non-``dino`` branch is interface-only: it makes a second
+    embedding function representable without renaming any existing asset.
+    """
+    return "" if embedding_function == "dino_embedding" else f"_{embedding_function}"
+
+
+# BaselineEmbeddings and EntityEmbeddings wrap the DINOv2 (or other embedding-function)
+# embedding files, sharing the local -> HuggingFace -> from-scratch storage cascade with the
+# Result Templates and the interference artifacts (all inherit it from SingleFileArtifact).
+class BaselineEmbeddings(SingleFileArtifact):
+    """Embeddings of the ORIGINAL-model generated images for one task.
+
+    The baseline is produced by the base model with no unlearning, so it depends only on the
+    task, the base model, and the embedding function — never on an unlearning method or its
+    epoch count.
+    """
+    task: type_task = "people"
+    model: type_model = "sd1.4"
+    embedding_function: type_l = "dino_embedding"
+
+    def _get_data_path_remote(self) -> str:
+        suffix = _embedding_function_suffix(self.embedding_function)
+        return f"datasets/embeddings_{self.task}_original{model_segment(self.model)}{suffix}.json"
+
+    def _compute_from_scratch(self) -> Dict[str, Any]:
+        raise NotImplementedError(
+            "BaselineEmbeddings._compute_from_scratch requires a GPU (embedding the "
+            "generated baseline images with DINOv2) and is not supported here. Provide the "
+            "local file, fetch it from HuggingFace, or run pipeline_05 (compute embeddings) "
+            "for the baseline."
+        )
+
+    def _validate(self, data: Any) -> None:
+        assert isinstance(data, dict)
+        assert "embeddings" in data
+
+    def compute(self) -> Dict[str, Any]:
+        """Resolve the baseline embeddings from local disk, HuggingFace, or from scratch."""
+        return cast(Dict[str, Any], self._resolve())
+
+
+class EntityEmbeddings(SingleFileArtifact):
+    """Embeddings of the images generated by a model UNLEARNED on one entity.
+
+    Unlike the baseline, these depend on the unlearning method and its epoch count. The
+    epoch count is derived from the executed-combination table so callers only pass the
+    method, mirroring the existing path helpers.
+    """
+    task: type_task = "people"
+    hf_entity: str = ""
+    unlearning_algorithm: type_unlearning_algorithm = "distil"
+    model: type_model = "sd1.4"
+    embedding_function: type_l = "dino_embedding"
+
+    def _epochs(self) -> int:
+        return unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+
+    def _get_data_path_remote(self) -> str:
+        suffix = _embedding_function_suffix(self.embedding_function)
+        return (
+            f"datasets/embeddings_{self.task}_{self.hf_entity}"
+            f"_{self.unlearning_algorithm}_{self._epochs():03d}{model_segment(self.model)}{suffix}.json"
+        )
+
+    def _compute_from_scratch(self) -> Dict[str, Any]:
+        raise NotImplementedError(
+            "EntityEmbeddings._compute_from_scratch requires a GPU (embedding the "
+            "per-entity unlearned images with DINOv2) and is not supported here. Provide the "
+            "local file, fetch it from HuggingFace, or run pipeline_05 (compute embeddings)."
+        )
+
+    def _validate(self, data: Any) -> None:
+        assert isinstance(data, dict)
+        assert "embeddings" in data
+
+    def compute(self) -> Dict[str, Any]:
+        """Resolve the per-entity embeddings from local disk, HuggingFace, or from scratch."""
+        return cast(Dict[str, Any], self._resolve())
 
 
 

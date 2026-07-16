@@ -58,6 +58,7 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     get_embedding_output_path,
     get_interference_per_entity_path,
     get_interference_per_pair_path,
+    BaselineEmbeddings,
 )
 from vision_unlearning.datasets.testbed import (
     exists_unlearned_dataset,
@@ -228,12 +229,12 @@ def enumerate_items(
             ))
 
         if "embeddings" in stages:
-            # Baseline embedding: method-agnostic (one per task), see pipeline_05 docstring.
+            # Baseline embedding: method-agnostic (one per task), addressed by BaselineEmbeddings.
             items.append(SyncItem(
                 stage="embeddings", task=task, name="original",
                 kind="file",
-                local_path=get_embedding_output_path(task, "original", "", 0, base_folder=base_folder),
-                remote_path=get_embedding_hf_path(task, "original", "", 0),
+                local_path=BaselineEmbeddings(task=task_t, base_folder=base_folder)._get_data_path_local(),  # type: ignore[arg-type]
+                remote_path=BaselineEmbeddings(task=task_t)._get_data_path_remote(),  # type: ignore[arg-type]
             ))
 
         for method in methods:
@@ -473,8 +474,9 @@ if __name__ == "__main__":
                         help="Check-only mode: report local/remote completion status, upload nothing.")
     parser.add_argument("--base-folder", default="assets",
                         help="Local base folder for data storage.")
-    parser.add_argument("--status-path", default=os.path.join("assets", "hf_sync_status.json"),
-                        help="Where to write the JSON status report.")
+    parser.add_argument("--status-path", default=None,
+                        help="Where to write the JSON status report "
+                             "(default: '{base_folder}/hf_sync_status.json').")
     parser.add_argument("--repository", default=HF_REPO)
     parser.add_argument("--max-retries", type=int, default=5,
                         help="Upload retry attempts per item (exponential backoff).")
@@ -486,6 +488,9 @@ if __name__ == "__main__":
 
     stages: List[str] = STAGES if "all" in args.stages else args.stages
     upload: bool = not args.no_upload
+    # The status report defaults inside the chosen base folder so nothing is written
+    # outside it when --base-folder is overridden; an explicit --status-path still wins.
+    status_path: str = args.status_path or os.path.join(args.base_folder, "hf_sync_status.json")
 
     # --- Token (same lookup as pipeline_05) ---
     _env_paths = [
@@ -549,4 +554,4 @@ if __name__ == "__main__":
             print(f"  {i.remote_path}")
         if len(missing) > 50:
             print(f"  ... and {len(missing) - 50} more (full list in the status JSON)")
-    write_status_json(items, report, args.status_path, args.repository)
+    write_status_json(items, report, status_path, args.repository)

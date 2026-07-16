@@ -15,6 +15,7 @@ Requires: precomputed RT results in assets/results/ (run pipeline_08 first).
 """
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,10 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pipeline_10")
 
-OUT_DIR = "reports/paper_outputs"
-ASSETS_DIR = "assets"
-
-# Paper method labels (distil = SPARE in published figures)
+# Paper method labels (distil = spare in published figures)
 METHOD_LABELS = {"distil": "spare", "munba": "munba", "uce": "uce"}
 ATTR_LABELS: dict = {
     "group": "Breed group",
@@ -60,8 +58,8 @@ ATTR_LABELS: dict = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _save(fig: plt.Figure, filename: str) -> None:
-    path = os.path.join(OUT_DIR, filename)
+def _save(fig: plt.Figure, filename: str, output_dir: str) -> None:
+    path = os.path.join(output_dir, filename)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved → %s", path)
@@ -87,14 +85,10 @@ def _draw_bracket(
     ax.text((x1 + x2) / 2, y + h + 0.1, label, ha="center", va="bottom", fontsize=6.5)
 
 
-def _load_sr_grid() -> pd.DataFrame:
+def _load_sr_grid(sr_grid_dir: str) -> pd.DataFrame:
     """Load the reconciled SR grid (sr_grid_reconciled.csv); falls back to sr_grid.csv."""
-    reconciled = os.path.join(
-        "reports", "AttributeInterference_analysis", "sr_grid_reconciled.csv"
-    )
-    fallback = os.path.join(
-        "reports", "AttributeInterference_analysis", "sr_grid.csv"
-    )
+    reconciled = os.path.join(sr_grid_dir, "sr_grid_reconciled.csv")
+    fallback = os.path.join(sr_grid_dir, "sr_grid.csv")
     if os.path.exists(reconciled):
         df = pd.read_csv(reconciled)
         logger.info("SR grid: loaded %s (%d rows)", reconciled, len(df))
@@ -117,7 +111,7 @@ def _load_sr_grid() -> pd.DataFrame:
 # 1. sig_by_method.png
 # ---------------------------------------------------------------------------
 
-def gen_sig_by_method(df: pd.DataFrame) -> None:
+def gen_sig_by_method(df: pd.DataFrame, output_dir: str) -> None:
     """Bar chart: % significant SR results by unlearning method."""
     df = df.copy()
     df["method_label"] = df["method"].map(lambda m: METHOD_LABELS.get(m, m))
@@ -157,19 +151,19 @@ def gen_sig_by_method(df: pd.DataFrame) -> None:
         "% significant SR results by method\n(all tasks × attrs-of-interest × Me)", fontsize=9
     )
     plt.tight_layout()
-    _save(fig, "sig_by_method.png")
+    _save(fig, "sig_by_method.png", output_dir)
 
 
 # ---------------------------------------------------------------------------
 # 2. sig_by_attribute.png
 # ---------------------------------------------------------------------------
 
-def _load_srn_significant_counts() -> Dict[str, Dict[str, int]]:
+def _load_srn_significant_counts(base_folder: str) -> Dict[str, Dict[str, int]]:
     """Load count of significant results from SRN JSONs.
 
     Returns {task: {attribute: count}} for all numerical attributes.
     """
-    srn_dir = os.path.join(ASSETS_DIR, "results", "SignificantRelationshipNumerical")
+    srn_dir = os.path.join(base_folder, "results", "SignificantRelationshipNumerical")
     result: Dict[str, Dict[str, int]] = {}
     if not os.path.isdir(srn_dir):
         logger.warning("SRN dir not found: %s", srn_dir)
@@ -190,7 +184,7 @@ def _load_srn_significant_counts() -> Dict[str, Dict[str, int]]:
     return result
 
 
-def gen_sig_by_attribute(df: pd.DataFrame) -> None:
+def gen_sig_by_attribute(df: pd.DataFrame, base_folder: str, output_dir: str) -> None:
     """Bar chart: % significant SR by attribute, three task panels.
 
     Combines SRC (categorical) results from the df argument with SRN (numerical)
@@ -203,7 +197,7 @@ def gen_sig_by_attribute(df: pd.DataFrame) -> None:
     denom = N_ME * N_METHODS  # 153
 
     # Load SRN counts {task: {attr: sig_count}}
-    srn_counts = _load_srn_significant_counts()
+    srn_counts = _load_srn_significant_counts(base_folder)
 
     fig, axes = plt.subplots(1, 3, figsize=(11, 4))
     for ax, task in zip(axes, task_order):
@@ -247,14 +241,14 @@ def gen_sig_by_attribute(df: pd.DataFrame) -> None:
         fontsize=9, y=1.01,
     )
     plt.tight_layout()
-    _save(fig, "sig_by_attribute.png")
+    _save(fig, "sig_by_attribute.png", output_dir)
 
 
 # ---------------------------------------------------------------------------
 # 3. sig_by_me.png (top-15 Me)
 # ---------------------------------------------------------------------------
 
-def gen_sig_by_me(df: pd.DataFrame) -> None:
+def gen_sig_by_me(df: pd.DataFrame, output_dir: str) -> None:
     """Heatmap: count significant SR per Me (y-axis) × method (x-axis).
 
     Each cell = number of significant results for that (Me, method) combination
@@ -303,14 +297,14 @@ def gen_sig_by_me(df: pd.DataFrame) -> None:
     plt.setp(ax.get_xticklabels(), rotation=0, fontsize=8)
     plt.setp(ax.get_yticklabels(), rotation=0, fontsize=7)
     plt.tight_layout()
-    _save(fig, "sig_by_me.png")
+    _save(fig, "sig_by_me.png", output_dir)
 
 
 # ---------------------------------------------------------------------------
 # 4. sig_breeds_group.png (breeds / group attribute)
 # ---------------------------------------------------------------------------
 
-def gen_sig_breeds_group(_df: pd.DataFrame) -> None:
+def gen_sig_breeds_group(_df: pd.DataFrame, base_folder: str, output_dir: str) -> None:
     """SRC boxplot: breeds / group attribute, UCE method.
 
     Matches paper figure: y = 'Emitter worst interfered clip diff', x = breed group,
@@ -322,13 +316,13 @@ def gen_sig_breeds_group(_df: pd.DataFrame) -> None:
             unlearning_algorithm="uce",  # type: ignore[arg-type]
             interference_entity="Emitter worst interfered clip diff",  # type: ignore[arg-type]
             attribute="group",
-            base_folder=ASSETS_DIR,
+            base_folder=base_folder,
         )
         data = rt.compute()
         result = rt.plot(data, return_fig=True)
         if result is not None:
             fig, _ = result
-            _save(fig, "sig_breeds_group.png")
+            _save(fig, "sig_breeds_group.png", output_dir)
     except Exception as exc:
         logger.error("SRC breeds/group: %s", exc)
 
@@ -337,7 +331,7 @@ def gen_sig_breeds_group(_df: pd.DataFrame) -> None:
 # 5. SimilarityMatrix figures
 # ---------------------------------------------------------------------------
 
-def gen_similarity_matrix_figures() -> None:
+def gen_similarity_matrix_figures(base_folder: str, output_dir: str) -> None:
     """SimilarityMatrix_people_clip.png and sim_matrix_act.png.
 
     SimilarityMatrix_people_clip.png: standard CLIP cosine similarity matrix for people
@@ -355,13 +349,13 @@ def gen_similarity_matrix_figures() -> None:
         rt = vb.ResultTemplateSimilarityMatrix(
             task="people",
             similarity_metric="clip",
-            base_folder=ASSETS_DIR,
+            base_folder=base_folder,
         )
         data = rt.compute()
         result = rt.plot(data, return_fig=True)
         if result is not None:
             fig, _ = result
-            _save(fig, "SimilarityMatrix_people_clip.png")
+            _save(fig, "SimilarityMatrix_people_clip.png", output_dir)
         else:
             logger.warning("SimilarityMatrix plot returned None for people/clip")
     except Exception as exc:
@@ -377,8 +371,8 @@ def gen_similarity_matrix_figures() -> None:
         "Athlete": "#2ecc71",
     }
     try:
-        fps = load_act_fingerprints("people", "sd1.4", ASSETS_DIR)
-        meta = vb.get_metadata_filtered("people")
+        fps = load_act_fingerprints("people", "sd1.4", base_folder)
+        meta = vb.get_metadata_filtered("people", base_folder=base_folder)
         occ_map = {e["name"]: e.get("occupation_simplified", "other") for e in meta}
         entities = [e["name"] for e in meta if e["name"] in fps]
         labels = [occ_map[e] for e in entities]
@@ -415,7 +409,7 @@ def gen_similarity_matrix_figures() -> None:
         ]
         g.fig.legend(handles=patches, loc="upper left", bbox_to_anchor=(0.02, 0.98))
         fig_act = g.fig
-        path = os.path.join(OUT_DIR, "sim_matrix_act.png")
+        path = os.path.join(output_dir, "sim_matrix_act.png")
         fig_act.savefig(path, dpi=100, bbox_inches="tight")
         plt.close(fig_act)
         logger.info("Saved → %s", path)
@@ -427,7 +421,7 @@ def gen_similarity_matrix_figures() -> None:
 # 6. SRN highlight figures
 # ---------------------------------------------------------------------------
 
-def gen_srn_highlights() -> None:
+def gen_srn_highlights(base_folder: str, output_dir: str) -> None:
     """SignificantRelationshipNumerical paper highlight figures.
 
     Paper figures (all use method=distil, per paper inspection):
@@ -463,13 +457,13 @@ def gen_srn_highlights() -> None:
                 unlearning_algorithm=method,
                 interference_entity=me,
                 attribute=attr,
-                base_folder=ASSETS_DIR,
+                base_folder=base_folder,
             )
             data = rt.compute()
             result = rt.plot(data, return_fig=True)
             if result is not None:
                 fig, _ = result
-                _save(fig, filename)
+                _save(fig, filename, output_dir)
         except Exception as exc:
             logger.error("SRN %s/%s/%s/%s: %s", task, method, me, attr, exc)
 
@@ -485,6 +479,8 @@ def _gen_directional_sr_composite(
     interference_pair: str,
     source_values: list,
     filename: str,
+    base_folder: str,
+    output_dir: str,
 ) -> None:
     """Generate a multi-panel directional SR figure (one panel per source group).
 
@@ -503,7 +499,7 @@ def _gen_directional_sr_composite(
                 attribute=attribute,
                 source_attribute_value=source_val,
                 interference_pair=interference_pair,  # type: ignore[arg-type]
-                base_folder=ASSETS_DIR,
+                base_folder=base_folder,
             )
             data = rt.compute()
             result = rt.plot(data, return_fig=True)
@@ -541,10 +537,10 @@ def _gen_directional_sr_composite(
         plt.close(panel_fig)
 
     composite_fig.tight_layout(pad=0)
-    _save(composite_fig, filename)
+    _save(composite_fig, filename, output_dir)
 
 
-def gen_directional_sr_figures() -> None:
+def gen_directional_sr_figures(base_folder: str, output_dir: str) -> None:
     """sig_dir_occupation.png and sig_dir_sports.png.
 
     Each figure is a multi-panel composite showing all source groups for the attribute
@@ -563,6 +559,8 @@ def gen_directional_sr_figures() -> None:
             interference_pair="clip_diff",
             source_values=["Politician", "Athlete", "Artist"],
             filename="sig_dir_occupation.png",
+            base_folder=base_folder,
+            output_dir=output_dir,
         )
         # Also save as the RT-conventional name (committed in paper/images/ as a separate file).
         _gen_directional_sr_composite(
@@ -572,6 +570,8 @@ def gen_directional_sr_figures() -> None:
             interference_pair="clip_diff",
             source_values=["Politician", "Athlete", "Artist"],
             filename="SignificantRelationshipCategoricalDirectional_occupation_people_fade.png",
+            base_folder=base_folder,
+            output_dir=output_dir,
         )
     except AttributeError:
         logger.warning(
@@ -588,6 +588,8 @@ def gen_directional_sr_figures() -> None:
             interference_pair="clip_diff",
             source_values=["False", "True"],
             filename="sig_dir_sports.png",
+            base_folder=base_folder,
+            output_dir=output_dir,
         )
     except AttributeError:
         logger.warning(
@@ -600,7 +602,7 @@ def gen_directional_sr_figures() -> None:
 # 8. IAT figures
 # ---------------------------------------------------------------------------
 
-def gen_iat_figures() -> None:
+def gen_iat_figures(base_folder: str, output_dir: str) -> None:
     """iat_gender.png, iat_hpi.png, iat_uce.png."""
     cases = [
         ("people", "distil", "gender", "occupation_simplified", "iat_gender.png"),
@@ -615,13 +617,13 @@ def gen_iat_figures() -> None:
                 attribute_1=attr1,
                 attribute_2=attr2,
                 latent_embedding="dino_embedding",
-                base_folder=ASSETS_DIR,
+                base_folder=base_folder,
             )
             data = rt.compute()
             result = rt.plot(data, return_fig=True)
             if result is not None:
                 fig, _ = result
-                _save(fig, filename)
+                _save(fig, filename, output_dir)
         except Exception as exc:
             logger.error("IAT %s/%s/%s/%s: %s", task, method, attr1, attr2, exc)
 
@@ -630,7 +632,7 @@ def gen_iat_figures() -> None:
 # 9. Visual summaries
 # ---------------------------------------------------------------------------
 
-def gen_visual_summaries() -> None:
+def gen_visual_summaries(base_folder: str, output_dir: str) -> None:
     """visual_summary_schnauzer_uce_seed{N}.png and visual_summary_skating_distil_seed{N}.png.
 
     Generates one image per seed (42, 43, 44, 45) for each entity.
@@ -646,7 +648,7 @@ def gen_visual_summaries() -> None:
     ]
     for task, method, entity_name, mp, prefix in cases:
         try:
-            metadata = get_metadata_filtered(task)  # type: ignore[arg-type]
+            metadata = get_metadata_filtered(task, base_folder=base_folder)  # type: ignore[arg-type]
             names = [m["name"] for m in metadata]
             if entity_name not in names:
                 logger.warning(
@@ -665,13 +667,13 @@ def gen_visual_summaries() -> None:
                         entity_index=entity_index,
                         seed=seed,
                         save_outputs=True,
-                        base_folder=ASSETS_DIR,
+                        base_folder=base_folder,
                     )
                     data = rt.compute()
                     result = rt.plot(data, return_fig=True)
                     if result is not None:
                         fig, _ = result
-                        _save(fig, filename)
+                        _save(fig, filename, output_dir)
                 except Exception as exc:
                     logger.error(
                         "VisualSummary %s/%s/%s/%s seed=%d: %s",
@@ -685,7 +687,7 @@ def gen_visual_summaries() -> None:
 # 10. Latent embedding figures
 # ---------------------------------------------------------------------------
 
-def gen_latent_embedding_figures() -> None:
+def gen_latent_embedding_figures(base_folder: str, output_dir: str) -> None:
     """latent_dino_bush.png, latent_dino_serena.png, latent_dino_winona.png."""
     cases = [
         # Paper reference for latent_dino_bush uses distil method.
@@ -699,13 +701,13 @@ def gen_latent_embedding_figures() -> None:
                 task=task,  # type: ignore[arg-type]
                 unlearning_algorithm=method,  # type: ignore[arg-type]
                 entity=entity_name,
-                base_folder=ASSETS_DIR,
+                base_folder=base_folder,
             )
             data = rt.compute()
             result = rt.plot(data, return_fig=True)
             if result is not None:
                 fig, _ = result
-                _save(fig, filename)
+                _save(fig, filename, output_dir)
         except Exception as exc:
             logger.error(
                 "EmbeddingUnlearningProfile %s/%s/%s: %s", task, method, entity_name, exc
@@ -716,7 +718,7 @@ def gen_latent_embedding_figures() -> None:
 # 11. MCME figure
 # ---------------------------------------------------------------------------
 
-def gen_mcme_figure() -> None:
+def gen_mcme_figure(base_folder: str, output_dir: str) -> None:
     """MethodComparisonByMetricEntity.png.
 
     3-panel figure: People / Scenes / Breeds, all 3 methods, symlog y-scale.
@@ -736,7 +738,7 @@ def gen_mcme_figure() -> None:
                 task=task,  # type: ignore[arg-type]
                 interference_entity=_ME,  # type: ignore[arg-type]
                 unlearning_algorithm_list=_METHODS,  # type: ignore[arg-type]
-                base_folder=ASSETS_DIR,
+                base_folder=base_folder,
                 recompute_if_exists=True,  # stale caches exist from pre-Phase0 per-entity rebuild
             )
             task_data[task] = rt.compute()
@@ -783,14 +785,14 @@ def gen_mcme_figure() -> None:
                fontsize=9, bbox_to_anchor=(0.5, -0.05))
     fig.suptitle("Method comparison | Metric: Emitter average clip diff", fontsize=13, y=1.02)
     plt.tight_layout(pad=0.8)
-    _save(fig, "MethodComparisonByMetricEntity.png")
+    _save(fig, "MethodComparisonByMetricEntity.png", output_dir)
 
 
 # ---------------------------------------------------------------------------
 # 12. MMA clip_rmse figure
 # ---------------------------------------------------------------------------
 
-def gen_mma_clip_rmse() -> None:
+def gen_mma_clip_rmse(base_folder: str, output_dir: str) -> None:
     """MetricMetricAlignment_clip_rmse.png.
 
     Scatter plot of Me1='Emitter average clip diff' vs Me2='Emitter average rmse'
@@ -802,13 +804,13 @@ def gen_mma_clip_rmse() -> None:
             unlearning_algorithm="uce",
             interference_entity_1="Emitter average clip diff",
             interference_entity_2="Emitter average rmse",
-            base_folder=ASSETS_DIR,
+            base_folder=base_folder,
         )
         data = rt.compute()
         result = rt.plot(data, return_fig=True)
         if result is not None:
             fig, _ = result
-            _save(fig, "MetricMetricAlignment_clip_rmse.png")
+            _save(fig, "MetricMetricAlignment_clip_rmse.png", output_dir)
     except Exception as exc:
         logger.error("MMA clip_rmse: %s", exc)
 
@@ -817,7 +819,7 @@ def gen_mma_clip_rmse() -> None:
 # 13. MSAOne figures
 # ---------------------------------------------------------------------------
 
-def gen_msaone_figures() -> None:
+def gen_msaone_figures(base_folder: str, output_dir: str) -> None:
     """msaone_* figures — single-emitter MSA and rank-by-similarity plots.
 
     scatter cases: ResultTemplateMetricSimilarityAlignmentOne (x=similarity, y=interference)
@@ -843,7 +845,7 @@ def gen_msaone_figures() -> None:
                     interference_pair=mp,  # type: ignore[arg-type]
                     similarity_metric=sim,  # type: ignore[arg-type]
                     entity=emitter,
-                    base_folder=ASSETS_DIR,
+                    base_folder=base_folder,
                 )
             else:
                 rt = vb.ResultTemplateInterferenceBySimilarityRank(  # type: ignore[arg-type]
@@ -852,13 +854,13 @@ def gen_msaone_figures() -> None:
                     interference_pair=mp,  # type: ignore[arg-type]
                     similarity_metric=sim,  # type: ignore[arg-type]
                     entity=emitter,
-                    base_folder=ASSETS_DIR,
+                    base_folder=base_folder,
                 )
             data = rt.compute()
             result = rt.plot(data, return_fig=True)
             if result is not None:
                 fig, _ = result
-                _save(fig, filename)
+                _save(fig, filename, output_dir)
         except Exception as exc:
             logger.error("MSAOne %s/%s/%s/%s/%s/%s: %s", rt_type, task, method, mp, sim, emitter, exc)
 
@@ -867,7 +869,7 @@ def gen_msaone_figures() -> None:
 # 14. MSA full-grid figures
 # ---------------------------------------------------------------------------
 
-def gen_msa_full_figures() -> None:
+def gen_msa_full_figures(base_folder: str, output_dir: str) -> None:
     """msa_full_groupby_method.png and msa_full_heatmap_sim_mp_abs.png.
 
     Aggregation over the full 3 tasks × 3 methods × 5 Mp × 4 s = 180 MSA grid.
@@ -876,7 +878,7 @@ def gen_msa_full_figures() -> None:
     """
     _SIM_KEEP = ["clip", "jacc", "dino", "act"]
     _MP_KEEP = ["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"]
-    msa_dir = os.path.join(ASSETS_DIR, "results", "MetricSimilarityAlignment")
+    msa_dir = os.path.join(base_folder, "results", "MetricSimilarityAlignment")
 
     records = []
     for fpath in sorted(glob.glob(os.path.join(msa_dir, "*.json"))):
@@ -941,7 +943,7 @@ def gen_msa_full_figures() -> None:
             ax.text(v + 0.001, i, f"{v:.4f}  ({ns}/{nc} sig)", va="center", fontsize=9)
         ax.set_xlim(0, float(gb_method["mean_abs_r"].max()) * 1.5)
         plt.tight_layout(pad=0.5)
-        _save(fig, "msa_full_groupby_method.png")
+        _save(fig, "msa_full_groupby_method.png", output_dir)
     except Exception as exc:
         logger.error("msa_full_groupby_method: %s", exc)
 
@@ -968,7 +970,7 @@ def gen_msa_full_figures() -> None:
         plt.setp(ax2.get_xticklabels(), rotation=30, ha="right")
         plt.setp(ax2.get_yticklabels(), rotation=0)
         plt.tight_layout(pad=0.5)
-        _save(fig2, "msa_full_heatmap_sim_mp_abs.png")
+        _save(fig2, "msa_full_heatmap_sim_mp_abs.png", output_dir)
     except Exception as exc:
         logger.error("msa_full_heatmap_sim_mp_abs: %s", exc)
 
@@ -993,10 +995,12 @@ def gen_mci_graph() -> None:
 # 16. Equalization and Pareto figures
 # ---------------------------------------------------------------------------
 
-def _load_mma_json(task: str, method: str, me1_slug: str, me2_slug: str) -> Optional[dict]:
-    """Load a pre-computed MMA JSON from assets/results/MetricMetricAlignment/."""
+def _load_mma_json(
+    task: str, method: str, me1_slug: str, me2_slug: str, base_folder: str
+) -> Optional[dict]:
+    """Load a pre-computed MMA JSON from ``{base_folder}/results/MetricMetricAlignment/``."""
     path = os.path.join(
-        ASSETS_DIR, "results", "MetricMetricAlignment",
+        base_folder, "results", "MetricMetricAlignment",
         f"sd1.4_{task}_{method}_{me1_slug}_{me2_slug}.json",
     )
     if not os.path.exists(path):
@@ -1019,7 +1023,7 @@ def _pareto_front_indices(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return np.where(~dominated)[0]
 
 
-def gen_mma_equalization_pareto() -> None:
+def gen_mma_equalization_pareto(base_folder: str, output_dir: str) -> None:
     """equalization.png and paretto.png.
 
     equalization.png: 3-panel (People / Scenes / Breeds), forget_clip_diff vs
@@ -1051,7 +1055,7 @@ def gen_mma_equalization_pareto() -> None:
         )
         for ax, task in zip(axes_eq, eq_tasks):
             for method in _METHODS:
-                d = _load_mma_json(task, method, _ME1, _ME2)
+                d = _load_mma_json(task, method, _ME1, _ME2, base_folder)
                 if d is None:
                     logger.warning("equalization: no data for %s/%s", task, method)
                     continue
@@ -1076,7 +1080,7 @@ def gen_mma_equalization_pareto() -> None:
             ax.set_title(f"Task: {task.title()}", fontsize=10)
             ax.legend(fontsize=8, loc="upper right")
         plt.tight_layout()
-        _save(fig_eq, "equalization.png")
+        _save(fig_eq, "equalization.png", output_dir)
     except Exception as exc:
         logger.error("equalization.png: %s", exc)
 
@@ -1084,7 +1088,7 @@ def gen_mma_equalization_pareto() -> None:
     # paretto.png — Pareto front for distil/Scenes
     # -------------------------------------------------------------------------
     try:
-        d_par = _load_mma_json("scenes", "distil", _ME1, _ME2)
+        d_par = _load_mma_json("scenes", "distil", _ME1, _ME2, base_folder)
         if d_par is None:
             logger.warning("paretto.png: no MMA data for scenes/distil — skipping")
             return
@@ -1093,7 +1097,7 @@ def gen_mma_equalization_pareto() -> None:
         names_p: List[str] = d_par["result"].get("entity_names", [f"e{i}" for i in range(len(x_p))])
 
         # Load specificity ratios for coloring
-        ipe_path = os.path.join(ASSETS_DIR, "interference_per_entity_scenes.json")
+        ipe_path = os.path.join(base_folder, "interference_per_entity_scenes.json")
         ipe: Dict[str, Any] = {}
         if os.path.exists(ipe_path):
             with open(ipe_path, encoding="utf-8") as f:
@@ -1178,7 +1182,7 @@ def gen_mma_equalization_pareto() -> None:
                 ax_r.text(i, med + 0.05, f"{med:.2f}", ha="center", fontsize=8)
 
         plt.tight_layout()
-        _save(fig_par, "paretto.png")
+        _save(fig_par, "paretto.png", output_dir)
     except Exception as exc:
         logger.error("paretto.png: %s", exc)
 
@@ -1266,7 +1270,7 @@ def gen_grid_clipdiff_act_top5() -> None:
 # 22. dinodiff_jacc figure
 # ---------------------------------------------------------------------------
 
-def gen_dinodiff_jacc_figure() -> None:
+def gen_dinodiff_jacc_figure(base_folder: str, output_dir: str) -> None:
     """dinodiff_jacc_scenes_distil.png — MSAOne for dino_diff / jacc."""
     try:
         rt = vb.ResultTemplateMetricSimilarityAlignment(
@@ -1274,13 +1278,13 @@ def gen_dinodiff_jacc_figure() -> None:
             unlearning_algorithm="distil",
             interference_pair="dino_diff",
             similarity_metric="jacc",
-            base_folder=ASSETS_DIR,
+            base_folder=base_folder,
         )
         data = rt.compute()
         result = rt.plot(data, return_fig=True)
         if result is not None:
             fig, _ = result
-            _save(fig, "dinodiff_jacc_scenes_distil.png")
+            _save(fig, "dinodiff_jacc_scenes_distil.png", output_dir)
     except Exception as exc:
         logger.error("dinodiff_jacc: %s", exc)
 
@@ -1289,71 +1293,114 @@ def gen_dinodiff_jacc_figure() -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Regenerate every data-derived figure in the paper. Reads precomputed "
+            "RT results from the assets folder and writes figures to the output "
+            "directory."
+        )
+    )
+    parser.add_argument(
+        "--base-folder",
+        default="assets",
+        metavar="PATH",
+        help=(
+            "Path to the assets folder holding the precomputed RT results the "
+            "figures are built from (default: 'assets' in the current directory)."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="reports/paper_outputs",
+        metavar="PATH",
+        help=(
+            "Directory the figures are written to, with filenames matching the "
+            "LaTeX \\includegraphics references (default: 'reports/paper_outputs')."
+        ),
+    )
+    parser.add_argument(
+        "--sr-grid-dir",
+        default=os.path.join("reports", "AttributeInterference_analysis"),
+        metavar="PATH",
+        help=(
+            "Directory holding the reconciled SR grid CSV (sr_grid_reconciled.csv, "
+            "produced by the AttributeInterference analysis) that the significance "
+            "summary figures read (default: 'reports/AttributeInterference_analysis')."
+        ),
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    os.makedirs(OUT_DIR, exist_ok=True)
-    logger.info("Output directory: %s", os.path.abspath(OUT_DIR))
+    args = parse_args()
+    base_folder: str = args.base_folder
+    output_dir: str = args.output_dir
+
+    os.makedirs(output_dir, exist_ok=True)
+    logger.info("Output directory: %s", os.path.abspath(output_dir))
 
     # SR grid — shared by figures 1–4
     sr_df: Optional[pd.DataFrame] = None
     try:
-        sr_df = _load_sr_grid()
+        sr_df = _load_sr_grid(args.sr_grid_dir)
     except FileNotFoundError as exc:
         logger.error("SR grid unavailable: %s", exc)
 
     # ── SR summary figures ──────────────────────────────────────────────────
     if sr_df is not None:
         logger.info("=== sig_by_method.png ===")
-        gen_sig_by_method(sr_df)
+        gen_sig_by_method(sr_df, output_dir)
 
         logger.info("=== sig_by_attribute.png ===")
-        gen_sig_by_attribute(sr_df)
+        gen_sig_by_attribute(sr_df, base_folder, output_dir)
 
         logger.info("=== sig_by_me.png ===")
-        gen_sig_by_me(sr_df)
+        gen_sig_by_me(sr_df, output_dir)
 
         logger.info("=== sig_breeds_group.png ===")
-        gen_sig_breeds_group(sr_df)
+        gen_sig_breeds_group(sr_df, base_folder, output_dir)
 
     # ── RT-based figures ────────────────────────────────────────────────────
     logger.info("=== SimilarityMatrix figures ===")
-    gen_similarity_matrix_figures()
+    gen_similarity_matrix_figures(base_folder, output_dir)
 
     logger.info("=== SRN highlight figures ===")
-    gen_srn_highlights()
+    gen_srn_highlights(base_folder, output_dir)
 
     logger.info("=== Directional SR figures ===")
-    gen_directional_sr_figures()
+    gen_directional_sr_figures(base_folder, output_dir)
 
     logger.info("=== IAT figures ===")
-    gen_iat_figures()
+    gen_iat_figures(base_folder, output_dir)
 
     logger.info("=== Visual summary figures ===")
-    gen_visual_summaries()
+    gen_visual_summaries(base_folder, output_dir)
 
     logger.info("=== Latent embedding figures ===")
-    gen_latent_embedding_figures()
+    gen_latent_embedding_figures(base_folder, output_dir)
 
     logger.info("=== MCME figure ===")
-    gen_mcme_figure()
+    gen_mcme_figure(base_folder, output_dir)
 
     logger.info("=== MMA clip_rmse figure ===")
-    gen_mma_clip_rmse()
+    gen_mma_clip_rmse(base_folder, output_dir)
 
     logger.info("=== MSAOne figures ===")
-    gen_msaone_figures()
+    gen_msaone_figures(base_folder, output_dir)
 
     logger.info("=== dinodiff_jacc figure ===")
-    gen_dinodiff_jacc_figure()
+    gen_dinodiff_jacc_figure(base_folder, output_dir)
 
     # ── Complex aggregations (require manual or follow-up runs) ─────────────
     logger.info("=== MSA full-grid figures (deferred) ===")
-    gen_msa_full_figures()
+    gen_msa_full_figures(base_folder, output_dir)
 
     logger.info("=== MCI graph (deferred) ===")
     gen_mci_graph()
 
     logger.info("=== MMA equalization + Pareto (deferred) ===")
-    gen_mma_equalization_pareto()
+    gen_mma_equalization_pareto(base_folder, output_dir)
 
     logger.info("=== Qualitative figures (deferred) ===")
     gen_qualitative_figures()
@@ -1373,7 +1420,7 @@ def main() -> None:
     logger.info(
         "pipeline_10 complete. Check %s for saved figures. "
         "Figures marked 'deferred' require additional steps — see warnings above.",
-        os.path.abspath(OUT_DIR),
+        os.path.abspath(output_dir),
     )
 
 

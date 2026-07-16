@@ -1,4 +1,5 @@
 
+import argparse
 import os
 import sys
 import random
@@ -142,8 +143,15 @@ hub_model_id = None  # 'LeonardoBenitez/demo-vision-unlearning-' + 'fade' if met
 
 # No need to change anything from now on...
 
+# CLI: the assets folder can be overridden so the script runs from any directory.
+_parser = argparse.ArgumentParser(description="Unlearn a model for a set of entities.")
+_parser.add_argument("--base-folder", default="assets",
+                     help="Path to the assets folder (default: 'assets' in the current directory).")
+_args, _unknown = _parser.parse_known_args()
+base_folder: str = _args.base_folder
+
 # Basic params
-with open(f"assets/metadata_{task}_2_enriched_filtered.json", "r", encoding="utf-8") as f:
+with open(os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json"), "r", encoding="utf-8") as f:
     metadata_filtered = json.load(f)
 
 model_base_name = "CompVis/stable-diffusion-v1-4"
@@ -154,13 +162,13 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # Main loop
 for index in range(index_start, index_start + max_identities):
     target = metadata_filtered[index]['name']
-    output_dir = get_unlearned_model_folder(task, method, num_train_epochs, target)
+    output_dir = get_unlearned_model_folder(task, method, num_train_epochs, target, base_folder=base_folder)
     if task == 'people':
-        dataset_base_path = 'assets/datasets/lfw_splits_filtered'
+        dataset_base_path = os.path.join(base_folder, 'datasets/lfw_splits_filtered')
     elif task == 'breeds':
-        dataset_base_path = 'assets/datasets/taras_breeds_splits_filtered'
+        dataset_base_path = os.path.join(base_folder, 'datasets/taras_breeds_splits_filtered')
     elif task == 'scenes':
-        dataset_base_path = 'assets/datasets/SUN_splits_filtered'
+        dataset_base_path = os.path.join(base_folder, 'datasets/SUN_splits_filtered')
     else:
         raise NotImplementedError()
     assert type(dataset_base_path) == str
@@ -340,7 +348,7 @@ for index in range(index_start, index_start + max_identities):
         raise NotImplementedError()
 
 
-    if replace_if_exists or not exists_unlearned_model(task, method, num_train_epochs, target):
+    if replace_if_exists or not exists_unlearned_model(task, method, num_train_epochs, target, base_folder=base_folder):
         logger.info(f"Overwritting the entity '{target}' by '{target_overwrite}'")
         logger.info(hyperparameters)
         eval_results = unlearner.train()
@@ -403,6 +411,7 @@ for index in range(index_start, index_start + max_identities):
             target=target_preprocessed,
             method=method,
             num_train_epochs=num_train_epochs,
+            base_folder=base_folder,
         )
         generated_dataset_output_path = ds_entity.folder_path
 
