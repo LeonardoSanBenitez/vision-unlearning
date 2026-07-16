@@ -719,6 +719,65 @@ class TestGetTargetOverwriteMethodInvariance(unittest.TestCase):
                 )
 
 
+class TestGetTargetPreprocessedCharacterization(unittest.TestCase):
+    """Locks the CURRENT output of `get_target_preprocessed`, including its known bug, before
+    that bug is fixed.
+
+    Cidral (2026-07-14, item F): `get_target_preprocessed` has a stale
+    ``# TODO THIS SHOULD FOLLOW THE RULES CURRENTLY CODED AT get_target_overwrite`` on its
+    people/breeds branches -- both are literal no-ops (``target_preprocessed = target``), unlike
+    `get_target_overwrite`'s corresponding preprocessing (underscore-to-space for people, an
+    article prepended for breeds). `get_target_overwrite` already has a characterization test
+    (`TestGetTargetOverwriteMethodInvariance` above); `get_target_preprocessed` had zero test
+    coverage before this class -- "keep the exact same behavior" (the user's explicit
+    instruction for this fix) is unverifiable without a locked "before" snapshot.
+
+    This test intentionally documents the CURRENT (buggy) behavior. It is not yet used to gate a
+    fix: three live call sites were found to depend on today's shape (`testbed.py`'s deprecated
+    but still pipeline_02-called `calculate_similarity_clip`; `embeddings.py`'s
+    `prompted_entity` construction; `pipeline_07`'s embedding-specificity self-key lookup), and
+    `pipeline_05` has an explicit comment relying on the people branch returning underscores, not
+    spaces. Fixing the no-op without tracing all four is exactly the kind of "naming is
+    delicate" mistake the user warned about -- deferred to a dedicated pass, not bundled into
+    this cleanup task.
+    """
+
+    TASKS_AND_TARGETS = [
+        ('people', 'Colin_Powell'),
+        ('people', 'Brad_Pitt'),
+        ('breeds', 'poodle'),
+        ('breeds', 'Afghan hound'),
+        ('scenes', 'abbey'),
+        ('scenes', 'airport terminal'),
+    ]
+
+    def test_current_output_snapshot(self) -> None:
+        from vision_unlearning.datasets.testbed import get_target_preprocessed
+        expected = {
+            ('people', 'Colin_Powell'): 'Colin_Powell',  # BUG: no-op, underscores not converted
+            ('people', 'Brad_Pitt'): 'Brad_Pitt',  # BUG: no-op, underscores not converted
+            ('breeds', 'poodle'): 'poodle',  # BUG: no-op, no article prepended
+            ('breeds', 'Afghan hound'): 'Afghan hound',  # BUG: no-op, no article prepended
+            ('scenes', 'abbey'): 'an abbey scene',  # correct: article + " scene" suffix
+            ('scenes', 'airport terminal'): 'an airport terminal scene',  # correct
+        }
+        for task, target in self.TASKS_AND_TARGETS:
+            actual = get_target_preprocessed(task, target)  # type: ignore[arg-type]
+            self.assertEqual(
+                actual, expected[(task, target)],
+                msg=f"get_target_preprocessed({task!r}, {target!r}) changed from the locked snapshot",
+            )
+
+    def test_people_and_breeds_are_currently_no_ops(self) -> None:
+        """Documents the bug explicitly: for people/breeds, output == input, unlike scenes."""
+        from vision_unlearning.datasets.testbed import get_target_preprocessed
+        for task, target in [('people', 'Colin_Powell'), ('breeds', 'poodle')]:
+            self.assertEqual(get_target_preprocessed(task, target), target)  # type: ignore[arg-type]
+        # scenes is NOT a no-op today -- contrast case, so this class can't be satisfied by a
+        # trivial "always return input" stub.
+        self.assertNotEqual(get_target_preprocessed('scenes', 'abbey'), 'abbey')  # type: ignore[arg-type]
+
+
 class TestGeneratedDatasetComputeBatchSize(unittest.TestCase):
     """Issue 3 (Cidral 2026-05-23): batch_size must be forwarded through compute() and
     _compute_from_scratch() to generate_dataset().

@@ -25,6 +25,9 @@ import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+# "No network" for every test in this file is now enforced suite-wide by the autouse
+# `_no_real_huggingface_by_default` fixture in `tests/conftest.py` -- no per-file fixture
+# needed here anymore.
 
 @pytest.fixture(autouse=True)
 def _close_figs() -> Any:

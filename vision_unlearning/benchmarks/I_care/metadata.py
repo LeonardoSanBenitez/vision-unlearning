@@ -228,30 +228,41 @@ class InterferencePerEntity(SingleFileArtifact):
 
 
 
+def _me_column_fragment(interference_entity: type_me) -> str:
+    """Convert a `type_me` display name into the column-name fragment
+    `pipeline_07_compute_interference_per_entity.py` writes: lowercase, spaces to underscores.
+
+    `interference_entity` is guaranteed systematic by `configuration.generate_me_names()` (see
+    that function's docstring for the exact combinatorial structure); this is the one place that
+    knows how a `type_me` name maps to the column-name fragment built from it.
+    """
+    return interference_entity.lower().replace(' ', '_')
+
+
 def choose_metric_column_interference_per_entity(
     unlearning_algorithm: type_unlearning_algorithm,
     interference_entity: type_me,
     metric_cols: List[str],
 ) -> str:
     """
-    The columns of the interference per entity file are not named in a way that is easy to generate given `unlearning_algorithm` and `interference_entity`, so we need to search for the right one.
-    We assume there is only one match, and we assert it. If there are no matches or more than one match, we raise an error.
+    The columns of the interference per entity file embed an epoch count
+    (`metric_{unlearning_algorithm}_{epochs}_{fragment} ({direction_arrow})`) that this
+    function's caller does not know, so an exact column name cannot be constructed here — we
+    match every epoch and require exactly one hit. `interference_entity` itself is fully
+    systematic (see `configuration.generate_me_names()`), so the only genuinely unknown segment
+    is the epoch count.
 
-    The names look like this:
+    We assume there is only one match, and we assert it. If there are no matches or more than one
+    match, we raise an error.
+
+    Example column names this matches against:
         'metric_distil_400_emitter_minus_receiver_worst_interfered_ssim (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_brisque_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_clip_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_rmse (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_ssim (↓)',
-       'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_zero_clip_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_average_brisque_diff (↓)',
-       'metric_distil_400_emitter_minus_receiver_average_clip_diff (↑)',
-       'metric_uce_000_emitter_minus_receiver_average_rmse (↓)',
-       'metric_munba_100_emitter_minus_receiver_average_ssim (↑)',
-    
-    TODO: these names are defined in `4. Compute interference per entity.ipynb`. There should be a central way of defining them.
+        'metric_distil_400_emitter_minus_receiver_number_of_interfered_worse_than_target_brisque_diff (↓)',
+        'metric_uce_000_emitter_minus_receiver_average_rmse (↓)',
+        'metric_munba_100_emitter_minus_receiver_average_ssim (↑)',
     """
-    pattern = f"metric_{unlearning_algorithm}_[^_]*_{interference_entity.lower().replace(' ', '_')} .*"
+    fragment = _me_column_fragment(interference_entity)
+    pattern = f"metric_{unlearning_algorithm}_[^_]*_{fragment} .*"
     matching_cols = [col for col in metric_cols if re.match(pattern, col)]
     if len(matching_cols) == 0:
         raise ValueError(f'No metric column found for unlearning_algorithm={unlearning_algorithm} and interference_entity={interference_entity}')

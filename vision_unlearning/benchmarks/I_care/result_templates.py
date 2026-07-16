@@ -4430,7 +4430,14 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         entity_slug = self.entity.replace(" ", "_")
         try:
             meta = get_metadata_filtered(self.task, base_folder=self.base_folder)
-        except FileNotFoundError:
+        except (FileNotFoundError, NotImplementedError):
+            # FileNotFoundError: legacy direct-file-read path (should no longer occur).
+            # NotImplementedError: MetadataFiltered._compute_from_scratch's actual raise when
+            # the file is absent both locally and on HuggingFace (artifact.py cascade) -- this
+            # is the exception this call site was actually meant to catch; the mp_clip_diffs
+            # Mp-coloring feature below is optional (falls back to the Me aggregate, see the
+            # comment above), so a missing/unreachable metadata file must degrade gracefully
+            # here, not crash the whole RT.
             meta = []
         entity_idx_in_meta: Optional[int] = next(
             (i for i, m in enumerate(meta) if m["name"].replace(" ", "_") == entity_slug),

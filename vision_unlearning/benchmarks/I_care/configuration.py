@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, TypeVar, get_args
 
-# Petty formatted values
-domain_unlearning_algorithm = ["SPARE", "Munba", "UCE"]
+from pydantic import BaseModel
+
+# domain_unlearning_algorithm (pretty names) is derived from ALGORITHM_REGISTRY, defined
+# further down alongside the other declarative registries (Mp/S/L/UnlearningAlgorithm).
 domain_task = ["Breeds", "Scenes", "People"]
 domain_attribute = {
     "Breeds": [
@@ -523,86 +525,9 @@ domain_entity = {
     ],
 }
 domain_model = ["Stable Diffusion 1.4"]
-domain_mp = ["Delta Clip", "Delta Brisque", "RMSE", "SSIM", "DINO Cosine Similarity"]
-domain_me = [
-    "Emitter worst interfered brisque diff",
-    "Emitter worst interfered clip diff",
-    "Emitter worst interfered rmse",
-    "Emitter worst interfered ssim",
-    "Emitter number of interfered worse than target brisque diff",
-    "Emitter number of interfered worse than target clip diff",
-    "Emitter number of interfered worse than target rmse",
-    "Emitter number of interfered worse than target ssim",
-    "Emitter number of interfered worse than zero clip diff",
-    "Emitter average brisque diff",
-    "Emitter average clip diff",
-    "Emitter average rmse",
-    "Emitter average ssim",
-    "Receiver worst interfered brisque diff",
-    "Receiver worst interfered clip diff",
-    "Receiver worst interfered rmse",
-    "Receiver worst interfered ssim",
-    "Receiver number of interfered worse than target brisque diff",
-    "Receiver number of interfered worse than target clip diff",
-    "Receiver number of interfered worse than target rmse",
-    "Receiver number of interfered worse than target ssim",
-    "Receiver number of interfered worse than zero clip diff",
-    "Receiver average brisque diff",
-    "Receiver average clip diff",
-    "Receiver average rmse",
-    "Receiver average ssim",
-    "Emitter minus receiver worst interfered brisque diff",
-    "Emitter minus receiver worst interfered clip diff",
-    "Emitter minus receiver worst interfered rmse",
-    "Emitter minus receiver worst interfered ssim",
-    "Emitter minus receiver number of interfered worse than target brisque diff",
-    "Emitter minus receiver number of interfered worse than target clip diff",
-    "Emitter minus receiver number of interfered worse than target rmse",
-    "Emitter minus receiver number of interfered worse than target ssim",
-    "Emitter minus receiver number of interfered worse than zero clip diff",
-    "Emitter minus receiver average brisque diff",
-    "Emitter minus receiver average clip diff",
-    "Emitter minus receiver average rmse",
-    "Emitter minus receiver average ssim",
-    # Embedding-space specificity: cosine-distance of self-displacement vs mean
-    # retained-entity displacement (computed by "4. Compute interference per entity.py").
-    # Higher is better: ratio >> 1 means unlearning was targeted (forgotten entity
-    # drifted more than retained entities in DINOv2 space).
-    # DINOv2 cosine similarity between on/off images per receiver (computed by
-    # pipeline_06_compute_interference_per_pair.py).
-    # Higher = more similar = less semantic drift = less interference.  Analogous to ssim
-    # but in DINOv2 embedding space rather than pixel space.
-    "Emitter worst interfered dino diff",
-    "Emitter number of interfered worse than target dino diff",
-    "Emitter average dino diff",
-    "Receiver worst interfered dino diff",
-    "Receiver number of interfered worse than target dino diff",
-    "Receiver average dino diff",
-    "Emitter minus receiver worst interfered dino diff",
-    "Emitter minus receiver number of interfered worse than target dino diff",
-    "Emitter minus receiver average dino diff",
-    "Embedding specificity ratio",
-    # CLIP-space unlearning quality (computed by "4. Compute interference per entity.py").
-    # forget_clip_diff: diagonal entry of the interference matrix — clip_diff of the
-    # forgotten entity on its own prompt.  (↓) = more negative = more effective forgetting.
-    # Expected range for effective unlearning: strongly negative values.
-    "Forget clip diff",
-    # retain_average_clip_diff: mean off-diagonal clip_diff — average CLIP change across
-    # all other N-1 entities' prompts after unlearning entity i.  (↑) = closer to zero =
-    # less collateral damage.  Together with Forget clip diff, enables equalization
-    # verification (paper Section ~3.2).
-    "Retain average clip diff",
-]
-domain_s = [
-    "Clip Cosine Similarity",
-    "Jacc Similarity",
-    "DINOv2 Cosine Similarity",
-    "UNet Cross-Attention Similarity",
-]
-domain_l = [
-    "Clip Embedding",
-    "DINOv2 Embedding",
-]
+# domain_mp, domain_me, domain_s, domain_l (pretty names) are all derived further down from the
+# declarative registries (MP_REGISTRY/S_REGISTRY/L_REGISTRY) and from `type_me` itself, once the
+# corresponding `type_*` Literals below exist.
 
 # Types (as they appear in the code/files)
 type_unlearning_algorithm = Literal["distil", "munba", "uce"]
@@ -698,43 +623,6 @@ def model_segment(model: type_model) -> str:
     return "" if model == "sd1.4" else f"_{model}"
 
 
-# And converting between them
-GUI_TO_BACKEND = {
-    "unlearning_algorithm": {
-        "SPARE": "distil",
-        "Munba": "munba",
-        "UCE": "uce",
-    },
-    "task": {
-        "Breeds": "breeds",
-        "Scenes": "scenes",
-        "People": "people",
-    },
-    "model": {
-        "Stable Diffusion 1.4": "sd1.4",
-    },
-    "interference_pair": {
-        "Delta Clip": "clip_diff",
-        "Delta Brisque": "brisque_diff",
-        "RMSE": "rmse",
-        "SSIM": "ssim",
-        "DINO Cosine Similarity": "dino_diff",
-    },
-    "similarity_metric": {
-        "Clip Cosine Similarity": "clip",
-        "Jacc Similarity": "jacc",
-        "DINOv2 Cosine Similarity": "dino",
-        "UNet Cross-Attention Similarity": "act",
-    },
-    "latent_embedding": {
-        "Clip Embedding": "clip_embedding",
-        "DINOv2 Embedding": "dino_embedding",
-    },
-}
-
-
-type_direction = Literal["↑", "↓"]
-
 # =============================================================================
 # DIRECTION CONVENTION  (read carefully — these dicts were historically MIS-commented)
 # -----------------------------------------------------------------------------
@@ -750,34 +638,175 @@ type_direction = Literal["↑", "↓"]
 #     # worst == most interference.  For '↑' metrics worst = SMALLEST value;
 #     #                              for '↓' metrics worst = BIGGEST value.
 # =============================================================================
-mp_to_direction: Dict[type_mp, type_direction] = {
+type_direction = Literal["↑", "↓"]
+
+
+# =============================================================================
+# Declarative registries — single source of truth per concept.
+# -----------------------------------------------------------------------------
+# Each record below replaces what used to be 2-4 independently hand-maintained lists/dicts
+# (a pretty-name list, a direction dict, a GUI_TO_BACKEND entry, ...). Adding a metric, an
+# embedding function, or an unlearning method is exactly one new entry in the corresponding
+# registry; `domain_*`, `*_to_direction`, and `GUI_TO_BACKEND` below are all *derived* from it,
+# so there is nothing else to keep in sync. The `type_*` Literals stay hand-written (mypy needs
+# a static definition), but every registry key is one of that Literal's members, and a
+# completeness test (`tests/test_configuration.py`) locks the two together.
+# =============================================================================
+
+_K = TypeVar("_K")
+
+
+def _pretty_names(registry: Dict[_K, "MetricWithDirectionSpec"], order: List[_K]) -> List[str]:
+    """Look up ``order`` in ``registry`` and return the (guaranteed non-``None``) pretty names,
+    in exactly the given order. Raises if a key is missing a display name (not GUI-exposed)."""
+    names: List[str] = []
+    for key in order:
+        pretty = registry[key].name_pretty
+        assert pretty is not None, f"{key!r} has no display name (not GUI-exposed)"
+        names.append(pretty)
+    return names
+
+
+class MetricWithDirectionSpec(BaseModel):
+    """One (software name, display name, direction) record for a metric used either as a
+    per-pair interference dimension (`type_mp`) or a similarity dimension (`type_s`).
+
+    ``name_pretty`` is ``None`` for a metric that is computed and typed but intentionally not
+    GUI-selectable (currently only `weight_overlap`, a LoRA-weight-specific diagnostic).
+    """
+    name: str
+    name_pretty: Optional[str] = None
+    direction: type_direction
+
+
+class LSpec(BaseModel):
+    """One (software name, display name) record for an embedding function (`type_l`)."""
+    name: str
+    name_pretty: str
+
+
+class UnlearningAlgorithmSpec(BaseModel):
+    """One (software name, display name) record for an unlearning method
+    (`type_unlearning_algorithm`)."""
+    name: str
+    name_pretty: str
+
+
+MP_REGISTRY: Dict[type_mp, MetricWithDirectionSpec] = {
     # clip_diff = clip_on - clip_off.  off = original/baseline model, on = unlearned model.
     # Damaging a receiver lowers clip_on => clip_diff goes NEGATIVE.
     # ==> MORE interference = MORE NEGATIVE (lower) clip_diff.  Arrow "↑" = healthy/higher.
-    "clip_diff": "↑",
+    "clip_diff": MetricWithDirectionSpec(name="clip_diff", name_pretty="Delta Clip", direction="↑"),
     # brisque_diff = brisque_on - brisque_off.  BRISQUE: lower = better quality, so damage
     # raises brisque_on => positive diff.  ==> MORE interference = HIGHER (more positive).
-    "brisque_diff": "↓",
+    "brisque_diff": MetricWithDirectionSpec(name="brisque_diff", name_pretty="Delta Brisque", direction="↓"),
     # rmse between off/on images.  Identical images => 0.  ==> MORE interference = HIGHER rmse.
-    "rmse": "↓",
+    "rmse": MetricWithDirectionSpec(name="rmse", name_pretty="RMSE", direction="↓"),
     # ssim between off/on images, in [0,1].  Identical => 1.  ==> MORE interference = LOWER ssim.
-    "ssim": "↑",
+    "ssim": MetricWithDirectionSpec(name="ssim", name_pretty="SSIM", direction="↑"),
     # dino_diff = DINOv2 cosine similarity of off/on images, in [0,1].  Identical => 1.
     # ==> MORE interference = LOWER dino_diff (same polarity as ssim).
-    "dino_diff": "↑",
+    "dino_diff": MetricWithDirectionSpec(name="dino_diff", name_pretty="DINO Cosine Similarity", direction="↑"),
 }
+# GUI dropdown order (Forgety's frontend) — intentionally NOT the same order as MP_REGISTRY /
+# type_mp above; preserved exactly as before this refactor.
+_MP_DISPLAY_ORDER: List[type_mp] = ["clip_diff", "brisque_diff", "rmse", "ssim", "dino_diff"]
+
 # Similarity metrics: arrow "↑" = HIGHER value means MORE similar (all current s metrics
 # are similarities, so all are "↑").  Higher similarity is hypothesised to predict more
 # interference, but that is a hypothesis about the s<->m_p relationship, NOT the polarity
 # of s itself.
-s_to_direction: Dict[type_s, type_direction] = {
-    "clip": "↑",            # CLIP text/image similarity; higher = more similar
-    "jacc": "↑",            # Jaccard attribute overlap; higher = more similar
-    "dino": "↑",            # DINOv2 cosine similarity; higher = more similar
-    "act": "↑",             # higher cosine = more similar UNet cross-attention pattern
-    "weight_overlap": "↑",  # higher cosine = more shared LoRA weight direction
+S_REGISTRY: Dict[type_s, MetricWithDirectionSpec] = {
+    "clip": MetricWithDirectionSpec(name="clip", name_pretty="Clip Cosine Similarity", direction="↑"),
+    "jacc": MetricWithDirectionSpec(name="jacc", name_pretty="Jacc Similarity", direction="↑"),
+    "dino": MetricWithDirectionSpec(name="dino", name_pretty="DINOv2 Cosine Similarity", direction="↑"),
+    "act": MetricWithDirectionSpec(name="act", name_pretty="UNet Cross-Attention Similarity", direction="↑"),
+    # No name_pretty: cosine similarity of trained LoRA weight changes (B@A), scenes/distil
+    # only — a diagnostic, not GUI-selectable (not in GUI_TO_BACKEND['similarity_metric']).
+    "weight_overlap": MetricWithDirectionSpec(name="weight_overlap", direction="↑"),
 }
+_S_DISPLAY_ORDER: List[type_s] = ["clip", "jacc", "dino", "act"]  # weight_overlap excluded: no display name
+
+L_REGISTRY: Dict[type_l, LSpec] = {
+    "clip_embedding": LSpec(name="clip_embedding", name_pretty="Clip Embedding"),
+    "dino_embedding": LSpec(name="dino_embedding", name_pretty="DINOv2 Embedding"),
+}
+_L_DISPLAY_ORDER: List[type_l] = ["clip_embedding", "dino_embedding"]
+
+ALGORITHM_REGISTRY: Dict[type_unlearning_algorithm, UnlearningAlgorithmSpec] = {
+    "distil": UnlearningAlgorithmSpec(name="distil", name_pretty="SPARE"),
+    "munba": UnlearningAlgorithmSpec(name="munba", name_pretty="Munba"),
+    "uce": UnlearningAlgorithmSpec(name="uce", name_pretty="UCE"),
+}
+_UNLEARNING_ALGORITHM_DISPLAY_ORDER: List[type_unlearning_algorithm] = ["distil", "munba", "uce"]
+
+domain_unlearning_algorithm = [ALGORITHM_REGISTRY[k].name_pretty for k in _UNLEARNING_ALGORITHM_DISPLAY_ORDER]
+domain_mp = _pretty_names(MP_REGISTRY, _MP_DISPLAY_ORDER)
+domain_s = _pretty_names(S_REGISTRY, _S_DISPLAY_ORDER)
+domain_l = [L_REGISTRY[k].name_pretty for k in _L_DISPLAY_ORDER]
+
+mp_to_direction: Dict[type_mp, type_direction] = {k: v.direction for k, v in MP_REGISTRY.items()}
+s_to_direction: Dict[type_s, type_direction] = {k: v.direction for k, v in S_REGISTRY.items()}
 # me_to_direction can... be infered?
+
+# And converting between them
+GUI_TO_BACKEND: Dict[str, Dict[str, str]] = {
+    "unlearning_algorithm": {v.name_pretty: k for k, v in ALGORITHM_REGISTRY.items()},
+    "task": {
+        "Breeds": "breeds",
+        "Scenes": "scenes",
+        "People": "people",
+    },
+    "model": {
+        "Stable Diffusion 1.4": "sd1.4",
+    },
+    "interference_pair": {v.name_pretty: k for k, v in MP_REGISTRY.items() if v.name_pretty is not None},
+    "similarity_metric": {v.name_pretty: k for k, v in S_REGISTRY.items() if v.name_pretty is not None},
+    "latent_embedding": {v.name_pretty: k for k, v in L_REGISTRY.items()},
+}
+
+
+# =============================================================================
+# type_me — combinatorial structure.
+# -----------------------------------------------------------------------------
+# The 51 `type_me` names are not arbitrary: {Emitter, Receiver, Emitter minus receiver} x
+# {worst interfered, number of interfered worse than target, average} x each base Mp metric,
+# plus a clip_diff-only "worse than zero" variant per role, the dino_diff group (retrofitted
+# later — no "worse than zero" variant), and three named specials. `generate_me_names()`
+# reproduces this set from the same MP_REGISTRY above; a test locks it against `type_me`'s own
+# members. This also gives `choose_metric_column_interference_per_entity` (metadata.py) a single
+# authoritative naming contract instead of a bare regex reverse-engineering a convention defined
+# nowhere. The irregularities baked in below are historical, not principled, and are encoded
+# explicitly rather than idealised away — changing them would add/remove `type_me` members,
+# which is out of scope of this refactor (see CONTRIBUTING.md's backward-compatibility rule).
+# =============================================================================
+_ME_ROLES = ["Emitter", "Receiver", "Emitter minus receiver"]
+_ME_AGGREGATIONS = ["worst interfered", "number of interfered worse than target", "average"]
+_ME_BASE_MP_ORDER: List[type_mp] = ["brisque_diff", "clip_diff", "rmse", "ssim"]  # dino_diff handled separately below
+
+
+def generate_me_names() -> List[str]:
+    """Reproduce the `type_me` vocabulary from its combinatorial structure. See the module-level
+    comment above this function for the two historical irregularities encoded here."""
+    names: List[str] = []
+    for role in _ME_ROLES:
+        for aggregation in _ME_AGGREGATIONS:
+            for mp in _ME_BASE_MP_ORDER:
+                names.append(f"{role} {aggregation} {mp.replace('_', ' ')}")
+        # Only clip_diff has a "worse than zero" variant (one per role).
+        names.append(f"{role} number of interfered worse than zero clip diff")
+    # dino_diff was retrofitted after the base four metrics: no "worse than zero" variant.
+    for role in _ME_ROLES:
+        for aggregation in _ME_AGGREGATIONS:
+            names.append(f"{role} {aggregation} dino diff")
+    names += ["Embedding specificity ratio", "Forget clip diff", "Retain average clip diff"]
+    return names
+
+
+# domain_me is the same 51 pretty names as `type_me` (they ARE the pretty names — `type_me`
+# values are already display-cased). Read directly off the Literal's own members instead of
+# hand-duplicating the list a second time, so the two can never drift.
+domain_me = list(get_args(type_me))
 
 
 task_to_attributes_of_interest = {
