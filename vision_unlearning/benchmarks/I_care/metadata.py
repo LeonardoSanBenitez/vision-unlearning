@@ -69,13 +69,14 @@ def get_interference_per_pair(
     base_folder: str = 'assets',
     model: type_model = 'sd1.4',
 ) -> Dict[str, Dict[str, float]]:
-    # TODO: maybe this function should first check locally if the file exists, and if not, check in huggingface if the file exists there, and just then return an error if neighter?
-    assert os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model)), "Caused interferences by this entity were not computed yet"
-    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model), 'r') as f:
-        interference_per_pair = json.load(f)
-    assert isinstance(interference_per_pair, dict)
-    assert len(interference_per_pair) == max_identities
-    return interference_per_pair
+    """Thin wrapper delegating to InterferencePerPair's local -> HuggingFace -> from-scratch
+    cascade (see InterferencePerPair below), mirroring get_metadata_filtered's relationship
+    to MetadataFiltered. A caller only sees a "not computed yet" failure once none of the
+    three sources has the data."""
+    return InterferencePerPair(
+        task=cast(type_task, task), index=index, method=method, num_train_epochs=num_train_epochs,
+        max_identities=max_identities, base_folder=base_folder, model=model,
+    ).compute()
 
 
 def exists_interference_per_pair(
@@ -86,7 +87,11 @@ def exists_interference_per_pair(
     base_folder: str = 'assets',
     model: type_model = 'sd1.4',
 ) -> bool:
-    return os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model))
+    """True if the per-pair interference file is available locally OR on HuggingFace."""
+    return InterferencePerPair(
+        task=cast(type_task, task), index=index, method=method, num_train_epochs=num_train_epochs,
+        base_folder=base_folder, model=model,
+    ).exists()
 
 def save_interference_per_pair(
     interference_per_pair: Dict[str, Dict[str, float]],
@@ -132,11 +137,11 @@ def get_interference_per_pair_inverse(
 class InterferencePerPair(MetricEffectPerEntityPair):
     """Object-oriented interface over a single per-pair interference file.
 
-    Wraps interferences_caused_by_{task}_{index}_{method}_{epochs}.json and adds the shared
-    local -> HuggingFace -> (not-computed-on-demand) storage cascade. Complements the
-    get_interference_per_pair / exists_interference_per_pair / save_interference_per_pair
-    helpers, which remain the fast local-only path. "Interference" is I-CARE's concrete name
-    for the generic `MetricEffectPerEntityPair` shape (see `benchmarks/care.py`).
+    Wraps interferences_caused_by_{task}_{index}_{method}_{epochs}.json with the shared
+    local -> HuggingFace -> (not-yet-computed-on-demand) storage cascade. get_interference_per_pair
+    / exists_interference_per_pair are thin wrappers delegating to this class's compute()/exists().
+    "Interference" is I-CARE's concrete name for the generic `MetricEffectPerEntityPair` shape
+    (see `benchmarks/care.py`).
     """
     task: type_task = 'people'
     index: int
@@ -179,12 +184,12 @@ def get_interference_per_entity(
     base_folder: str = 'assets',
     model: type_model = 'sd1.4',
 ) -> List[Dict[str, Any]]:
-    assert os.path.exists(get_interference_per_entity_path(task, base_folder=base_folder, model=model))
-    with open(get_interference_per_entity_path(task, base_folder=base_folder, model=model), "r", encoding="utf-8") as f:
-        metadata_filtered = json.load(f)
-    assert isinstance(metadata_filtered, list)
-    assert len(metadata_filtered) == max_identities
-    return metadata_filtered
+    """Thin wrapper delegating to InterferencePerEntity's local -> HuggingFace ->
+    from-scratch cascade (see InterferencePerEntity below), mirroring
+    get_metadata_filtered's relationship to MetadataFiltered."""
+    data = InterferencePerEntity(task=cast(type_task, task), base_folder=base_folder, model=model).compute()
+    assert len(data) == max_identities
+    return data
 
 
 def save_interference_per_entity(
@@ -200,9 +205,9 @@ def save_interference_per_entity(
 
 # InterferencePerEntity is stored as a single JSON file and shares the local -> HuggingFace
 # -> from-scratch storage cascade with the Result Templates; both inherit that cascade from
-# SingleFileArtifact. The functional helpers below (get_interference_per_entity, ...) remain
-# available and coexist with this object-oriented interface. "Interference" is I-CARE's
-# concrete name for the generic `MetricEffectPerEntity` shape (see `benchmarks/care.py`).
+# SingleFileArtifact. get_interference_per_entity is a thin wrapper delegating to this class's
+# compute(). "Interference" is I-CARE's concrete name for the generic `MetricEffectPerEntity`
+# shape (see `benchmarks/care.py`).
 class InterferencePerEntity(MetricEffectPerEntity):
     task: type_task = 'people'
     model: type_model = 'sd1.4'

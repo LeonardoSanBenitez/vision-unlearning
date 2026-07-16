@@ -564,13 +564,9 @@ class TestComputeFromScratchMocked:
 
         monkeypatch.setattr(vb, "get_interference_per_pair", fake_pair)
         monkeypatch.setattr(_rt_mod, "get_interference_per_pair", fake_pair)
-        monkeypatch.setattr(
-            vb, "get_interference_per_pair_path", lambda *a, **k: "exists"
-        )
-        monkeypatch.setattr(
-            _rt_mod, "get_interference_per_pair_path", lambda *a, **k: "exists"
-        )
-        monkeypatch.setattr(os.path, "exists", lambda p: p == "exists")
+        # ResultTemplateInterferenceMatrix._compute_from_scratch checks availability via
+        # InterferencePerPair.exists() (local-or-HuggingFace cascade), not a raw path check.
+        monkeypatch.setattr(_rt_mod.InterferencePerPair, "exists", lambda self: True)
 
         rt = vb.ResultTemplateInterferenceMatrix(
             task="people",
@@ -791,9 +787,9 @@ class TestComputeFromScratchMocked:
 
         monkeypatch.setattr(vb, "get_interference_per_pair", fake_pair)
         monkeypatch.setattr(_rt_mod, "get_interference_per_pair", fake_pair)
-        # Make all source emitter paths appear to exist.
-        monkeypatch.setattr(vb, "get_interference_per_pair_path", lambda *a, **k: __file__)
-        monkeypatch.setattr(_rt_mod, "get_interference_per_pair_path", lambda *a, **k: __file__)
+        # Make all source emitters appear available: _compute_from_scratch checks via
+        # InterferencePerPair.exists() (local-or-HuggingFace cascade), not a raw path check.
+        monkeypatch.setattr(_rt_mod.InterferencePerPair, "exists", lambda self: True)
 
         rt = vb.ResultTemplateSignificantRelationshipCategoricalDirectional(
             task="scenes",

@@ -170,6 +170,16 @@ class SingleFileArtifact(Artifact):
     def _compute_from_scratch(self) -> Any:
         raise NotImplementedError()
 
+    def exists(self) -> bool:
+        """Return True if the JSON file is available locally OR on HuggingFace.
+
+        Unlike a raw local path check, this reflects the same two sources ``_resolve``
+        itself is willing to read from, so a caller deciding whether to include/skip this
+        artifact (e.g. an aggregation loop over many entities) does not silently treat a
+        HuggingFace-only artifact as missing.
+        """
+        return self._exists_local() or self._exists_remote(get_hf_token_from_env())
+
     # ---- storage hooks over one JSON file ----
     def _exists_local(self) -> bool:
         return os.path.exists(self._get_data_path_local())

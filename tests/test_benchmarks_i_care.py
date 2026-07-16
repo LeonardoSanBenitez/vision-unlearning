@@ -1813,6 +1813,58 @@ class TestInterferencePerPairArtifact:
         with pytest.raises(NotImplementedError):
             ipp.compute()
 
+    def test_remote_hit_downloads_and_returns_data(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression test for a fresh-clone crash: a fresh local cache (nothing downloaded
+        yet) must still resolve data that is only present on HuggingFace, not raise. This is
+        the exact scenario a freshly-cloned Forgety instance hits on first use."""
+        ipp = _meta_mod.InterferencePerPair(
+            task='people', index=0, method='distil', num_train_epochs=400,
+            max_identities=2, base_folder=str(tmp_path),
+        )
+        payload = {'a': {'rmse': 1.0}, 'b': {'rmse': 2.0}}
+        monkeypatch.setattr(
+            _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: True
+        )
+
+        def fake_download(**kw: Any) -> None:
+            local_path = ipp._get_data_path_local()
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f)
+
+        monkeypatch.setattr(_artifact_mod, 'huggingface_dataset_file_download', fake_download)
+        assert not os.path.exists(ipp._get_data_path_local())  # nothing local yet
+        assert ipp.exists()  # cascade-aware existence check sees the HuggingFace copy
+        assert ipp.compute() == payload
+
+    def test_functional_wrapper_delegates_to_cascade(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """get_interference_per_pair / exists_interference_per_pair are thin wrappers over
+        InterferencePerPair; both must see a HuggingFace-only file, not just a local one."""
+        payload = {'a': {'rmse': 1.0}, 'b': {'rmse': 2.0}}
+        monkeypatch.setattr(
+            _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: True
+        )
+
+        def fake_download(**kw: Any) -> None:
+            path = _meta_mod.get_interference_per_pair_path(
+                'people', 0, 'distil', 400, base_folder=str(tmp_path)
+            )
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f)
+
+        monkeypatch.setattr(_artifact_mod, 'huggingface_dataset_file_download', fake_download)
+        assert _meta_mod.exists_interference_per_pair(
+            'people', 0, 'distil', 400, base_folder=str(tmp_path)
+        )
+        assert _meta_mod.get_interference_per_pair(
+            'people', 0, 'distil', 400, max_identities=2, base_folder=str(tmp_path)
+        ) == payload
+
 
 class TestSimilarityArtifact:
     """Similarity wraps the canonical similarity_{s}_{task}.json with the shared cascade and

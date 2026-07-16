@@ -77,15 +77,14 @@ from vision_unlearning.benchmarks.I_care.configuration import (
 from vision_unlearning.benchmarks.I_care.metadata import (
     choose_metric_column_interference_per_entity,
     InterferencePerEntity,
+    InterferencePerPair,
     BaselineEmbeddings,
     EntityEmbeddings,
     get_interference_per_pair,
-    get_interference_per_pair_path,
     get_interference_per_entity_path,
     get_interference_per_entity,
     save_interference_per_entity,
     save_interference_per_pair,
-    exists_interference_per_pair,
 )
 from vision_unlearning.benchmarks.I_care.utils import (
     explanation_to_dict,
@@ -2091,17 +2090,17 @@ class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate
                 f"Available values: {sorted({str(v) for v in entity_to_attr.values() if v is not None})}"
             )
 
-        # Verify that every source emitter's per-pair file exists before loading anything.
-        # Missing data is a computation error, not a graceful skip.
+        # Verify that every source emitter's per-pair file is available (local or HuggingFace)
+        # before loading anything. Missing data (neither local nor remote) is a computation
+        # error, not a graceful skip.
         num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
         for name in source_names:
             idx = entity_to_index[name]
-            path = get_interference_per_pair_path(self.task, idx, self.unlearning_algorithm, num_train_epochs, self.base_folder, self.model)
-            if not os.path.exists(path):
+            if not InterferencePerPair(task=self.task, index=idx, method=self.unlearning_algorithm, num_train_epochs=num_train_epochs, base_folder=self.base_folder, model=self.model).exists():
                 raise FileNotFoundError(
                     f"Per-pair interference file missing for source entity '{name}' "
                     f"(index={idx}, task={self.task}, method={self.unlearning_algorithm}, "
-                    f"epochs={num_train_epochs}): {path}. "
+                    f"epochs={num_train_epochs}), neither locally nor on HuggingFace. "
                     "All source emitter files must be computed before running this RT."
                 )
 
@@ -3821,11 +3820,12 @@ class ResultTemplateInterferenceMatrix(ResultTemplateMatrix):
         # df_aggregated_interference = store one MetricInterferencePerEntityPair (brisque_diff, clip_diff, rmse, or ssim)
         df_aggregated_interference = pd.DataFrame(columns=labels)
         for index in range(len(labels)):
-            if not os.path.exists(get_interference_per_pair_path(self.task, index, self.unlearning_algorithm, num_train_epochs)):
-                logger.warning(f'SKIP entity-pair analysis for task={self.task}, index={index}, method={self.unlearning_algorithm}, num_train_epochs={num_train_epochs}, do not exist yet')
+            pair_artifact = InterferencePerPair(task=self.task, index=index, method=self.unlearning_algorithm, num_train_epochs=num_train_epochs, base_folder=self.base_folder, model=self.model)
+            if not pair_artifact.exists():
+                logger.warning(f'SKIP entity-pair analysis for task={self.task}, index={index}, method={self.unlearning_algorithm}, num_train_epochs={num_train_epochs}, not available locally or on HuggingFace')
                 continue
             #logger.info(f'Analyzing entity-pairs for task={self.task}, index={index}, method={self.unlearning_algorithm}, num_train_epochs={num_train_epochs}...')
-            interference_per_pair = get_interference_per_pair(self.task, index, self.unlearning_algorithm, num_train_epochs)
+            interference_per_pair = get_interference_per_pair(self.task, index, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder, model=self.model)
             emitter_name = metadata_filtered[index]['name']
             df_aggregated_interference.loc[emitter_name] = [interference_per_pair[l][self.interference_pair] for l in labels]
             #df_aggregated_interference_clip_diff.loc[emitter_name] = [interference_per_pair[l]['clip_diff'] for l in labels]
