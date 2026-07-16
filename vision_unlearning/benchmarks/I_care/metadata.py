@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.artifact import SingleFileArtifact
+from vision_unlearning.benchmarks.care import MetricEffectPerEntity, MetricEffectPerEntityPair
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite
 from vision_unlearning.integrations.huggingface import (
     get_hf_token_from_env,
@@ -128,13 +129,14 @@ def get_interference_per_pair_inverse(
     return interference_per_pair_inverse
 
 
-class InterferencePerPair(SingleFileArtifact):
+class InterferencePerPair(MetricEffectPerEntityPair):
     """Object-oriented interface over a single per-pair interference file.
 
     Wraps interferences_caused_by_{task}_{index}_{method}_{epochs}.json and adds the shared
     local -> HuggingFace -> (not-computed-on-demand) storage cascade. Complements the
     get_interference_per_pair / exists_interference_per_pair / save_interference_per_pair
-    helpers, which remain the fast local-only path.
+    helpers, which remain the fast local-only path. "Interference" is I-CARE's concrete name
+    for the generic `MetricEffectPerEntityPair` shape (see `benchmarks/care.py`).
     """
     task: type_task = 'people'
     index: int
@@ -199,8 +201,9 @@ def save_interference_per_entity(
 # InterferencePerEntity is stored as a single JSON file and shares the local -> HuggingFace
 # -> from-scratch storage cascade with the Result Templates; both inherit that cascade from
 # SingleFileArtifact. The functional helpers below (get_interference_per_entity, ...) remain
-# available and coexist with this object-oriented interface.
-class InterferencePerEntity(SingleFileArtifact):
+# available and coexist with this object-oriented interface. "Interference" is I-CARE's
+# concrete name for the generic `MetricEffectPerEntity` shape (see `benchmarks/care.py`).
+class InterferencePerEntity(MetricEffectPerEntity):
     task: type_task = 'people'
     model: type_model = 'sd1.4'
     # This class deprecates: save_interference_per_entity, get_interference_per_entity_path
