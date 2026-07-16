@@ -25,6 +25,7 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     type_task,
     type_model,
     type_s,
+    model_segment,
 )
 
 
@@ -98,7 +99,7 @@ class Similarity(SingleFileArtifact):
     similarity_metric: type_s = 'clip'
 
     def _get_data_path_remote(self) -> str:
-        return f"similarity_{self.similarity_metric}_{self.task}.json"
+        return f"similarity_{self.similarity_metric}_{self.task}{model_segment(self.model)}.json"
 
     def _get_partial_path_local(self) -> str:
         return self._get_data_path_local() + '.partial'

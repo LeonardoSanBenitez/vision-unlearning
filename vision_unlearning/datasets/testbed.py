@@ -20,6 +20,19 @@ logger = get_logger('testbed')
 # lower-level helper functions.
 _type_task = Literal['breeds', 'scenes', 'people']
 _type_method = Literal['distil', 'munba', 'uce']
+_type_model = Literal['sd1.4']
+
+
+def _model_segment(model: _type_model) -> str:
+    """Filename/folder segment for the base model.
+
+    ``sd1.4`` (the only produced model) returns an empty segment so every existing
+    dataset/model folder name is unchanged; any other base model adds a disambiguating
+    ``_{model}`` segment. Kept local — mirroring ``configuration.model_segment`` — so this
+    module stays decoupled from the ``benchmarks.I_care`` sub-package, exactly as the task
+    and method aliases above are. The two must stay in sync if a real second model is added.
+    """
+    return '' if model == 'sd1.4' else f'_{model}'
 
 
 ##########################################
@@ -182,9 +195,10 @@ def get_unlearned_model_folder(
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> str:
     # By convention, I'm passing here the NON preprocessed target
-    return os.path.join(base_folder, 'models', f"{task}_{target}_{method}_{num_train_epochs:03d}")
+    return os.path.join(base_folder, 'models', f"{task}_{target}_{method}_{num_train_epochs:03d}{_model_segment(model)}")
 
 
 def exists_unlearned_model(
@@ -193,8 +207,9 @@ def exists_unlearned_model(
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> bool:
-    model_path = get_unlearned_model_folder(task, method, num_train_epochs, target, base_folder=base_folder)
+    model_path = get_unlearned_model_folder(task, method, num_train_epochs, target, base_folder=base_folder, model=model)
     if method == 'uce':
         return os.path.exists(os.path.join(model_path, 'uce_sd_weights.safetensors'))
     else:
@@ -210,9 +225,10 @@ def get_generated_dataset_folder(
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> str:
     # By convention, I'm passing here the preprocessed target... TODO change?
-    return os.path.join(base_folder, "datasets", f"generated_{task}_{target}_{method}_{num_train_epochs:03d}")
+    return os.path.join(base_folder, "datasets", f"generated_{task}_{target}_{method}_{num_train_epochs:03d}{_model_segment(model)}")
 
 
 def get_generated_dataset_file(
@@ -256,6 +272,7 @@ def exists_unlearned_dataset(
 def get_shared_baseline_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
+    model: _type_model = 'sd1.4',
 ) -> str:
     """Return the task-level shared baseline folder path.
 
@@ -266,7 +283,7 @@ def get_shared_baseline_folder(
 
     Convention: assets/datasets/generated_{task}_baseline/
     """
-    return os.path.join(base_folder, "datasets", f"generated_{task}_baseline")
+    return os.path.join(base_folder, "datasets", f"generated_{task}_baseline{_model_segment(model)}")
 
 
 def get_off_image_path(
@@ -279,6 +296,7 @@ def get_off_image_path(
     base_folder: str = 'assets',
     seeds: Optional[List[int]] = None,
     prompts: Optional[List[str]] = None,
+    model: _type_model = 'sd1.4',
 ) -> str:
     """Return the path to a baseline (lora_state='off') image for a given entity/seed/prompt.
 
@@ -317,7 +335,7 @@ def get_off_image_path(
         to the entity folder (backward-compatible).
     """
     # 1. Shared task-level baseline already present locally.
-    shared_folder = get_shared_baseline_folder(task, base_folder)
+    shared_folder = get_shared_baseline_folder(task, base_folder, model)
     if os.path.exists(shared_folder):
         path = os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
         if not os.path.exists(path):
@@ -338,14 +356,14 @@ def get_off_image_path(
         # Use the class directly since it is in the same module.
         # cast: task is narrowed to _type_task by the guard above.
         from typing import cast as _cast  # noqa: PLC0415
-        baseline_ds = GeneratedDataset(task=_cast(_type_task, task), base_folder=base_folder)
+        baseline_ds = GeneratedDataset(task=_cast(_type_task, task), base_folder=base_folder, model=model)
         baseline_ds.compute(seeds, prompts)
         # After compute() the shared folder should now exist locally.
         if os.path.exists(shared_folder):
             return os.path.join(shared_folder, get_generated_dataset_file('off', seed, prompt))
 
     # 3. Entity folder fallback (pre-refactor mixed on_* + off_* folder).
-    entity_folder = get_generated_dataset_folder(task, method, num_train_epochs, target, base_folder)
+    entity_folder = get_generated_dataset_folder(task, method, num_train_epochs, target, base_folder, model)
     return os.path.join(entity_folder, get_generated_dataset_file('off', seed, prompt))
 
 
@@ -392,6 +410,7 @@ class GeneratedDataset(Artifact):
     target: Optional[str] = None          # None → shared baseline (task-level)
     method: Optional[_type_method] = None  # None → baseline dataset
     num_train_epochs: Optional[int] = None
+    model: _type_model = 'sd1.4'          # base image-generating model; sd1.4 → unchanged names
     # base_folder, remote_repository_name, recompute_if_exists, upload_if_recomputed and
     # save_outputs are inherited from Artifact. save_outputs is unused here: image
     # generation writes the folder directly, so _persist_local is a no-op.
@@ -438,14 +457,14 @@ class GeneratedDataset(Artifact):
           - get_generated_dataset_folder()
         """
         if self.is_baseline:
-            return get_shared_baseline_folder(self.task, self.base_folder)
+            return get_shared_baseline_folder(self.task, self.base_folder, self.model)
         # Entity dataset
         assert self.target is not None
         assert self.num_train_epochs is not None
         assert self.method is not None  # guaranteed by _validate_consistency
         method: _type_method = self.method
         return get_generated_dataset_folder(
-            self.task, method, self.num_train_epochs, self.target, self.base_folder
+            self.task, method, self.num_train_epochs, self.target, self.base_folder, self.model
         )
 
     @property
@@ -629,10 +648,10 @@ class GeneratedDataset(Artifact):
             assert self.num_train_epochs is not None
 
             model_folder = get_unlearned_model_folder(
-                self.task, self.method, self.num_train_epochs, self.target, self.base_folder
+                self.task, self.method, self.num_train_epochs, self.target, self.base_folder, self.model
             )
             if not exists_unlearned_model(
-                self.task, self.method, self.num_train_epochs, self.target, self.base_folder
+                self.task, self.method, self.num_train_epochs, self.target, self.base_folder, self.model
             ):
                 raise FileNotFoundError(
                     f"Trained unlearned model not found at '{model_folder}'. "
@@ -823,6 +842,7 @@ class GeneratedDataset(Artifact):
         base_folder: str = 'assets',
         seeds: Optional[List[int]] = None,
         prompts: Optional[List[str]] = None,
+        model: _type_model = 'sd1.4',
     ) -> str:
         """Return the path to a baseline (lora_state='off') image.
 
@@ -860,6 +880,7 @@ class GeneratedDataset(Artifact):
             base_folder=base_folder,
             seeds=seeds,
             prompts=prompts,
+            model=model,
         )
 
 

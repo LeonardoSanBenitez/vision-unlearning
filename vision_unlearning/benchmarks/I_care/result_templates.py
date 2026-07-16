@@ -1489,6 +1489,7 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
                         seed=seed,
                         prompt=entity_prompt,
                         base_folder=self.base_folder,
+                        model=self.model,
                     )
                     img = Image.open(img_path).convert('RGB')
                     clip_scores.append(metric_clip_img.score(img, entity_prompt)['clip'])
@@ -2095,7 +2096,7 @@ class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate
         num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
         for name in source_names:
             idx = entity_to_index[name]
-            path = get_interference_per_pair_path(self.task, idx, self.unlearning_algorithm, num_train_epochs, self.base_folder)
+            path = get_interference_per_pair_path(self.task, idx, self.unlearning_algorithm, num_train_epochs, self.base_folder, self.model)
             if not os.path.exists(path):
                 raise FileNotFoundError(
                     f"Per-pair interference file missing for source entity '{name}' "
@@ -2109,7 +2110,7 @@ class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate
         phi_v_accum: Dict[str, List[float]] = {name: [] for name in labels}
         for source_name in source_names:
             source_idx = entity_to_index[source_name]
-            interference_per_pair = get_interference_per_pair(self.task, source_idx, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder)
+            interference_per_pair = get_interference_per_pair(self.task, source_idx, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder, model=self.model)
             for receiver_name in labels:
                 if self.exclude_diagonal and receiver_name == source_name:
                     continue
@@ -3944,7 +3945,7 @@ class ResultTemplateMethodComparisonByMetricEntity(ResultTemplate):
 
     def _compute_from_scratch(self) -> dict:
         interference_per_entity: List[Dict] = InterferencePerEntity(
-            task=self.task, base_folder=self.base_folder
+            task=self.task, base_folder=self.base_folder, model=self.model
         ).compute()
         df = pd.DataFrame(interference_per_entity)
         metric_cols = [c for c in df.columns if c.startswith('metric_')]
@@ -4369,7 +4370,7 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         # Me clip_diffs are kept as fallback colouring (used by plot() if Mp unavailable).
         # embedding_specificity_ratio is read from IPE only — no inline fallback.
         # If IPE is absent or missing this entity's ratio, ratio_source = "not_available".
-        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder)
+        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder, model=self.model)
         clip_diff_by_entity: Dict[str, float] = {}
         embedding_specificity_ratio: float = float("nan")
         ratio_source: str = "not_available"
@@ -4658,7 +4659,7 @@ class ResultTemplateEmbeddingForgettingEfficiency(ResultTemplate):
         # Load interference_per_entity (required — contains pre-computed
         # embedding_specificity_ratio for each entity).
         ipe_data: List[Dict] = InterferencePerEntity(
-            task=self.task, base_folder=self.base_folder
+            task=self.task, base_folder=self.base_folder, model=self.model
         ).compute()
         df = pd.DataFrame(ipe_data)
         metric_cols = [c for c in df.columns if c.startswith('metric_')]

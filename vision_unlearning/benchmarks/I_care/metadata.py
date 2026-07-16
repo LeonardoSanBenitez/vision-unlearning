@@ -27,6 +27,7 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     type_me,
     type_model,
     type_l,
+    model_segment,
     unlearning_algorithm_to_epochs,
 )
 
@@ -42,8 +43,9 @@ def _interference_per_pair_filename(
     index: int,
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
+    model: type_model = 'sd1.4',
 ) -> str:
-    return f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}.json'
+    return f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}{model_segment(model)}.json'
 
 
 def get_interference_per_pair_path(
@@ -52,8 +54,9 @@ def get_interference_per_pair_path(
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> str:
-    return os.path.join(base_folder, 'datasets', _interference_per_pair_filename(task, index, method, num_train_epochs))
+    return os.path.join(base_folder, 'datasets', _interference_per_pair_filename(task, index, method, num_train_epochs, model))
 
 
 def get_interference_per_pair(
@@ -63,10 +66,11 @@ def get_interference_per_pair(
     num_train_epochs: int,
     max_identities: int = 100,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> Dict[str, Dict[str, float]]:
     # TODO: maybe this function should first check locally if the file exists, and if not, check in huggingface if the file exists there, and just then return an error if neighter?
-    assert os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder)), "Caused interferences by this entity were not computed yet"
-    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder), 'r') as f:
+    assert os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model)), "Caused interferences by this entity were not computed yet"
+    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model), 'r') as f:
         interference_per_pair = json.load(f)
     assert isinstance(interference_per_pair, dict)
     assert len(interference_per_pair) == max_identities
@@ -79,8 +83,9 @@ def exists_interference_per_pair(
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> bool:
-    return os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder))
+    return os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model))
 
 def save_interference_per_pair(
     interference_per_pair: Dict[str, Dict[str, float]],
@@ -89,10 +94,11 @@ def save_interference_per_pair(
     method: Literal['munba', 'uce', 'distil'],
     num_train_epochs: int,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> None:
     assert isinstance(interference_per_pair, dict)
     assert len(interference_per_pair) > 0, "interference_per_pair should not be empty"
-    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder), 'w') as f:
+    with open(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder, model), 'w') as f:
             json.dump(interference_per_pair, f)
 
 
@@ -104,13 +110,14 @@ def get_interference_per_pair_inverse(
     index_start: int = 0,
     max_identities: int = 100,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> Dict[str, Dict[str, float]]:
     metadata_filtered = get_metadata_filtered(task)
     target = metadata_filtered[index]['name']
 
     interference_per_pair_inverse = {}
     for idx_emitter in range(index_start, index_start + max_identities):
-        path = get_interference_per_pair_path(task, idx_emitter, method, num_train_epochs, base_folder)
+        path = get_interference_per_pair_path(task, idx_emitter, method, num_train_epochs, base_folder, model)
         if os.path.exists(path):  # Unlearning already performed
             with open(path, 'r') as f:
                 interference_per_pair_temp = json.load(f)
@@ -134,9 +141,10 @@ class InterferencePerPair(SingleFileArtifact):
     method: type_unlearning_algorithm
     num_train_epochs: int
     max_identities: int = 100
+    model: type_model = 'sd1.4'
 
     def _get_data_path_remote(self) -> str:
-        return f"datasets/{_interference_per_pair_filename(self.task, self.index, self.method, self.num_train_epochs)}"
+        return f"datasets/{_interference_per_pair_filename(self.task, self.index, self.method, self.num_train_epochs, self.model)}"
 
     def _compute_from_scratch(self) -> Dict[str, Dict[str, float]]:
         raise NotImplementedError(
@@ -158,17 +166,19 @@ class InterferencePerPair(SingleFileArtifact):
 def get_interference_per_entity_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> str:
-    return os.path.join(base_folder, f"interference_per_entity_{task}.json")
+    return os.path.join(base_folder, f"interference_per_entity_{task}{model_segment(model)}.json")
 
 
 def get_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     max_identities: int = 100,
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> List[Dict[str, Any]]:
-    assert os.path.exists(get_interference_per_entity_path(task, base_folder=base_folder))
-    with open(get_interference_per_entity_path(task, base_folder=base_folder), "r", encoding="utf-8") as f:
+    assert os.path.exists(get_interference_per_entity_path(task, base_folder=base_folder, model=model))
+    with open(get_interference_per_entity_path(task, base_folder=base_folder, model=model), "r", encoding="utf-8") as f:
         metadata_filtered = json.load(f)
     assert isinstance(metadata_filtered, list)
     assert len(metadata_filtered) == max_identities
@@ -179,8 +189,9 @@ def save_interference_per_entity(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     metadata_filtered: List[Dict[str, Any]],
     base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
 ) -> None:
-    with open(get_interference_per_entity_path(task, base_folder=base_folder), "w", encoding="utf-8") as f:
+    with open(get_interference_per_entity_path(task, base_folder=base_folder, model=model), "w", encoding="utf-8") as f:
         json.dump(metadata_filtered, f, indent=4)
 
 
@@ -191,10 +202,11 @@ def save_interference_per_entity(
 # available and coexist with this object-oriented interface.
 class InterferencePerEntity(SingleFileArtifact):
     task: type_task = 'people'
+    model: type_model = 'sd1.4'
     # This class deprecates: save_interference_per_entity, get_interference_per_entity_path
 
     def _get_data_path_remote(self) -> str:
-        return f'interference_per_entity_{self.task}.json'
+        return f'interference_per_entity_{self.task}{model_segment(self.model)}.json'
 
     def _compute_from_scratch(self) -> List[Dict[str, Any]]:
         raise NotImplementedError(
@@ -257,13 +269,14 @@ def get_embedding_output_path(
     method: str,
     num_train_epochs: int,
     base_folder: str = "assets",
+    model: type_model = "sd1.4",
 ) -> str:
     """Local path for a per-entity (unlearned) embedding file.
 
     The method-agnostic baseline is addressed by :class:`BaselineEmbeddings`; it has no
     method or epoch, so it must never be built through this method/epoch-carrying interface.
     """
-    filename = f"embeddings_{task}_{hf_entity}_{method}_{num_train_epochs:03d}.json"
+    filename = f"embeddings_{task}_{hf_entity}_{method}_{num_train_epochs:03d}{model_segment(model)}.json"
     return os.path.join(base_folder, "datasets", filename)
 
 
@@ -272,12 +285,13 @@ def get_embedding_hf_path(
     hf_entity: str,
     method: str,
     num_train_epochs: int,
+    model: type_model = "sd1.4",
 ) -> str:
     """HuggingFace repo path (no leading slash) for a per-entity (unlearned) embedding file.
 
     The method-agnostic baseline is addressed by :class:`BaselineEmbeddings`.
     """
-    return f"datasets/embeddings_{task}_{hf_entity}_{method}_{num_train_epochs:03d}.json"
+    return f"datasets/embeddings_{task}_{hf_entity}_{method}_{num_train_epochs:03d}{model_segment(model)}.json"
 
 
 def _embedding_function_suffix(embedding_function: type_l) -> str:
@@ -307,7 +321,7 @@ class BaselineEmbeddings(SingleFileArtifact):
 
     def _get_data_path_remote(self) -> str:
         suffix = _embedding_function_suffix(self.embedding_function)
-        return f"datasets/embeddings_{self.task}_original{suffix}.json"
+        return f"datasets/embeddings_{self.task}_original{model_segment(self.model)}{suffix}.json"
 
     def _compute_from_scratch(self) -> Dict[str, Any]:
         raise NotImplementedError(
@@ -346,7 +360,7 @@ class EntityEmbeddings(SingleFileArtifact):
         suffix = _embedding_function_suffix(self.embedding_function)
         return (
             f"datasets/embeddings_{self.task}_{self.hf_entity}"
-            f"_{self.unlearning_algorithm}_{self._epochs():03d}{suffix}.json"
+            f"_{self.unlearning_algorithm}_{self._epochs():03d}{model_segment(self.model)}{suffix}.json"
         )
 
     def _compute_from_scratch(self) -> Dict[str, Any]:

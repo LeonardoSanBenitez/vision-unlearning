@@ -574,7 +574,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
             ds._compute_from_scratch(seeds, prompts)
 
             mock_model_folder.assert_called_once_with(
-                'people', 'distil', 400, 'Colin Powell', 'assets'
+                'people', 'distil', 400, 'Colin Powell', 'assets', 'sd1.4'
             )
             mock_gen.assert_called_once_with(
                 model_base_name='CompVis/stable-diffusion-v1-4',

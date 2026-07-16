@@ -680,6 +680,24 @@ type_regression_algorithm = Literal[
     "random_forest",
 ]
 
+
+def model_segment(model: type_model) -> str:
+    """Filename/folder segment for the base model.
+
+    ``sd1.4`` (the historical default and only produced model) keeps every existing asset
+    name unchanged by returning an empty segment; any other base model adds a disambiguating
+    ``_{model}`` segment so its assets never collide with the ``sd1.4`` ones. This mirrors
+    ``metadata._embedding_function_suffix`` for the embedding-function dimension. It is
+    interface-only for now: no non-``sd1.4`` model is produced, but the naming is ready for
+    one without renaming any current file.
+
+    Note this does NOT apply to the activation-fingerprint files, which already embed the
+    model name explicitly (``act_fingerprints_{task}_{model}.json``, non-empty for ``sd1.4``);
+    those keep their own convention untouched.
+    """
+    return "" if model == "sd1.4" else f"_{model}"
+
+
 # And converting between them
 GUI_TO_BACKEND = {
     "unlearning_algorithm": {
