@@ -38,6 +38,7 @@ import pytest  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+from vision_unlearning.artifact import ArtifactNotAvailableError  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
 import vision_unlearning.benchmarks.I_care.similarity as _sim_mod  # noqa: E402
 import vision_unlearning.artifact as _artifact_mod  # noqa: E402
@@ -233,7 +234,7 @@ class TestPathHelpers:
 
         # Stub metadata so we don't need real files on disk
         fake_meta = [{"name": "alice"}, {"name": "bob"}, {"name": "carol"}]
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: fake_meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: fake_meta)
         monkeypatch.setattr(_meta_mod, "get_metadata_filtered", lambda task, **k: fake_meta)
 
         # Write a fake interference file for emitter index 0 under tmp_path/datasets/
@@ -556,14 +557,13 @@ class TestComputeFromScratchMocked:
     ) -> None:
         labels = ["a", "b", "c"]
         meta = _fake_metadata(labels)
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
-        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: meta)
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: meta)
 
-        def fake_pair(task: str, index: int, method: str, epochs: int, **k: Any) -> Dict[str, Any]:
-            return {lab: {"rmse": float(index + j)} for j, lab in enumerate(labels)}
+        def fake_pair(self: Any) -> Dict[str, Any]:
+            return {lab: {"rmse": float(self.index + j)} for j, lab in enumerate(labels)}
 
-        monkeypatch.setattr(vb, "get_interference_per_pair", fake_pair)
-        monkeypatch.setattr(_rt_mod, "get_interference_per_pair", fake_pair)
+        monkeypatch.setattr(_rt_mod.InterferencePerPair, "compute", fake_pair)
         # ResultTemplateInterferenceMatrix._compute_from_scratch checks availability via
         # InterferencePerPair.exists() (local-or-HuggingFace cascade), not a raw path check.
         monkeypatch.setattr(_rt_mod.InterferencePerPair, "exists", lambda self: True)
@@ -585,9 +585,9 @@ class TestComputeFromScratchMocked:
     ) -> None:
         labels = ["a", "b", "c"]
         meta = _fake_metadata(labels)
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: meta)
         # Similarity binds get_metadata_filtered in similarity.py, so patch it there.
-        monkeypatch.setattr(_sim_mod, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_sim_mod.MetadataFiltered, "compute", lambda self: meta)
 
         rt = vb.ResultTemplateSimilarityMatrix(
             task="people",
@@ -612,9 +612,9 @@ class TestComputeFromScratchMocked:
         import json as _json
         labels = ["alpha", "beta", "gamma"]
         meta = _fake_metadata(labels)
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: meta)
         # Similarity binds get_metadata_filtered in similarity.py, so patch it there.
-        monkeypatch.setattr(_sim_mod, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(_sim_mod.MetadataFiltered, "compute", lambda self: meta)
 
         # Write a minimal fake embeddings file at the correct sub-path.
         # For task='people', distil epochs=400, the expected path is:
@@ -708,13 +708,7 @@ class TestComputeFromScratchMocked:
             }
         )
         path = str(tmp_path / "interference_per_entity_people.json")
-        df.to_json(path)
-        monkeypatch.setattr(
-            vb, "get_interference_per_entity_path", lambda task, **k: path
-        )
-        monkeypatch.setattr(
-            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
-        )
+        df.to_json(path, orient="records")
 
         rt = vb.ResultTemplateSignificantRelationshipNumerical(
             task="people",
@@ -743,13 +737,7 @@ class TestComputeFromScratchMocked:
             }
         )
         path = str(tmp_path / "interference_per_entity_people.json")
-        df.to_json(path)
-        monkeypatch.setattr(
-            vb, "get_interference_per_entity_path", lambda task, **k: path
-        )
-        monkeypatch.setattr(
-            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
-        )
+        df.to_json(path, orient="records")
 
         rt = vb.ResultTemplateSignificantRelationshipCategorical(
             task="people",
@@ -773,11 +761,11 @@ class TestComputeFromScratchMocked:
             {"name": name, "sports": "sport" if i < 6 else "nonSport"}
             for i, name in enumerate(labels)
         ]
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
-        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: meta)
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: meta)
 
         # Per-pair files: sport emitters cause more negative clip_diff to sport receivers.
-        def fake_pair(task: str, index: int, method: str, epochs: int, **k: Any) -> Dict[str, Any]:
+        def fake_pair(self: Any) -> Dict[str, Any]:
             # Source is entity index 0..5 (sport). Sport receivers (0..5) get -3.0, others -1.0.
             result = {}
             for j, lab in enumerate(labels):
@@ -785,8 +773,7 @@ class TestComputeFromScratchMocked:
                 result[lab] = {"clip_diff": val}
             return result
 
-        monkeypatch.setattr(vb, "get_interference_per_pair", fake_pair)
-        monkeypatch.setattr(_rt_mod, "get_interference_per_pair", fake_pair)
+        monkeypatch.setattr(_rt_mod.InterferencePerPair, "compute", fake_pair)
         # Make all source emitters appear available: _compute_from_scratch checks via
         # InterferencePerPair.exists() (local-or-HuggingFace cascade), not a raw path check.
         monkeypatch.setattr(_rt_mod.InterferencePerPair, "exists", lambda self: True)
@@ -826,8 +813,8 @@ class TestComputeFromScratchMocked:
         pytest.importorskip("shap", reason="shap not installed; install vision-unlearning[testbed]")
         labels = [f"p{i}" for i in range(8)]
         meta = _fake_metadata(labels)
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
-        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: meta)
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: meta)
 
         def fake_im_compute(self: Any) -> Dict[str, Any]:
             res = []
@@ -921,8 +908,8 @@ class TestComputeFromScratchMocked:
         pytest.importorskip("shap", reason="shap not installed")
         labels = [f"p{i}" for i in range(8)]
         meta = _fake_metadata(labels)
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
-        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: meta)
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: meta)
 
         def fake_im_compute(self: Any) -> Dict[str, Any]:
             rng = np.random.default_rng(0)
@@ -953,9 +940,7 @@ class TestComputeFromScratchMocked:
             "metric_distil_400_forget_clip_diff (↓)": [float(-i) for i in range(len(labels))],
         })
         me_path = str(tmp_path / "interference_per_entity_people.json")
-        df_me.to_json(me_path)
-        monkeypatch.setattr(vb, "get_interference_per_entity_path", lambda task, **k: me_path)
-        monkeypatch.setattr(_rt_mod, "get_interference_per_entity_path", lambda task, **k: me_path)
+        df_me.to_json(me_path, orient="records")
 
         rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
             task="people",
@@ -990,8 +975,8 @@ class TestComputeFromScratchMocked:
         clear FileNotFoundError must be raised — no silent NaN fallback."""
         labels = [f"p{i}" for i in range(4)]
         meta = _fake_metadata(labels)
-        monkeypatch.setattr(vb, "get_metadata_filtered", lambda task, **k: meta)
-        monkeypatch.setattr(_rt_mod, "get_metadata_filtered", lambda task, **k: meta)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: meta)
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: meta)
 
         def fake_im_compute(self: Any) -> Dict[str, Any]:
             rng = np.random.default_rng(0)
@@ -1018,8 +1003,6 @@ class TestComputeFromScratchMocked:
 
         # Me file does NOT exist
         missing_path = str(tmp_path / "interference_per_entity_people.json")
-        monkeypatch.setattr(vb, "get_interference_per_entity_path", lambda task, **k: missing_path)
-        monkeypatch.setattr(_rt_mod, "get_interference_per_entity_path", lambda task, **k: missing_path)
 
         rt = vb.ResultTemplateMetricSimilarityAlignmentMulti(
             task="people",
@@ -1030,7 +1013,7 @@ class TestComputeFromScratchMocked:
             save_outputs=False,
             base_folder=str(tmp_path),
         )
-        with pytest.raises(FileNotFoundError, match="Me file not found"):
+        with pytest.raises(ArtifactNotAvailableError, match="InterferencePerEntity"):
             rt._compute_from_scratch()
 
 
@@ -1071,13 +1054,7 @@ class TestMetricMetricAlignment:
             }
         )
         path = str(tmp_path / "interference_per_entity_people.json")
-        df.to_json(path)
-        monkeypatch.setattr(
-            vb, "get_interference_per_entity_path", lambda task, **k: path
-        )
-        monkeypatch.setattr(
-            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
-        )
+        df.to_json(path, orient="records")
 
         rt = vb.ResultTemplateMetricMetricAlignment(
             task="people",
@@ -1119,10 +1096,7 @@ class TestMetricMetricAlignment:
             }
         )
         path = str(tmp_path / "interference_per_entity_people.json")
-        df.to_json(path)
-        monkeypatch.setattr(
-            _rt_mod, "get_interference_per_entity_path", lambda task, **k: path
-        )
+        df.to_json(path, orient="records")
 
         rt = vb.ResultTemplateMetricMetricAlignment(
             task="people",

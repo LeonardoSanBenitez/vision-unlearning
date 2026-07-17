@@ -30,6 +30,7 @@ import vision_unlearning.benchmarks.I_care.metadata as _meta_mod  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
 import vision_unlearning.benchmarks.I_care.similarity as _sim_mod  # noqa: E402
 import vision_unlearning.artifact as _artifact_mod  # noqa: E402
+from vision_unlearning.artifact import ArtifactNotAvailableError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -97,15 +98,9 @@ class TestSimilarityMatrixDinoCompute:
         monkeypatch.setattr(
             _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
-        monkeypatch.setattr(
-            vb, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in entities],
-        )
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: [{"name": e} for e in entities],)
         # Patch at the actual call site in similarity.py (where the Similarity artifact binds it)
-        monkeypatch.setattr(
-            _sim_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in entities],
-        )
+        monkeypatch.setattr(_sim_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in entities],)
         # Write a baseline embedding file in tmp_path/datasets/ (correct sub-path).
         emb_path = str(tmp_path / "datasets" / "embeddings_people_original.json")
         _write_embedding_file(emb_path, entities)
@@ -154,15 +149,9 @@ class TestSimilarityMatrixDinoCompute:
         with open(emb_path, "w") as f:
             json.dump(embedding_data, f)
 
-        monkeypatch.setattr(
-            vb, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in entities],
-        )
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: [{"name": e} for e in entities],)
         # Patch at the actual call site in similarity.py (where the Similarity artifact binds it)
-        monkeypatch.setattr(
-            _sim_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in entities],
-        )
+        monkeypatch.setattr(_sim_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in entities],)
         rt = vb.ResultTemplateSimilarityMatrix(
             task="people",
             similarity_metric="dino",
@@ -180,29 +169,23 @@ class TestSimilarityMatrixDinoCompute:
     def test_dino_missing_file_raises(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
-        """AssertionError when baseline embedding file is absent."""
+        """The typed cascade error when the baseline embeddings are absent everywhere."""
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
         monkeypatch.setattr(
             _artifact_mod, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
-        monkeypatch.setattr(
-            vb, "get_metadata_filtered",
-            lambda task, **kw: [{"name": "Alice"}],
-        )
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: [{"name": "Alice"}],)
         # Patch at the actual call site in similarity.py (where the Similarity artifact binds it)
-        monkeypatch.setattr(
-            _sim_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": "Alice"}],
-        )
+        monkeypatch.setattr(_sim_mod.MetadataFiltered, "compute", lambda self: [{"name": "Alice"}],)
         rt = vb.ResultTemplateSimilarityMatrix(
             task="people",
             similarity_metric="dino",
             save_outputs=False,
             base_folder=str(tmp_path),
         )
-        with pytest.raises(AssertionError, match="Baseline DINOv2 embeddings not found"):
+        with pytest.raises(ArtifactNotAvailableError, match="BaselineEmbeddings"):
             rt._compute_from_scratch()
 
 
@@ -473,125 +456,92 @@ class TestMethodSpecificityPlot:
 # ResultTemplateInterferenceVisualSummary — off-image path selection
 # ---------------------------------------------------------------------------
 
-class TestInterferenceVisualSummaryOffImagePath:
-    """Verify that _compute_from_scratch uses get_off_image_path for 'off' images
-    and get_generated_dataset_folder for 'on' images."""
+class TestInterferenceVisualSummaryImageResolution:
+    """The image folders must be resolved through GeneratedDataset, not hand-built paths.
 
-    def test_off_images_use_get_off_image_path(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    The previous version of these tests asserted the opposite -- that _load_images called
+    get_off_image_path/get_generated_dataset_folder directly -- which is exactly the bypass
+    that made a fresh clone raise instead of downloading images that were on HuggingFace.
+    """
+
+    @staticmethod
+    def _fake_metadata() -> List[Dict[str, Any]]:
+        return [{"name": f"Person {chr(65 + i)}", "type": "politician"} for i in range(9)]
+
+    def _patch_common(
+        self, monkeypatch: pytest.MonkeyPatch, _rt: Any, calls: List[Dict[str, Any]]
     ) -> None:
-        """get_off_image_path must be called for the 'off' state."""
-        import vision_unlearning.benchmarks.I_care.result_templates as _rt
+        fake_metadata = self._fake_metadata()
 
-        # Track calls to off-image path function vs entity-folder function
-        off_image_calls: List[str] = []
-        entity_folder_calls: List[str] = []
+        def fake_compute(self_ds: Any, seeds: List[int], prompts: List[str],
+                         batch_size: int = 16) -> str:
+            calls.append({
+                "is_baseline": self_ds.method is None,
+                "target": self_ds.target,
+                "seeds": list(seeds),
+                "prompts": list(prompts),
+            })
+            return "/fake/folder"
 
-        # Fake entities — two people suffice: the target and one other
-        fake_metadata = [
-            {"name": "Person A", "type": "politician"},
-            {"name": "Person B", "type": "politician"},
-            {"name": "Person C", "type": "politician"},
-            {"name": "Person D", "type": "politician"},
-            {"name": "Person E", "type": "politician"},
-            {"name": "Person F", "type": "politician"},
-            {"name": "Person G", "type": "politician"},
-            {"name": "Person H", "type": "politician"},
-            {"name": "Person I", "type": "politician"},
-        ]
-
-        fake_interference: Dict[str, Dict[str, float]] = {
-            m["name"]: {"ssim": float(i)} for i, m in enumerate(fake_metadata)
-        }
-
-        def fake_get_off_image_path(
-            task: str, target: str, method: str, num_train_epochs: int,
-            seed: int, prompt: str, base_folder: str = "assets",
-        ) -> str:
-            off_image_calls.append(prompt)
-            return os.path.join(tmp_path, "baseline", f"off_{seed}_{target}.png")
-
-        def fake_get_generated_dataset_folder(
-            task: str, method: str, num_train_epochs: int, target: str,
-            base_folder: str = "assets",
-        ) -> str:
-            entity_folder_calls.append(target)
-            return str(tmp_path / "entity")
-
-        def fake_encode_image_file(path: str, max_dim: int = 128) -> str:
-            return "base64fake"
-
-        def fake_get_interference_per_pair(
-            task: str, entity_index: int, method: str, num_train_epochs: int,
-        ) -> Dict[str, Dict[str, float]]:
-            return {m["name"]: {"ssim": float(i)} for i, m in enumerate(fake_metadata)}
-
-        monkeypatch.setattr(_rt, "get_metadata_filtered", lambda *a, **kw: fake_metadata)
+        monkeypatch.setattr(_rt.MetadataFiltered, "compute", lambda self: fake_metadata)
+        monkeypatch.setattr(_rt.GeneratedDataset, "compute", fake_compute)
         monkeypatch.setattr(_rt, "get_target_overwrite", lambda task, method, name: (name, name))
-        monkeypatch.setattr(_rt, "get_off_image_path", fake_get_off_image_path)
-        monkeypatch.setattr(_rt, "get_generated_dataset_folder", fake_get_generated_dataset_folder)
-        monkeypatch.setattr(_rt, "_encode_image_file", fake_encode_image_file)
-        monkeypatch.setattr(_rt, "get_interference_per_pair",
-                            lambda *a, **kw: fake_get_interference_per_pair(*a, **kw))
+        monkeypatch.setattr(_rt, "_encode_image_file", lambda *a, **kw: "base64fake")
+        monkeypatch.setattr(
+            _rt.InterferencePerPair, "compute",
+            lambda self: {m["name"]: {"ssim": float(i)} for i, m in enumerate(fake_metadata)},
+        )
         monkeypatch.setattr(_rt, "unlearning_algorithm_to_epochs", {"people": {"distil": 400}})
         monkeypatch.setattr(_rt, "mp_to_direction", {"ssim": "↑"})
         monkeypatch.setattr(_rt, "get_generated_dataset_file",
                             lambda state, seed, prompt: f"{state}_{seed}.png")
 
+    def test_both_image_folders_resolve_through_generated_dataset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Baseline (off) and entity (on) folders both go through GeneratedDataset.compute."""
+        import vision_unlearning.benchmarks.I_care.result_templates as _rt
+        calls: List[Dict[str, Any]] = []
+        self._patch_common(monkeypatch, _rt, calls)
+
         rt = _rt.ResultTemplateInterferenceVisualSummary(
-            unlearning_algorithm="distil",
-            interference_pair="ssim",
-            entity="Person A",
+            unlearning_algorithm="distil", interference_pair="ssim", entity="Person A",
         )
         result = rt._compute_from_scratch()
 
-        # off-image path must have been resolved via get_off_image_path
-        assert len(off_image_calls) > 0, "get_off_image_path was never called for 'off' images"
-        # 'on' images must use the entity folder (get_generated_dataset_folder)
-        assert len(entity_folder_calls) > 0, "get_generated_dataset_folder was never called for 'on' images"
-        # Both image states must appear in the result
+        assert any(c["is_baseline"] for c in calls),             "the shared baseline folder was not resolved through GeneratedDataset"
+        assert any(not c["is_baseline"] for c in calls),             "the entity folder was not resolved through GeneratedDataset"
         assert "off" in result["result"]["images"]
         assert "on" in result["result"]["images"]
 
-    def test_on_images_use_entity_folder(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    def test_full_task_prompt_list_is_passed(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """get_generated_dataset_folder is called at least once for 'on' images."""
+        """The COMPLETE task prompt list is passed, not just the 9 displayed entities.
+
+        GeneratedDataset.exists() compares a file count against len(seeds) * len(prompts),
+        so a partial list silently reports the folder as incomplete and triggers a spurious
+        regeneration. Passing no list at all (the original bug) skipped the HuggingFace
+        download entirely and fell through to a non-existent legacy folder.
+        """
         import vision_unlearning.benchmarks.I_care.result_templates as _rt
-
-        entity_folder_calls: List[str] = []
-
-        fake_metadata = [
-            {"name": f"Person {chr(65+i)}", "type": "politician"} for i in range(9)
-        ]
-
-        def fake_get_off_image_path(*args: Any, **kwargs: Any) -> str:
-            return str(tmp_path / "off.png")
-
-        def fake_get_generated_dataset_folder(*args: Any, **kwargs: Any) -> str:
-            entity_folder_calls.append("called")
-            return str(tmp_path / "entity")
-
-        monkeypatch.setattr(_rt, "get_metadata_filtered", lambda *a, **kw: fake_metadata)
-        monkeypatch.setattr(_rt, "get_target_overwrite", lambda task, method, name: (name, name))
-        monkeypatch.setattr(_rt, "get_off_image_path", fake_get_off_image_path)
-        monkeypatch.setattr(_rt, "get_generated_dataset_folder", fake_get_generated_dataset_folder)
-        monkeypatch.setattr(_rt, "_encode_image_file", lambda *a, **kw: "base64fake")
-        monkeypatch.setattr(_rt, "get_interference_per_pair",
-                            lambda *a, **kw: {m["name"]: {"ssim": float(i)} for i, m in enumerate(fake_metadata)})
-        monkeypatch.setattr(_rt, "unlearning_algorithm_to_epochs", {"people": {"distil": 400}})
-        monkeypatch.setattr(_rt, "mp_to_direction", {"ssim": "↑"})
-        monkeypatch.setattr(_rt, "get_generated_dataset_file",
-                            lambda state, seed, prompt: f"{state}_{seed}.png")
+        calls: List[Dict[str, Any]] = []
+        self._patch_common(monkeypatch, _rt, calls)
 
         rt = _rt.ResultTemplateInterferenceVisualSummary(
-            unlearning_algorithm="distil",
-            interference_pair="ssim",
-            entity="Person A",
+            unlearning_algorithm="distil", interference_pair="ssim", entity="Person A",
         )
         rt._compute_from_scratch()
 
-        assert len(entity_folder_calls) > 0, "get_generated_dataset_folder was never called for 'on' images"
+        expected_prompts = [f"An image of {m['name']}" for m in self._fake_metadata()]
+        assert calls, "GeneratedDataset.compute was never called"
+        for call in calls:
+            assert call["prompts"] == expected_prompts, (
+                "GeneratedDataset.compute must receive every prompt of the task"
+            )
+            assert call["seeds"] == [42, 43, 44, 45], (
+                "GeneratedDataset.compute must receive the canonical seed list"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -767,10 +717,7 @@ _SIM_VALUES = {**_FILLER, "Ada": {"Ada": 1.0, "Bob": 0.9, "Cleo": 0.95, "Dora": 
 
 
 def _patch_msaone_matrices(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        _rt_mod, "get_metadata_filtered",
-        lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
-    )
+    monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _MSAONE_LABELS],)
     monkeypatch.setattr(
         _rt_mod.ResultTemplateInterferenceMatrix, "compute",
         lambda self: {"result": _records_from_matrix(_MSAONE_LABELS, _INTERF_VALUES)},
@@ -792,10 +739,7 @@ class TestMSAOneRegistry:
 
 class TestMSAOneResolveEntity:
     def test_entity_to_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
-        )
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _MSAONE_LABELS],)
         rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
             unlearning_algorithm="uce", interference_pair="rmse",
             similarity_metric="dino", entity="Cleo",
@@ -805,10 +749,7 @@ class TestMSAOneResolveEntity:
         assert rt.entity_index == 2
 
     def test_index_to_entity(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
-        )
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _MSAONE_LABELS],)
         rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
             unlearning_algorithm="uce", interference_pair="rmse",
             similarity_metric="dino", entity_index=3,
@@ -818,10 +759,7 @@ class TestMSAOneResolveEntity:
         assert rt.entity_index == 3
 
     def test_mismatch_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
-        )
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _MSAONE_LABELS],)
         rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
             unlearning_algorithm="uce", interference_pair="rmse",
             similarity_metric="dino", entity="Ada", entity_index=1,
@@ -830,10 +768,7 @@ class TestMSAOneResolveEntity:
             rt._resolve_entity()
 
     def test_neither_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
-        )
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _MSAONE_LABELS],)
         rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
             unlearning_algorithm="uce", interference_pair="rmse",
             similarity_metric="dino",
@@ -889,10 +824,7 @@ class TestMSAOneCompute:
         assert r["labeled_least"] == ["Cleo", "Evan"]
 
     def test_serialize_includes_entity(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
-            lambda task, **kw: [{"name": e} for e in _MSAONE_LABELS],
-        )
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _MSAONE_LABELS],)
         rt = _rt_mod.ResultTemplateMetricSimilarityAlignmentOne(
             model="sd1.4", task="people", unlearning_algorithm="uce",
             interference_pair="rmse", similarity_metric="dino", entity="Cleo",
@@ -1001,10 +933,7 @@ _SIM7 = {**_FILLER7, "Ada": {
 
 
 def _patch_msaone7(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        _rt_mod, "get_metadata_filtered",
-        lambda task, **kw: [{"name": e} for e in _MSAONE7_LABELS],
-    )
+    monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _MSAONE7_LABELS],)
     monkeypatch.setattr(
         _rt_mod.ResultTemplateInterferenceMatrix, "compute",
         lambda self: {"result": _records_from_matrix(_MSAONE7_LABELS, _INTERF7)},
@@ -1211,10 +1140,7 @@ _GRID_SIM = {
 
 
 def _patch_grid(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        _rt_mod, "get_metadata_filtered",
-        lambda task, **kw: [{"name": e} for e in _GRID_LABELS],
-    )
+    monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{"name": e} for e in _GRID_LABELS],)
     monkeypatch.setattr(
         _rt_mod.ResultTemplateInterferenceMatrix, "compute",
         lambda self: {"result": _records_from_matrix(_GRID_LABELS, _GRID_INTERF)},
@@ -1332,7 +1258,7 @@ def _patch_svs(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     import vision_unlearning.benchmarks.I_care.result_templates as _rt
 
     fake_metadata = [{"name": n} for n in _SVS_LABELS]
-    monkeypatch.setattr(_rt, "get_metadata_filtered", lambda *a, **kw: fake_metadata)
+    monkeypatch.setattr(_rt.MetadataFiltered, "compute", lambda self: fake_metadata)
     monkeypatch.setattr(_rt, "get_target_overwrite", lambda task, method, name: (name, name))
     monkeypatch.setattr(_rt, "unlearning_algorithm_to_epochs", {"people": {"distil": 400}})
     monkeypatch.setattr(_rt, "s_to_direction", {"dino": "↑", "jacc": "↑", "clip": "↑", "act": "↑"})
@@ -1347,11 +1273,11 @@ def _patch_svs(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
         },
     )
     monkeypatch.setattr(_rt, "_encode_image_file", lambda *a, **kw: "base64fake")
+    # Image folders are resolved through GeneratedDataset (local -> HuggingFace), so the
+    # seam to stub is its compute(), not a raw path helper.
     monkeypatch.setattr(
-        _rt, "get_off_image_path", lambda *a, **kw: str(tmp_path / "off.png")
-    )
-    monkeypatch.setattr(
-        _rt, "get_generated_dataset_folder", lambda *a, **kw: str(tmp_path / "on")
+        _rt.GeneratedDataset, "compute",
+        lambda self, seeds, prompts, batch_size=16: str(tmp_path / ("on" if self.method else "off")),
     )
     monkeypatch.setattr(
         _rt, "get_generated_dataset_file", lambda state, seed, prompt: f"{state}_{seed}.png"
@@ -1754,7 +1680,7 @@ class TestMetadataFilteredArtifact:
             {'name': 'a'}, {'name': 'b'}
         ]
 
-    def test_missing_everywhere_raises_not_implemented(
+    def test_missing_everywhere_raises_artifact_not_available(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from vision_unlearning.datasets.testbed import MetadataFiltered
@@ -1762,7 +1688,7 @@ class TestMetadataFilteredArtifact:
             _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: False
         )
         mf = MetadataFiltered(task='people', base_folder=str(tmp_path))
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ArtifactNotAvailableError):
             mf.compute()
 
 
@@ -1800,7 +1726,7 @@ class TestInterferencePerPairArtifact:
         with pytest.raises(AssertionError):
             ipp.compute()
 
-    def test_missing_everywhere_raises_not_implemented(
+    def test_missing_everywhere_raises_artifact_not_available(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
@@ -1810,7 +1736,7 @@ class TestInterferencePerPairArtifact:
             task='people', index=0, method='distil', num_train_epochs=400,
             base_folder=str(tmp_path),
         )
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ArtifactNotAvailableError):
             ipp.compute()
 
     def test_remote_hit_downloads_and_returns_data(
@@ -1892,13 +1818,11 @@ class TestSimilarityArtifact:
         monkeypatch.setattr(
             _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: False
         )
-        monkeypatch.setattr(
-            _rt_mod, 'get_metadata_filtered', lambda task, **k: [{'name': 'Alice'}]
-        )
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{'name': 'Alice'}])
         sim = _rt_mod.Similarity(
             task='people', similarity_metric='clip', base_folder=str(tmp_path)
         )
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ArtifactNotAvailableError):
             sim.compute()
 
     def test_similarity_matrix_rt_reads_artifact(

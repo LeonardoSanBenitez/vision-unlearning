@@ -27,6 +27,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+from vision_unlearning.artifact import ArtifactNotAvailableError  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
 
 
@@ -388,14 +389,8 @@ class TestComputeFromScratch:
         monkeypatch.setattr(
             vb, "huggingface_dataset_file_exists", lambda *a, **kw: False
         )
-        monkeypatch.setattr(
-            _rt_mod, "get_metadata_filtered",
-            lambda task, **kw: METADATA,
-        )
-        monkeypatch.setattr(
-            vb, "get_metadata_filtered",
-            lambda task, **kw: METADATA,
-        )
+        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: METADATA,)
+        monkeypatch.setattr(vb.MetadataFiltered, "compute", lambda self: METADATA,)
 
     def test_smoke(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
         """compute() returns expected top-level keys."""
@@ -438,7 +433,7 @@ class TestComputeFromScratch:
         _write_entity_files(tmp_path)
 
         rt = _make_rt(tmp_path)
-        with pytest.raises(FileNotFoundError, match="Baseline DINOv2 embedding file not found"):
+        with pytest.raises(ArtifactNotAvailableError, match="BaselineEmbeddings"):
             rt._compute_from_scratch()
 
     def test_b_matrix_values_are_in_minus1_to_1(
@@ -545,7 +540,7 @@ class TestComputeFromScratch:
         _write_entity_files(tmp_path)
 
         rt = _make_rt(tmp_path)
-        with pytest.raises(FileNotFoundError, match="Baseline DINOv2 embedding file not found"):
+        with pytest.raises(ArtifactNotAvailableError, match="BaselineEmbeddings"):
             rt._compute_from_scratch()
 
     def test_no_entity_files_raises(
