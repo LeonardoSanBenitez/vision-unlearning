@@ -59,7 +59,7 @@ def run_clip(
     """Download or fall through to the CLIP similarity matrix for a task.
 
     The RT downloads from HuggingFace when available; if the matrix is not
-    present locally or on HF it raises NotImplementedError with instructions
+    present locally or on HF it raises ArtifactNotAvailableError with instructions
     for the GPU path.
     """
     import vision_unlearning.benchmarks.I_care as vb
@@ -72,7 +72,7 @@ def run_clip(
     try:
         rt.compute()
         logger.info("CLIP similarity matrix for task=%s OK.", task)
-    except NotImplementedError as exc:
+    except vb.ArtifactNotAvailableError as exc:
         logger.error(
             "CLIP similarity matrix for task=%s: %s\n"
             "A from-scratch CLIP recompute requires a GPU with CLIP/SD 1.4 loaded, "

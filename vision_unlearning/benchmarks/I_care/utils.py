@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Literal, Optional
 import numpy as np
 from PIL import Image
 
+from vision_unlearning.artifact import ArtifactNotAvailableError
 from vision_unlearning.utils.logger import get_logger
 
 logger = get_logger('I_care')
@@ -28,7 +29,12 @@ def _encode_image_file(img_path: str, max_dim: int = 1024) -> str:
     '''
     Downsample / reduce resolution to limit size before encoding
     '''
-    assert os.path.exists(img_path), f"Image file not found at {img_path}"
+    # Not an assert: this is a data-availability condition, not an internal invariant, so it
+    # must survive `python -O` (which strips asserts) and must name a catchable type. Callers
+    # are expected to have resolved the containing dataset through GeneratedDataset first, so
+    # reaching this means the image is genuinely absent everywhere.
+    if not os.path.exists(img_path):
+        raise ArtifactNotAvailableError(f"Image file not found at {img_path}")
     img: Image.Image = Image.open(img_path)
     with img:
         # Convert to RGB for consistent encoding.

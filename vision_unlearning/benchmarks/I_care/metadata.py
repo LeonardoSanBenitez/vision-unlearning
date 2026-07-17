@@ -13,7 +13,7 @@ import seaborn as sns
 from pydantic import BaseModel
 
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.artifact import SingleFileArtifact
+from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
 from vision_unlearning.benchmarks.care import MetricEffectPerEntity, MetricEffectPerEntityPair
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite
 from vision_unlearning.integrations.huggingface import (
@@ -154,7 +154,7 @@ class InterferencePerPair(MetricEffectPerEntityPair):
         return f"datasets/{_interference_per_pair_filename(self.task, self.index, self.method, self.num_train_epochs, self.model)}"
 
     def _compute_from_scratch(self) -> Dict[str, Dict[str, float]]:
-        raise NotImplementedError(
+        raise ArtifactNotAvailableError(
             "InterferencePerPair is produced by the interference pipeline, not computed on "
             "demand. Provide the local file or fetch it from HuggingFace."
         )
@@ -217,9 +217,10 @@ class InterferencePerEntity(MetricEffectPerEntity):
         return f'interference_per_entity_{self.task}{model_segment(self.model)}.json'
 
     def _compute_from_scratch(self) -> List[Dict[str, Any]]:
-        raise NotImplementedError(
-            "InterferencePerEntity._compute_from_scratch is not yet implemented. "
-            "Provide a pre-computed file or fetch from HuggingFace."
+        raise ArtifactNotAvailableError(
+            "InterferencePerEntity is produced by pipeline_07 (compute interference per "
+            "entity), not computed on demand. Provide the local file or fetch it from "
+            "HuggingFace."
         )
 
     def _validate(self, data: Any) -> None:
@@ -343,7 +344,7 @@ class BaselineEmbeddings(SingleFileArtifact):
         return f"datasets/embeddings_{self.task}_original{model_segment(self.model)}{suffix}.json"
 
     def _compute_from_scratch(self) -> Dict[str, Any]:
-        raise NotImplementedError(
+        raise ArtifactNotAvailableError(
             "BaselineEmbeddings._compute_from_scratch requires a GPU (embedding the "
             "generated baseline images with DINOv2) and is not supported here. Provide the "
             "local file, fetch it from HuggingFace, or run pipeline_05 (compute embeddings) "
@@ -383,7 +384,7 @@ class EntityEmbeddings(SingleFileArtifact):
         )
 
     def _compute_from_scratch(self) -> Dict[str, Any]:
-        raise NotImplementedError(
+        raise ArtifactNotAvailableError(
             "EntityEmbeddings._compute_from_scratch requires a GPU (embedding the "
             "per-entity unlearned images with DINOv2) and is not supported here. Provide the "
             "local file, fetch it from HuggingFace, or run pipeline_05 (compute embeddings)."
