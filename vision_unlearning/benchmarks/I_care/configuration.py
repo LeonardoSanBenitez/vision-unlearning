@@ -825,6 +825,14 @@ task_to_attributes_of_interest = {
 }
 
 
+# The seeds every generated-image dataset in the I-CARE demonstration was produced with, and
+# therefore the seeds its folders can be checked for completeness against. A dataset folder
+# holds one image per (seed, prompt), so resolving one through GeneratedDataset requires this
+# exact list -- a partial list makes the completeness count disagree and triggers a spurious
+# regeneration (see GeneratedDataset.exists).
+GENERATE_DATASET_SEEDS: List[int] = [42, 43, 44, 45]
+
+
 # The method's hyperparameter is specially problematic to map/find, because i initially thought it should
 # be configurable and then I chagned my mind. Sometimes it can be infered (like in `choose_metric_column_interference_per_entity`),
 # Also, in the actual slurm scripts they are hardcoded all over

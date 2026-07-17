@@ -51,6 +51,7 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     get_interference_per_entity,
     save_interference_per_entity,
     InterferencePerEntity,
+    InterferencePerPair,
     choose_metric_column_interference_per_entity,
     get_embedding_output_path,
     get_embedding_hf_path,
@@ -97,6 +98,9 @@ from vision_unlearning.benchmarks.I_care.embeddings import (
     embed_forgetting_session,
     embed_forgetting_session_batched,
 )
+
+from vision_unlearning.artifact import ArtifactNotAvailableError
+from vision_unlearning.datasets.testbed import MetadataFiltered
 
 from vision_unlearning.integrations.huggingface import (
     huggingface_dataset_file_exists,
@@ -168,6 +172,7 @@ __all__ = [
     "get_interference_per_entity",
     "save_interference_per_entity",
     "InterferencePerEntity",
+    "InterferencePerPair",
     "choose_metric_column_interference_per_entity",
     "get_embedding_output_path",
     "get_embedding_hf_path",
@@ -219,6 +224,8 @@ __all__ = [
     "rt_name_to_class",
     "rt_name_to_params",
     "Similarity",
+    "MetadataFiltered",
+    "ArtifactNotAvailableError",
     "jacc_metric_score",
     "analyze_relationship_numerical",
     "analyze_relationship_categorical",

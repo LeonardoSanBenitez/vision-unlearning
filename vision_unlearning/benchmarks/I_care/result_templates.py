@@ -50,14 +50,13 @@ from vision_unlearning.integrations.huggingface import (
     huggingface_dataset_file_upload,
 )
 from vision_unlearning.datasets.testbed import (
-    get_metadata_filtered,
+    GeneratedDataset,
+    MetadataFiltered,
     get_target_overwrite,
-    get_generated_dataset_folder,
     get_generated_dataset_file,
-    get_off_image_path,
 )
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.artifact import SingleFileArtifact
+from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
 from vision_unlearning.benchmarks.I_care.configuration import (
     type_model,
     type_task,
@@ -73,6 +72,7 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     GUI_TO_BACKEND,
     mp_to_direction,
     task_to_attributes_of_interest,
+    GENERATE_DATASET_SEEDS,
 )
 from vision_unlearning.benchmarks.I_care.metadata import (
     choose_metric_column_interference_per_entity,
@@ -80,9 +80,6 @@ from vision_unlearning.benchmarks.I_care.metadata import (
     InterferencePerPair,
     BaselineEmbeddings,
     EntityEmbeddings,
-    get_interference_per_pair,
-    get_interference_per_entity_path,
-    get_interference_per_entity,
     save_interference_per_entity,
     save_interference_per_pair,
 )
@@ -366,13 +363,9 @@ class ResultTemplateMetricMetricAlignment(ResultTemplate):
         return None
 
     def _compute_from_scratch(self) -> dict:
-        interference_per_entity_path: str = get_interference_per_entity_path(self.task)
-        if not os.path.exists(interference_per_entity_path):
-            raise FileNotFoundError(
-                f"Interference per entity file not found at {interference_per_entity_path}. "
-                "Please compute it before running this RT."
-            )
-        df: pd.DataFrame = pd.read_json(interference_per_entity_path)
+        df: pd.DataFrame = pd.DataFrame(InterferencePerEntity(
+            task=self.task, model=self.model, base_folder=self.base_folder,
+        ).compute())
         metric_cols: List[str] = [c for c in df.columns if c.startswith('metric_')]
         for col in metric_cols:
             df[col] = df[col].astype(float)
@@ -541,7 +534,9 @@ class ResultTemplateMetricSimilarityAlignment(ResultTemplate):
         
         
         if self.colouring_attribute:
-            metadata_filtered = get_metadata_filtered(self.task)
+            metadata_filtered = MetadataFiltered(
+                task=self.task, base_folder=self.base_folder,
+            ).compute()
         
         # Prepare data
         # Each cell ij becomes a row {'c1': df1_ij, 'c2': df2_ij}
@@ -623,7 +618,9 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
         Ensures both entity and entity_index are filled and mutually consistent.
         Modifies in place. Same logic as ResultTemplateInterferenceVisualSummary.
         '''
-        metadata_filtered = get_metadata_filtered(self.task)
+        metadata_filtered = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
         if not self.entity:
             if self.entity_index is None:
                 raise ValueError("Either entity or entity_index must be provided.")
@@ -874,7 +871,9 @@ class ResultTemplateInterferenceBySimilarityRank(ResultTemplate):
         Ensures both entity and entity_index are filled and mutually consistent.
         Modifies in place. Same logic as ResultTemplateMetricSimilarityAlignmentOne.
         '''
-        metadata_filtered = get_metadata_filtered(self.task)
+        metadata_filtered = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
         if not self.entity:
             if self.entity_index is None:
                 raise ValueError("Either entity or entity_index must be provided.")
@@ -1172,7 +1171,9 @@ class ResultTemplateMostSimilarMostInterferedGrid(ResultTemplate):
                 denominators[row][col] = cell_denominator
 
         # nominal maximum per cell, assuming a full 100-entity task with all metrics present
-        sample_entities = len(get_metadata_filtered(tasks[0])) if tasks else 0
+        sample_entities = len(MetadataFiltered(
+            task=tasks[0], base_folder=self.base_folder,
+        ).compute()) if tasks else 0
         max_per_cell = sample_entities * len(self.interference_pairs) * len(self.similarity_metrics)
 
         data = {
@@ -1400,7 +1401,9 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
 
     def _compute_from_scratch(self, exclude_diagonal: bool = True, entity_col: str = 'name') -> dict:
         # Gather precomputed data
-        metadata_filtered = get_metadata_filtered(self.task)
+        metadata_filtered = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
         df_mp = pd.DataFrame(ResultTemplateInterferenceMatrix(
             model = self.model,
             task = self.task,
@@ -1449,13 +1452,9 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
         # Load emitter forget quality from Me file (required for include_emitter_forget_quality=True)
         emitter_forget_map: Dict[str, float] = {}
         if self.include_emitter_forget_quality:
-            me_path = get_interference_per_entity_path(self.task)
-            if not os.path.exists(me_path):
-                raise FileNotFoundError(
-                    f"Me file not found at {me_path}. Required for include_emitter_forget_quality=True. "
-                    "Run script 4 (Compute interference per entity) for this task first."
-                )
-            df_me = pd.read_json(me_path)
+            df_me = pd.DataFrame(InterferencePerEntity(
+                task=self.task, model=self.model, base_folder=self.base_folder,
+            ).compute())
             me_metric_cols = [c for c in df_me.columns if c.startswith('metric_')]
             forget_col = choose_metric_column_interference_per_entity(
                 self.unlearning_algorithm, 'Forget clip diff', me_metric_cols
@@ -1468,27 +1467,29 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
         emitter_baseline_clip_map: Dict[str, float] = {}
         if self.include_baseline_quality:
             from vision_unlearning.metrics.image_and_text import MetricImageTextSimilarity  # lazy import
-            baseline_seeds = [42, 43, 44, 45]
-            num_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
+            baseline_seeds = GENERATE_DATASET_SEEDS
             metric_clip_img = MetricImageTextSimilarity(metrics=['clip'])
             logger.info(
                 "Computing baseline CLIP scores for %d entities (%d seeds each) ...",
                 len(labels), len(baseline_seeds)
             )
+            # Resolve the shared baseline folder once (local -> HuggingFace), rather than
+            # rebuilding a raw path per entity per seed.
+            all_prompts = [
+                f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}"
+                for name in labels
+            ]
+            baseline_folder = GeneratedDataset(
+                task=self.task, base_folder=self.base_folder, model=self.model,
+            ).compute(baseline_seeds, all_prompts)
             for entity in labels:
                 target_name = get_target_overwrite(self.task, self.unlearning_algorithm, entity)[0]
                 entity_prompt = f"An image of {target_name}"
                 clip_scores: List[float] = []
                 for seed in baseline_seeds:
-                    img_path = get_off_image_path(
-                        task=self.task,
-                        target=target_name,
-                        method=self.unlearning_algorithm,
-                        num_train_epochs=num_epochs,
-                        seed=seed,
-                        prompt=entity_prompt,
-                        base_folder=self.base_folder,
-                        model=self.model,
+                    img_path = os.path.join(
+                        baseline_folder,
+                        get_generated_dataset_file('off', seed, entity_prompt),  # type: ignore
                     )
                     img = Image.open(img_path).convert('RGB')
                     clip_scores.append(metric_clip_img.score(img, entity_prompt)['clip'])
@@ -1763,10 +1764,9 @@ class ResultTemplateSignificantRelationshipNumerical(ResultTemplate):
 
     def _compute_from_scratch(self) -> dict:
         # This part is common with the categorical version
-        interference_per_entity_path: str = get_interference_per_entity_path(self.task)
-        if not os.path.exists(interference_per_entity_path):
-            raise FileNotFoundError(f"Interference per entity file not found at {interference_per_entity_path}. Please compute it before runnign this RT.")
-        df = pd.read_json(interference_per_entity_path)
+        df = pd.DataFrame(InterferencePerEntity(
+            task=self.task, model=self.model, base_folder=self.base_folder,
+        ).compute())
         metric_cols: List[str] = list(filter(lambda c: c.startswith('metric_'), df.columns))
         assert all(df[metric].dtype == np.float64 or df[metric].dtype == np.int64 for metric in metric_cols)
         for col in metric_cols:
@@ -1914,10 +1914,9 @@ class ResultTemplateSignificantRelationshipCategorical(ResultTemplate):
         return None
 
     def _compute_from_scratch(self) -> dict:
-        interference_per_entity_path: str = get_interference_per_entity_path(self.task)
-        if not os.path.exists(interference_per_entity_path):
-            raise FileNotFoundError(f"Interference per entity file not found at {interference_per_entity_path}. Please compute it before runnign this RT.")
-        df = pd.read_json(interference_per_entity_path)
+        df = pd.DataFrame(InterferencePerEntity(
+            task=self.task, model=self.model, base_folder=self.base_folder,
+        ).compute())
         metric_cols: List[str] = list(filter(lambda c: c.startswith('metric_'), df.columns))
         assert all(df[metric].dtype == np.float64 or df[metric].dtype == np.int64 for metric in metric_cols)
         for col in metric_cols:
@@ -2068,7 +2067,9 @@ class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate
 
     def _compute_from_scratch(self) -> dict:
         # Load the metadata so we have entity names + attribute values in one place.
-        metadata_filtered = get_metadata_filtered(self.task)
+        metadata_filtered = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
         labels: List[str] = [e['name'] for e in metadata_filtered]
         entity_to_index: Dict[str, int] = {e['name']: i for i, e in enumerate(metadata_filtered)}
 
@@ -2109,7 +2110,10 @@ class ResultTemplateSignificantRelationshipCategoricalDirectional(ResultTemplate
         phi_v_accum: Dict[str, List[float]] = {name: [] for name in labels}
         for source_name in source_names:
             source_idx = entity_to_index[source_name]
-            interference_per_pair = get_interference_per_pair(self.task, source_idx, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder, model=self.model)
+            interference_per_pair = InterferencePerPair(
+                task=self.task, index=source_idx, method=self.unlearning_algorithm,
+                num_train_epochs=num_train_epochs, base_folder=self.base_folder, model=self.model,
+            ).compute()
             for receiver_name in labels:
                 if self.exclude_diagonal and receiver_name == source_name:
                     continue
@@ -2428,24 +2432,25 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
         )
 
     # ------------------------------------------------------------------
-    # File-path helpers (mirrors EmbeddingUnlearningProfile patterns)
+    # Embedding artifacts (mirrors EmbeddingUnlearningProfile patterns)
     # ------------------------------------------------------------------
 
-    def _get_baseline_embedding_path(self) -> str:
-        """Local path to the original-model baseline embedding file (method-agnostic).
+    def _baseline_embeddings(self) -> BaselineEmbeddings:
+        """The original-model baseline embedding artifact (method-agnostic).
 
-        Addressed through :class:`BaselineEmbeddings`, whose interface has no method/epoch
-        parameter, so the obsolete per-method baseline name cannot be produced here.
+        :class:`BaselineEmbeddings` has no method/epoch parameter, so the obsolete per-method
+        baseline name cannot be produced here. Resolve it with ``.compute()``/``.exists()`` —
+        taking a path out of it would discard the local -> HuggingFace cascade.
         """
         return BaselineEmbeddings(
             task=self.task,
             model=self.model,
             embedding_function=self.latent_embedding,
             base_folder=self.base_folder,
-        )._get_data_path_local()
+        )
 
-    def _get_entity_embedding_path(self, hf_entity_name: str) -> str:
-        """Local path to the per-entity unlearned embedding file."""
+    def _entity_embeddings(self, hf_entity_name: str) -> EntityEmbeddings:
+        """The per-entity unlearned embedding artifact for *hf_entity_name*."""
         return EntityEmbeddings(
             task=self.task,
             hf_entity=hf_entity_name,
@@ -2453,7 +2458,7 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
             model=self.model,
             embedding_function=self.latent_embedding,
             base_folder=self.base_folder,
-        )._get_data_path_local()
+        )
 
     # ------------------------------------------------------------------
     # Static helpers
@@ -2599,7 +2604,9 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
             )
 
         # ── 1. Load metadata and build attribute groups ─────────────────────
-        metadata_filtered: List[Dict[str, Any]] = get_metadata_filtered(self.task)
+        metadata_filtered: List[Dict[str, Any]] = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
 
         # Validate attribute keys
         all_keys = set(metadata_filtered[0].keys()) if metadata_filtered else set()
@@ -2647,16 +2654,7 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
                 group_2[str(v2)].append(e['name'])
 
         # ── 2. Baseline B matrix ─────────────────────────────────────────────
-        baseline_path = self._get_baseline_embedding_path()
-        if not os.path.exists(baseline_path):
-            raise FileNotFoundError(
-                f"Baseline DINOv2 embedding file not found: {baseline_path}. "
-                f"Run 3_compute_embeddings.py --task {self.task} "
-                f"--method {self.unlearning_algorithm} --max-identities 100 first."
-            )
-
-        with open(baseline_path, encoding='utf-8') as f:
-            baseline_raw = json.load(f)
+        baseline_raw = self._baseline_embeddings().compute()
 
         baseline_embs = self._load_mean_embeddings_by_name(
             baseline_raw, metadata_filtered, self.task, self.unlearning_algorithm
@@ -2671,17 +2669,19 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
         for meta in metadata_filtered:
             meta_name: str = meta['name']
             hf_name: str = get_target_overwrite(self.task, self.unlearning_algorithm, meta_name)[0]
-            entity_path = self._get_entity_embedding_path(hf_name)
 
-            if not os.path.exists(entity_path):
+            # Skipping an entity that has no embeddings anywhere is intentional (the RT
+            # averages over whichever entities were unlearned). It must mean "unavailable
+            # locally AND on HuggingFace", not merely "not cached locally".
+            try:
+                entity_raw = self._entity_embeddings(hf_name).compute()
+            except ArtifactNotAvailableError:
                 logger.debug(
-                    "IAT: per-entity file missing for '%s' (%s) — skipping.",
-                    meta_name, entity_path,
+                    "IAT: per-entity embeddings unavailable for '%s' "
+                    "(neither local nor HuggingFace) — skipping.",
+                    meta_name,
                 )
                 continue
-
-            with open(entity_path, encoding='utf-8') as f:
-                entity_raw = json.load(f)
 
             entity_embs = self._load_mean_embeddings_by_name(
                 entity_raw, metadata_filtered, self.task, self.unlearning_algorithm
@@ -2693,9 +2693,9 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
 
         if not delta_B_list:
             raise RuntimeError(
-                f"No per-entity embedding files found for "
-                f"task='{self.task}', method='{self.unlearning_algorithm}'. "
-                f"Expected files at: {self._get_entity_embedding_path('<entity>')}"
+                f"No per-entity embedding files found for task='{self.task}', "
+                f"method='{self.unlearning_algorithm}' — neither locally nor on HuggingFace. "
+                f"Run pipeline_05 (compute embeddings) for this task/method."
             )
 
         delta_B_arr = np.stack(delta_B_list, axis=0)    # (n_entities, |a1|, |a2|)
@@ -3384,7 +3384,9 @@ class ResultTemplateVisualSummaryBase(ResultTemplate):
         Ensures both entity and entity_index are filled and mutually consistent.
         Modifies in place.
         """
-        metadata_filtered = get_metadata_filtered(self.task)
+        metadata_filtered = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
         if not self.entity:
             if self.entity_index is None:
                 raise ValueError("Either entity or entity_index must be provided.")
@@ -3412,44 +3414,61 @@ class ResultTemplateVisualSummaryBase(ResultTemplate):
             f"Index {self.entity_index} is out of bounds for metadata of length {len(metadata_filtered)}"
         )
 
+    def _all_task_prompts(self) -> List[str]:
+        """Every prompt the task's dataset folders were generated with, in metadata order.
+
+        A dataset folder holds one image per (seed, prompt) over ALL the task's entities, so
+        resolving one through GeneratedDataset requires the complete list, not just the
+        entities this RT happens to display (see GeneratedDataset.exists).
+        """
+        metadata_filtered = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
+        return [
+            f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, m['name'])[0]}"
+            for m in metadata_filtered
+        ]
+
     def _load_images(
         self, displayed_entities: List[str], num_train_epochs: int
     ) -> Dict[str, Dict[str, str]]:
         """
         Load and base64-encode on/off images for *displayed_entities*.
 
-        Off (original) images come from the method-agnostic baseline folder via
-        get_off_image_path.  On (unlearned) images come from the emitter's
-        unlearned-model folder.
+        Off (original) images come from the method-agnostic shared baseline folder; on
+        (unlearned) images come from the emitter's unlearned-model folder. Both folders are
+        resolved through :class:`GeneratedDataset`, so a folder that is absent locally but
+        present on HuggingFace is downloaded rather than reported as missing.
         """
         assert self.entity is not None, "_resolve_entity() must be called before _load_images()"
         emitter_target = get_target_overwrite(self.task, self.unlearning_algorithm, self.entity)[0]
+
+        prompts = self._all_task_prompts()
+        seeds = GENERATE_DATASET_SEEDS
+
+        baseline_folder = GeneratedDataset(
+            task=self.task, base_folder=self.base_folder, model=self.model,
+        ).compute(seeds, prompts)
+        entity_folder = GeneratedDataset(
+            task=self.task,
+            target=emitter_target,
+            method=self.unlearning_algorithm,
+            num_train_epochs=num_train_epochs,
+            base_folder=self.base_folder,
+            model=self.model,
+        ).compute(seeds, prompts)
+
+        folder_for_state = {'off': baseline_folder, 'on': entity_folder}
         images: Dict[str, Dict[str, str]] = {'off': {}, 'on': {}}
         for state in ['off', 'on']:
             for name in displayed_entities:
                 prompt = (
                     f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}"
                 )
-                if state == 'off':
-                    img_path = get_off_image_path(
-                        self.task,
-                        emitter_target,
-                        self.unlearning_algorithm,
-                        num_train_epochs,
-                        self.seed,
-                        prompt,
-                    )
-                else:
-                    entity_folder = get_generated_dataset_folder(
-                        self.task,
-                        self.unlearning_algorithm,
-                        num_train_epochs,
-                        emitter_target,
-                    )
-                    img_path = os.path.join(
-                        entity_folder,
-                        get_generated_dataset_file(state, self.seed, prompt),  # type: ignore
-                    )
+                img_path = os.path.join(
+                    folder_for_state[state],
+                    get_generated_dataset_file(state, self.seed, prompt),  # type: ignore
+                )
                 images[state][name] = _encode_image_file(img_path, max_dim=self.images_max_dim)
         return images
 
@@ -3562,9 +3581,10 @@ class ResultTemplateInterferenceVisualSummary(ResultTemplateVisualSummaryBase):
         num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
         is_worst_biggest = mp_to_direction[self.interference_pair] != '↑'
 
-        interference_per_pair = get_interference_per_pair(
-            self.task, self.entity_index, self.unlearning_algorithm, num_train_epochs
-        )
+        interference_per_pair = InterferencePerPair(
+            task=self.task, index=self.entity_index, method=self.unlearning_algorithm,
+            num_train_epochs=num_train_epochs, base_folder=self.base_folder, model=self.model,
+        ).compute()
         all_names = list(interference_per_pair.keys())
         metric_list = [(name, interference_per_pair[name][self.interference_pair]) for name in all_names]
 
@@ -3813,7 +3833,9 @@ class ResultTemplateInterferenceMatrix(ResultTemplateMatrix):
 
 
     def _compute_from_scratch(self):
-        metadata_filtered = get_metadata_filtered(self.task)
+        metadata_filtered = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
         labels = [e['name'] for e in metadata_filtered]
         num_train_epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
 
@@ -3825,7 +3847,10 @@ class ResultTemplateInterferenceMatrix(ResultTemplateMatrix):
                 logger.warning(f'SKIP entity-pair analysis for task={self.task}, index={index}, method={self.unlearning_algorithm}, num_train_epochs={num_train_epochs}, not available locally or on HuggingFace')
                 continue
             #logger.info(f'Analyzing entity-pairs for task={self.task}, index={index}, method={self.unlearning_algorithm}, num_train_epochs={num_train_epochs}...')
-            interference_per_pair = get_interference_per_pair(self.task, index, self.unlearning_algorithm, num_train_epochs, base_folder=self.base_folder, model=self.model)
+            interference_per_pair = InterferencePerPair(
+                task=self.task, index=index, method=self.unlearning_algorithm,
+                num_train_epochs=num_train_epochs, base_folder=self.base_folder, model=self.model,
+            ).compute()
             emitter_name = metadata_filtered[index]['name']
             df_aggregated_interference.loc[emitter_name] = [interference_per_pair[l][self.interference_pair] for l in labels]
             #df_aggregated_interference_clip_diff.loc[emitter_name] = [interference_per_pair[l]['clip_diff'] for l in labels]
@@ -4069,26 +4094,28 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _get_baseline_embedding_path(self) -> str:
-        """Local path to the original-model baseline embedding file (method-agnostic).
+    def _baseline_embeddings(self) -> BaselineEmbeddings:
+        """The original-model baseline embedding artifact (method-agnostic).
 
-        Addressed through :class:`BaselineEmbeddings`, whose interface has no method/epoch
-        parameter, so the obsolete per-method baseline name cannot be produced here.
+        :class:`BaselineEmbeddings` has no method/epoch parameter, so the obsolete per-method
+        baseline name cannot be produced here. Resolve it with ``.compute()``/``.exists()`` --
+        taking a path out of it would discard the local -> HuggingFace cascade.
         """
         return BaselineEmbeddings(
             task=self.task,
             model=self.model,
             base_folder=self.base_folder,
-        )._get_data_path_local()
+        )
 
-    def _get_entity_embedding_path(self) -> str:
+    def _entity_embeddings(self) -> EntityEmbeddings:
+        """The per-entity unlearned embedding artifact for this RT's entity."""
         return EntityEmbeddings(
             task=self.task,
             hf_entity=self._resolve_hf_entity(),
             unlearning_algorithm=self.unlearning_algorithm,
             model=self.model,
             base_folder=self.base_folder,
-        )._get_data_path_local()
+        )
 
     @staticmethod
     def _mean_embeddings(raw: dict) -> "Dict[str, np.ndarray]":
@@ -4284,28 +4311,10 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         from sklearn.decomposition import PCA
         import math
 
-        baseline_path = self._get_baseline_embedding_path()
-        entity_path = self._get_entity_embedding_path()
         epochs = unlearning_algorithm_to_epochs[self.task][self.unlearning_algorithm]
 
-        if not os.path.exists(baseline_path):
-            raise FileNotFoundError(
-                f"Baseline embedding file not found: {baseline_path}. "
-                f"Run 3_compute_embeddings.py --task {self.task} "
-                f"--method {self.unlearning_algorithm} first."
-            )
-        if not os.path.exists(entity_path):
-            raise FileNotFoundError(
-                f"Entity embedding file not found: {entity_path}. "
-                f"Run 3_compute_embeddings.py --task {self.task} "
-                f"--method {self.unlearning_algorithm} "
-                f"--identities '{self.entity}' first."
-            )
-
-        with open(baseline_path, "r", encoding="utf-8") as f:
-            baseline_raw = json.load(f)
-        with open(entity_path, "r", encoding="utf-8") as f:
-            entity_raw = json.load(f)
+        baseline_raw = self._baseline_embeddings().compute()
+        entity_raw = self._entity_embeddings().compute()
 
         entity_means_off = self._mean_embeddings(baseline_raw)
         entity_means_on = self._mean_embeddings(entity_raw)
@@ -4374,15 +4383,22 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
         # Me clip_diffs are kept as fallback colouring (used by plot() if Mp unavailable).
         # embedding_specificity_ratio is read from IPE only — no inline fallback.
         # If IPE is absent or missing this entity's ratio, ratio_source = "not_available".
-        ipe_path = get_interference_per_entity_path(self.task, base_folder=self.base_folder, model=self.model)
         clip_diff_by_entity: Dict[str, float] = {}
         embedding_specificity_ratio: float = float("nan")
         ratio_source: str = "not_available"
 
-        if os.path.exists(ipe_path):
-            with open(ipe_path, "r", encoding="utf-8") as f:
-                ipe_list = json.load(f)
+        # This read is optional by design: a missing IPE degrades to ratio_source
+        # "not_available" and Me-aggregate colouring, it does not fail the RT. Resolving
+        # through the artifact means a HuggingFace-only IPE counts as present, while a
+        # genuine double-miss still degrades rather than raising.
+        try:
+            ipe_list: List[Dict[str, Any]] = InterferencePerEntity(
+                task=self.task, model=self.model, base_folder=self.base_folder,
+            ).compute()
+        except ArtifactNotAvailableError:
+            ipe_list = []
 
+        if ipe_list:
             # Me aggregate clip_diff (emitter_minus_receiver) for fallback colouring
             col_me_candidates = [
                 f"metric_{self.unlearning_algorithm}_{epochs}_emitter_minus_receiver_average_clip_diff (↑)",
@@ -4429,15 +4445,13 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
 
         entity_slug = self.entity.replace(" ", "_")
         try:
-            meta = get_metadata_filtered(self.task, base_folder=self.base_folder)
-        except (FileNotFoundError, NotImplementedError):
-            # FileNotFoundError: legacy direct-file-read path (should no longer occur).
-            # NotImplementedError: MetadataFiltered._compute_from_scratch's actual raise when
-            # the file is absent both locally and on HuggingFace (artifact.py cascade) -- this
-            # is the exception this call site was actually meant to catch; the mp_clip_diffs
-            # Mp-coloring feature below is optional (falls back to the Me aggregate, see the
-            # comment above), so a missing/unreachable metadata file must degrade gracefully
-            # here, not crash the whole RT.
+            meta = MetadataFiltered(
+                task=self.task, base_folder=self.base_folder,
+            ).compute()
+        except ArtifactNotAvailableError:
+            # The Mp-colouring feature below is optional (it falls back to the Me aggregate,
+            # see the comment above), so metadata that is absent both locally and on
+            # HuggingFace must degrade gracefully here rather than fail the whole RT.
             meta = []
         entity_idx_in_meta: Optional[int] = next(
             (i for i, m in enumerate(meta) if m["name"].replace(" ", "_") == entity_slug),

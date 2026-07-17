@@ -19,8 +19,9 @@ from typing import Any, Dict, List, cast
 import numpy as np
 import pandas as pd
 
-from vision_unlearning.artifact import SingleFileArtifact
-from vision_unlearning.datasets.testbed import get_metadata_filtered, get_target_overwrite
+from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
+from vision_unlearning.datasets.testbed import MetadataFiltered, get_target_overwrite
+from vision_unlearning.benchmarks.I_care.metadata import BaselineEmbeddings
 from vision_unlearning.benchmarks.I_care.configuration import (
     type_task,
     type_model,
@@ -109,11 +110,13 @@ class Similarity(SingleFileArtifact):
         assert all(isinstance(row, dict) and 'emitter' in row for row in data)
 
     def _compute_from_scratch(self) -> List[Dict[str, Any]]:
-        metadata_filtered: List[Dict[str, Any]] = get_metadata_filtered(self.task)
+        metadata_filtered: List[Dict[str, Any]] = MetadataFiltered(
+            task=self.task, base_folder=self.base_folder,
+        ).compute()
         labels: List[str] = [e['name'] for e in metadata_filtered]
 
         if self.similarity_metric == 'clip':
-            raise NotImplementedError(
+            raise ArtifactNotAvailableError(
                 "CLIP similarity matrix not found locally or in HuggingFace Hub. "
                 "Recomputing from scratch requires a GPU with CLIP/SD 1.4 and is not "
                 "supported here.  Either upload the precomputed matrix to HF or "
@@ -144,17 +147,12 @@ class Similarity(SingleFileArtifact):
         elif self.similarity_metric == 'dino':
             from collections import defaultdict
             # Baseline embeddings are produced by the original model and carry no method or
-            # epoch (the per-method baseline name is an obsolete artifact).
-            embedding_path = os.path.join(
-                self.base_folder, 'datasets',
-                f'embeddings_{self.task}_original.json'
-            )
-            assert os.path.exists(embedding_path), (
-                f"Baseline DINOv2 embeddings not found at {embedding_path}. "
-                f"Run pipeline_05 (compute embeddings) for the baseline first."
-            )
-            with open(embedding_path, encoding='utf-8') as f:
-                raw = json.load(f)
+            # epoch (the per-method baseline name is an obsolete artifact). Addressing them
+            # through BaselineEmbeddings keeps the model segment and embedding-function
+            # suffix in the name, and resolves local -> HuggingFace.
+            raw = BaselineEmbeddings(
+                task=self.task, model=self.model, base_folder=self.base_folder,
+            ).compute()
 
             # Build forward mapping: metadata_name -> expected prompt string.
             # The embedding file's 'prompt' field is "An image of {get_target_overwrite(...)[0]}"
