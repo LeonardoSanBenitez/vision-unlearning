@@ -44,6 +44,27 @@ logger = get_logger('artifact')
 DEFAULT_REMOTE_REPOSITORY_NAME = 'LeonardoBenitez/VisionUnlearningEvaluationTestbeds'
 
 
+class ArtifactNotAvailableError(FileNotFoundError):
+    """An artifact is available neither locally nor on HuggingFace, and cannot be produced here.
+
+    Raised from :meth:`Artifact._compute_from_scratch` by artifacts whose production is a
+    pipeline job (a GPU run, a bulk producer script) rather than something a caller can do on
+    demand. It is the *only* exception the cascade raises for "the data is not there", so a
+    caller that wants to degrade gracefully catches this one type rather than guessing which
+    exception a particular subclass happens to use.
+
+    Subclasses ``FileNotFoundError`` because that is what it is — the artifact's backing file
+    is absent and cannot be created — and because callers that already degrade on
+    ``FileNotFoundError`` are then correct by construction rather than silently skipped.
+
+    It deliberately does **not** subclass ``NotImplementedError``: that would mean "this method
+    has no implementation", a programming error, which is a different thing from "the code is
+    fine, the data is missing". Conflating the two is a real bug this codebase has already hit
+    (a call site caught ``FileNotFoundError`` while the artifact raised ``NotImplementedError``,
+    so an intended graceful degradation crashed instead).
+    """
+
+
 class Artifact(BaseModel):
     """Base class standardising the local/remote storage cascade of a benchmark artifact.
 
@@ -169,6 +190,16 @@ class SingleFileArtifact(Artifact):
 
     def _compute_from_scratch(self) -> Any:
         raise NotImplementedError()
+
+    def exists(self) -> bool:
+        """Return True if the JSON file is available locally OR on HuggingFace.
+
+        Unlike a raw local path check, this reflects the same two sources ``_resolve``
+        itself is willing to read from, so a caller deciding whether to include/skip this
+        artifact (e.g. an aggregation loop over many entities) does not silently treat a
+        HuggingFace-only artifact as missing.
+        """
+        return self._exists_local() or self._exists_remote(get_hf_token_from_env())
 
     # ---- storage hooks over one JSON file ----
     def _exists_local(self) -> bool:

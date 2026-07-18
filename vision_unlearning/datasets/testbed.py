@@ -7,7 +7,7 @@ import os
 from pydantic import BaseModel, model_validator, PrivateAttr
 
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.artifact import Artifact, SingleFileArtifact
+from vision_unlearning.artifact import Artifact, ArtifactNotAvailableError, SingleFileArtifact
 
 
 logger = get_logger('testbed')
@@ -125,7 +125,7 @@ class MetadataFiltered(SingleFileArtifact):
         return _metadata_filtered_filename(self.task)
 
     def _compute_from_scratch(self) -> List[Dict[str, Any]]:
-        raise NotImplementedError(
+        raise ArtifactNotAvailableError(
             "MetadataFiltered is produced by the data-preparation pipeline, not computed on "
             "demand. Provide the local file or fetch it from HuggingFace."
         )
@@ -160,7 +160,13 @@ def exists_metadata_filtered(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     base_folder: str = 'assets',
 ) -> bool:
-    return os.path.exists(get_metadata_filtered_path(task, base_folder=base_folder))
+    """Whether the filtered metadata is available locally OR on HuggingFace.
+
+    Mirrors the sources ``get_metadata_filtered`` is willing to read from, so a caller
+    deciding whether to include or skip this task does not treat a HuggingFace-only file as
+    missing.
+    """
+    return MetadataFiltered(task=task, base_folder=base_folder).exists()
 
 
 def get_attribute_for_entity(

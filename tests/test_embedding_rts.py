@@ -19,6 +19,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+from vision_unlearning.artifact import ArtifactNotAvailableError  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
 
 
@@ -419,7 +420,7 @@ class TestEmbeddingUnlearningProfileCompute:
                 base_folder=str(tmp_path),
                 save_outputs=False,
             )
-            with pytest.raises(FileNotFoundError, match="Baseline embedding file not found"):
+            with pytest.raises(ArtifactNotAvailableError, match="BaselineEmbeddings"):
                 rt._compute_from_scratch()
         finally:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
@@ -440,7 +441,7 @@ class TestEmbeddingUnlearningProfileCompute:
                 base_folder=str(tmp_path),
                 save_outputs=False,
             )
-            with pytest.raises(FileNotFoundError, match="Entity embedding file not found"):
+            with pytest.raises(ArtifactNotAvailableError, match="EntityEmbeddings"):
                 rt._compute_from_scratch()
         finally:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
@@ -472,7 +473,7 @@ class TestEmbeddingUnlearningProfileCompute:
 
         # Patch get_metadata_filtered to return ENTITIES in order (Alice = index 0)
         fake_meta = [{"name": ent.replace(" ", "_")} for ent in ENTITIES]
-        with patch("vision_unlearning.benchmarks.I_care.result_templates.get_metadata_filtered",
+        with patch("vision_unlearning.benchmarks.I_care.result_templates.MetadataFiltered.compute",
                    return_value=fake_meta):
             rt = vb.ResultTemplateEmbeddingUnlearningProfile(
                 task=task,
@@ -506,7 +507,7 @@ class TestEmbeddingUnlearningProfileCompute:
         )
 
         fake_meta = [{"name": ent.replace(" ", "_")} for ent in ENTITIES]
-        with patch("vision_unlearning.benchmarks.I_care.result_templates.get_metadata_filtered",
+        with patch("vision_unlearning.benchmarks.I_care.result_templates.MetadataFiltered.compute",
                    return_value=fake_meta):
             rt = vb.ResultTemplateEmbeddingUnlearningProfile(
                 task=task,
@@ -610,7 +611,7 @@ class TestBaselinePerMethodObliteration:
                 task=task, unlearning_algorithm=method, entity=FORGOTTEN_ENTITY,
                 base_folder=str(tmp_path), save_outputs=False,
             )
-            with pytest.raises(FileNotFoundError, match="Baseline embedding file not found"):
+            with pytest.raises(ArtifactNotAvailableError, match="BaselineEmbeddings"):
                 rt._compute_from_scratch()
         finally:
             rt_mod.unlearning_algorithm_to_epochs = original_epochs
@@ -908,7 +909,7 @@ class TestEmbeddingForgettingEfficiencyCompute:
             base_folder=str(tmp_path),
             save_outputs=False,
         )
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ArtifactNotAvailableError):
             rt._compute_from_scratch()
 
     def test_missing_ratio_column_raises(
