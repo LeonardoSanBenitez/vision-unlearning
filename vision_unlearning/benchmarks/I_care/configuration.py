@@ -3,9 +3,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Tuple, TypeVar, get_args
+from typing import Any, Dict, List, Literal, Tuple, TypeVar, get_args
 
-from pydantic import BaseModel
+# Benchmark-agnostic record shapes are shared at the benchmarks/ level; the concrete
+# instances (MP_REGISTRY/S_REGISTRY/L_REGISTRY/ALGORITHM_REGISTRY, below) stay I-CARE-specific.
+from vision_unlearning.benchmarks.configuration import (
+    type_direction,
+    MetricWithDirectionSpec,
+    LSpec,
+    UnlearningAlgorithmSpec,
+)
 
 # domain_unlearning_algorithm (pretty names) is derived from ALGORITHM_REGISTRY, defined
 # further down alongside the other declarative registries (Mp/S/L/UnlearningAlgorithm).
@@ -637,8 +644,10 @@ def model_segment(model: type_model) -> str:
 #     is_worst_biggest = mp_to_direction[mp] != '↑'
 #     # worst == most interference.  For '↑' metrics worst = SMALLEST value;
 #     #                              for '↓' metrics worst = BIGGEST value.
+#
+# `type_direction` (the Literal["↑", "↓"] alias) is a benchmark-agnostic shape and lives in
+# `vision_unlearning.benchmarks.configuration`; it is imported at the top of this module.
 # =============================================================================
-type_direction = Literal["↑", "↓"]
 
 
 # =============================================================================
@@ -665,31 +674,6 @@ def _pretty_names(registry: Dict[_K, "MetricWithDirectionSpec"], order: List[_K]
         assert pretty is not None, f"{key!r} has no display name (not GUI-exposed)"
         names.append(pretty)
     return names
-
-
-class MetricWithDirectionSpec(BaseModel):
-    """One (software name, display name, direction) record for a metric used either as a
-    per-pair interference dimension (`type_mp`) or a similarity dimension (`type_s`).
-
-    ``name_pretty`` is ``None`` for a metric that is computed and typed but intentionally not
-    GUI-selectable (currently only `weight_overlap`, a LoRA-weight-specific diagnostic).
-    """
-    name: str
-    name_pretty: Optional[str] = None
-    direction: type_direction
-
-
-class LSpec(BaseModel):
-    """One (software name, display name) record for an embedding function (`type_l`)."""
-    name: str
-    name_pretty: str
-
-
-class UnlearningAlgorithmSpec(BaseModel):
-    """One (software name, display name) record for an unlearning method
-    (`type_unlearning_algorithm`)."""
-    name: str
-    name_pretty: str
 
 
 MP_REGISTRY: Dict[type_mp, MetricWithDirectionSpec] = {

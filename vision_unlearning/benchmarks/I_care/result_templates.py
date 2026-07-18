@@ -56,7 +56,8 @@ from vision_unlearning.datasets.testbed import (
     get_generated_dataset_file,
 )
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
+from vision_unlearning.artifact import ArtifactNotAvailableError
+from vision_unlearning.benchmarks.result_template import ResultTemplate
 from vision_unlearning.benchmarks.I_care.configuration import (
     type_model,
     type_task,
@@ -122,45 +123,6 @@ _UNLEARNING_ALGORITHM_DISPLAY = {v: k for k, v in GUI_TO_BACKEND['unlearning_alg
 def _display_unlearning_algorithm(method: str) -> str:
     """Map an internal unlearning-algorithm name (e.g. 'distil') to its plot display name (e.g. 'spare')."""
     return _UNLEARNING_ALGORITHM_DISPLAY.get(method, method)
-
-
-class ResultTemplate(SingleFileArtifact):
-
-    
-    def _serialize_parameters(self) -> str:
-        raise NotImplementedError()
-
-    def _get_data_path_remote(self) -> str:
-        # Forward slashes always: this is a path inside the HuggingFace repository, not a
-        # filesystem path. os.path.join would produce backslashes on Windows hosts, which
-        # HF rejects (the file then looks nonexistent and compute() falls through to
-        # _compute_from_scratch).
-        return f"results/{self.__class__.__name__.replace('ResultTemplate', '')}/{self._serialize_parameters()}.json"
-
-    @classmethod
-    def _fig_to_bytes(cls, fig: Figure) -> bytes:
-        buffer = io.BytesIO()
-        fig.savefig(buffer, format="png", dpi=100, bbox_inches="tight")
-        buffer.seek(0)
-        plt.close(fig)
-        return buffer.getvalue()
-
-    def _compute_from_scratch(self) -> dict | list:
-        raise NotImplementedError()
-
-    def _validate(self, data: Any) -> None:
-        assert type(data) == dict, f"Expected a dict in the json file, but got {type(data)}"
-        assert 'result' in data, f"Expected 'result' key in the json file, but got {list(data.keys())}"
-        assert type(data['result']) in [dict, list], f"Expected 'result' to be a dict or list, but got {type(data['result'])}"
-
-    def compute(self) -> dict:
-        """Resolve this result from local disk, HuggingFace, or by computing it from scratch.
-
-        The storage cascade (local -> remote -> from-scratch, with optional persist and
-        upload) lives in :class:`~vision_unlearning.artifact.SingleFileArtifact`; this method
-        only pins the return type.
-        """
-        return cast(dict, self._resolve())
 
 
 class ResultTemplateMetricMetricAlignment(ResultTemplate):
