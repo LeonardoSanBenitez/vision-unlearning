@@ -1185,7 +1185,8 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
             ds = GeneratedDataset(task='breeds', base_folder=tmp)
 
             def fake_download(folder_datasets: str, dataset_repository: str,
-                              dataset_config: str, token: str, path_in_repo: str = None) -> None:  # type: ignore[assignment]
+                              dataset_config: str, token: str, path_in_repo: str = None,  # type: ignore[assignment]
+                              overwrite: bool = False) -> None:
                 # Simulate HF download: write files to the local folder
                 self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='off')
 
@@ -1226,7 +1227,8 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
                                   method='uce', num_train_epochs=0, base_folder=tmp)
 
             def fake_download(folder_datasets: str, dataset_repository: str,
-                              dataset_config: str, token: str, path_in_repo: str = None) -> None:  # type: ignore[assignment]
+                              dataset_config: str, token: str, path_in_repo: str = None,  # type: ignore[assignment]
+                              overwrite: bool = False) -> None:
                 self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='on')
 
             mock_exists = MagicMock(return_value=True)
@@ -1269,7 +1271,8 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
 
             def fake_download(folder_datasets: str, dataset_repository: str,
                               dataset_config: str, token: Optional[str],
-                              path_in_repo: Optional[str] = None) -> None:
+                              path_in_repo: Optional[str] = None,
+                              overwrite: bool = False) -> None:
                 self._write_files_to_folder(ds.folder_path, seeds, prompts, prefix='off')
 
             mock_exists = MagicMock(return_value=True)
@@ -1438,6 +1441,77 @@ class TestGetOffImagePathSeedPromptValidation(unittest.TestCase):
                 base_folder=tmp,
             )
             self.assertTrue(os.path.exists(path), "Path should exist in baseline folder")
+
+
+class TestGeneratedDatasetPullRemoteHealsPartialFolder(unittest.TestCase):
+    """Regression: a partial dataset folder must not deadlock the download cascade.
+
+    An interrupted download (network drop, Ctrl-C, disk full) can leave the dataset
+    folder present but incomplete -- some images, no metadata.jsonl. Then
+    exists(seeds, prompts) reports it missing, _resolve() routes to the remote
+    branch and calls _pull_remote(). If _pull_remote let huggingface_dataset_download
+    skip on mere folder presence, exists() would keep failing and _resolve()'s
+    post-download assertion ("download completed but the artifact is still not
+    available locally") would raise on every request. _pull_remote must force an
+    overwrite download that fills the partial folder in place (never deleting it,
+    which a container bind mount may forbid).
+    """
+
+    def _write_partial_baseline(self, folder: str) -> None:
+        # 25 of 100 entities x 4 seeds, no metadata.jsonl: the interrupted-download shape.
+        os.makedirs(folder, exist_ok=True)
+        for s in [42, 43, 44, 45]:
+            for i in range(25):
+                open(os.path.join(folder, f'off_{s}_An image of entity {i}.png'), 'w').close()
+
+    def test_pull_remote_forces_overwrite_download(self) -> None:
+        """_pull_remote passes overwrite=True so a partial folder is filled, not skipped.
+
+        overwrite (fill in place) rather than clean (delete + refetch) is used because
+        deleting the folder is not always possible on a container bind mount.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            ds = GeneratedDataset(task='breeds', base_folder=tmp, model='sd1.4')
+            with patch(
+                'vision_unlearning.integrations.huggingface.huggingface_dataset_download'
+            ) as mock_dl:
+                ds._pull_remote(hf_token=None)
+            mock_dl.assert_called_once()
+            self.assertTrue(mock_dl.call_args.kwargs.get('overwrite'))
+
+    def test_compute_heals_partial_folder_via_remote(self) -> None:
+        """End-to-end: partial folder + remote available -> compute() completes.
+
+        Before the fix this raised the AssertionError from artifact.py because the
+        download was skipped and exists() stayed False.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = [42, 43, 44, 45]
+            prompts = [f'An image of entity {i}' for i in range(100)]
+            ds = GeneratedDataset(task='breeds', base_folder=tmp, model='sd1.4')
+            folder = ds.folder_path
+            self._write_partial_baseline(folder)
+            self.assertFalse(ds.exists(seeds, prompts))  # partial -> reported missing
+
+            def fake_download(**kw: object) -> None:
+                # Simulate an overwrite download: fill the complete set + metadata in
+                # place (no delete of the folder), which is what overwrite=True does.
+                self.assertTrue(kw.get('overwrite'))
+                os.makedirs(folder, exist_ok=True)
+                for s in seeds:
+                    for p in prompts:
+                        open(os.path.join(folder, f'off_{s}_{p}.png'), 'w').close()
+                open(os.path.join(folder, 'metadata.jsonl'), 'w').close()
+
+            with patch.object(GeneratedDataset, '_exists_remote', return_value=True), \
+                    patch(
+                        'vision_unlearning.integrations.huggingface.huggingface_dataset_download',
+                        side_effect=fake_download,
+                    ):
+                result = ds.compute(seeds, prompts)
+
+            self.assertEqual(result, folder)
+            self.assertTrue(ds.exists(seeds, prompts))
 
 
 if __name__ == '__main__':

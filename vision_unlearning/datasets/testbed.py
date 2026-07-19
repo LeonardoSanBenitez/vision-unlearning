@@ -789,6 +789,15 @@ class GeneratedDataset(Artifact):
             # downloads from public repositories.
             token=hf_token,
             path_in_repo=self.hf_path_in_repo,
+            # The cascade only reaches _pull_remote when _exists_local() is False,
+            # i.e. the folder is absent or an incomplete leftover of an interrupted
+            # download. huggingface_dataset_download skips when the folder merely
+            # exists, which for an incomplete folder would leave the artifact
+            # permanently unavailable (the finer exists(seeds, prompts) check keeps
+            # failing while the download refuses to run). overwrite=True fills the
+            # folder in place instead of skipping — and, unlike clean=True, never
+            # deletes the folder, which a container bind mount may forbid.
+            overwrite=True,
         )
 
     def _load_local(self) -> str:

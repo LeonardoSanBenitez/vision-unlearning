@@ -253,6 +253,7 @@ def huggingface_dataset_download(
     folder_cache: str = '/tmp/huggingface_cache',
     clean_cache: bool = False,
     path_in_repo: Optional[str] = None,
+    overwrite: bool = False,
 ) -> None:
     '''
     Download a dataset folder from HuggingFace.
@@ -271,44 +272,70 @@ def huggingface_dataset_download(
             files.  When None (default) it is the same as ``dataset_config``.
             Pass an explicit value when the HF-side path differs from the local
             folder name (e.g., ``path_in_repo="datasets/generated_breeds_baseline"``).
-        clean: If True, the local folder is deleted before downloading.
+        clean: If True, the local folder is deleted before downloading. Note this
+            calls ``rmtree`` on the destination, which is not always possible on a
+            container bind mount (a directory created inside the container may not be
+            removable by it); prefer ``overwrite`` when the goal is only to complete a
+            partial folder.
+        overwrite: If True, download even when the destination folder already exists,
+            copying the remote files into it in place (existing files are overwritten,
+            missing ones are added). This completes a partial/interrupted download
+            without deleting the folder — the robust choice when a coarse
+            folder-presence check would otherwise skip a re-download and strand an
+            incomplete dataset. When False (default) an existing folder is left as-is
+            and the download is skipped.
     '''
     hf_path = dataset_config if path_in_repo is None else path_in_repo
 
     folder_dataset = os.path.join(folder_datasets, dataset_config)
-    if clean:
-        if os.path.exists(folder_dataset):
-            shutil.rmtree(folder_dataset)
-    if os.path.exists(folder_dataset):
+    if clean and os.path.exists(folder_dataset):
+        shutil.rmtree(folder_dataset)
+
+    folder_pre_existed = os.path.exists(folder_dataset)
+    if folder_pre_existed and not overwrite:
+        # Skipping on mere folder *presence* is what turns an interrupted download
+        # (a folder with only some of its files) into a permanent gap: the caller
+        # that wants completeness never gets the missing files. Callers resolving a
+        # possibly-partial folder pass overwrite=True to fill it in place instead.
         logger.info('Dataset already exists locally, skipping download')
         return
-    os.makedirs(folder_dataset)
+    os.makedirs(folder_dataset, exist_ok=True)
 
-    folder_cache_dataset = os.path.join(folder_cache, dataset_repository, dataset_config)
-    os.makedirs(folder_cache_dataset, exist_ok=True)
+    try:
+        folder_cache_dataset = os.path.join(folder_cache, dataset_repository, dataset_config)
+        os.makedirs(folder_cache_dataset, exist_ok=True)
 
-    # Download to cache
-    repo_path = snapshot_download(
-        repo_id=dataset_repository,
-        repo_type="dataset",
-        token=token,
-        allow_patterns=f"{hf_path}/*",
-        cache_dir=folder_cache,
-    )
+        # Download to cache
+        repo_path = snapshot_download(
+            repo_id=dataset_repository,
+            repo_type="dataset",
+            token=token,
+            allow_patterns=f"{hf_path}/*",
+            cache_dir=folder_cache,
+        )
 
-    # Copy from cache to final folder
-    for root, _, files in os.walk(os.path.join(repo_path, hf_path)):
-        for file in files:
-            source_path = os.path.join(root, file)
-            if os.path.islink(source_path):
-                source_path = os.path.join(root, os.readlink(source_path))
-            target_path = os.path.join(folder_dataset, os.path.relpath(os.path.join(root, file), start=os.path.join(repo_path, hf_path)))
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            shutil.copy2(source_path, target_path)
+        # Copy from cache to final folder (overwrites existing files, adds missing ones)
+        for root, _, files in os.walk(os.path.join(repo_path, hf_path)):
+            for file in files:
+                source_path = os.path.join(root, file)
+                if os.path.islink(source_path):
+                    source_path = os.path.join(root, os.readlink(source_path))
+                target_path = os.path.join(folder_dataset, os.path.relpath(os.path.join(root, file), start=os.path.join(repo_path, hf_path)))
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                shutil.copy2(source_path, target_path)
 
-    # Remove cache
-    if clean_cache:
-        shutil.rmtree(repo_path)
+        # Remove cache
+        if clean_cache:
+            shutil.rmtree(repo_path)
+    except BaseException:
+        # A download that fails partway must not leave a stranded half-populated
+        # folder that a later folder-presence check would skip. Remove it only when
+        # this call created it: a pre-existing folder may hold files the next
+        # overwrite pass reuses, and on a bind mount its directory may not even be
+        # removable by this process. Leaving it is safe — the next overwrite fills it.
+        if not folder_pre_existed:
+            shutil.rmtree(folder_dataset, ignore_errors=True)
+        raise
 
 
 
