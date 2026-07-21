@@ -185,6 +185,31 @@ def huggingface_dataset_file_exists(
     return response.status_code in (200, 302, 303, 307)
 
 
+def huggingface_dataset_list_files(
+    dataset_repository: str,
+    token: Optional[str],
+) -> List[str]:
+    '''
+    List every file path in a Hugging Face dataset repository, forward-slashed and
+    relative to the repo root.
+
+    This performs ONE listing over the whole repository — the expensive operation the
+    state-of-the-world census pays exactly once and then caches, so that answering "is
+    artifact X on HuggingFace?" for thousands of artifacts becomes a set-membership test
+    rather than thousands of per-file HTTP round trips (the anti-pattern this replaces).
+
+    Pass ``token=None`` for anonymous access to a public repository.
+    '''
+    api = HfApi()
+    return list(
+        api.list_repo_files(
+            repo_id=dataset_repository,
+            repo_type='dataset',
+            token=token,
+        )
+    )
+
+
 def huggingface_dataset_file_upload(
     file_path: str,
     dataset_repository: str,
