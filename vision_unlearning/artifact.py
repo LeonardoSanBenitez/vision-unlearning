@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Optional, Set
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -200,41 +200,6 @@ class SingleFileArtifact(Artifact):
         HuggingFace-only artifact as missing.
         """
         return self._exists_local() or self._exists_remote(get_hf_token_from_env())
-
-    # ------------------------------------------------------------------
-    # Audit API — presence/validity WITHOUT resolving through the cascade
-    # ------------------------------------------------------------------
-    # These answer a state-of-the-world census's questions ("present locally?",
-    # "present on the remote?", "valid?") over many artifacts at once. Each returns
-    # only a bool or None (or raises) — never a path or the artifact's data — so, unlike
-    # taking a raw path out, they cannot be used to bypass the resolve() cascade and read
-    # data by hand (the failure tests/test_artifact_discipline.py guards against).
-    # Auditing existence across thousands of cells is the one context where calling
-    # exists()/compute() per cell (each a network round trip) is the anti-pattern, so a
-    # census needs this non-resolving, non-networking way to ask.
-    def exists_local(self) -> bool:
-        """True when the artifact's file is present in ``base_folder`` (no network)."""
-        return self._exists_local()
-
-    def is_in_listing(self, remote_listing: Set[str]) -> bool:
-        """True when the artifact's remote path is in a pre-fetched repository listing.
-
-        Takes a listing fetched once (see ``huggingface_dataset_list_files``) instead of
-        issuing a per-file existence request, so an audit over many artifacts costs one
-        listing rather than one request each. The remote path stays inside the artifact;
-        only a bool is returned.
-        """
-        return self._get_data_path_remote() in remote_listing
-
-    def validate_local(self) -> None:
-        """Run the artifact's own ``_validate`` over the locally-present file.
-
-        Raises (typically ``AssertionError``) when the file violates the artifact's
-        invariants; returns ``None`` when valid. A census calls this only when
-        ``exists_local()`` is true and converts a raised error into a reported "invalid"
-        state. Loads and validates internally — no data is returned to the caller.
-        """
-        self._validate(self._load_local())
 
     # ---- storage hooks over one JSON file ----
     def _exists_local(self) -> bool:
