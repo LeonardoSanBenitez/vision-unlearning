@@ -1042,13 +1042,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--ledger-path",
-        default="logs/pipeline_08_ledger.jsonl",
+        default="",
         metavar="PATH",
         help=(
             "Where to append the per-attempt run ledger (one JSON line per RT "
             "computation: ok/skipped/failed, with the commit SHA and a timestamp). "
             "Debugging/traceability only -- not a Result Template, not a paper artifact. "
-            "Default: 'logs/pipeline_08_ledger.jsonl'. Also read by --action ledger-summary."
+            "Default (empty): '{base_folder}/logs/pipeline_08_ledger.jsonl', i.e. inside "
+            "the assets folder, which is already gitignored wholesale -- so the ledger is "
+            "never committed without any extra .gitignore rule. Also read by "
+            "--action ledger-summary (resolved against --base-folder the same way)."
         ),
     )
     parser.add_argument(
@@ -1058,6 +1061,18 @@ def parse_args() -> argparse.Namespace:
         help="Disable writing the run ledger for this invocation.",
     )
     return parser.parse_args()
+
+
+def _resolve_ledger_path(ledger_path: str, base_folder: str) -> str:
+    """Return ``ledger_path`` unchanged if set, else the default under ``base_folder``.
+
+    The default lives inside the assets folder (``{base_folder}/logs/...``) rather than
+    beside the code, so it inherits the assets folder's blanket ``.gitignore`` entry and
+    is never committed by accident, with no extra ignore rule to keep in sync.
+    """
+    if ledger_path:
+        return ledger_path
+    return os.path.join(base_folder, "logs", "pipeline_08_ledger.jsonl")
 
 
 def resolve_rt_names(requested: List[str]) -> List[str]:
@@ -1085,19 +1100,20 @@ def resolve_rt_names(requested: List[str]) -> List[str]:
 
 def main() -> None:
     args = parse_args()
+    base_folder: str = args.base_folder
+    ledger_path = _resolve_ledger_path(args.ledger_path, base_folder)
 
     if args.action == "ledger-summary":
-        print(summarize(args.ledger_path))
+        print(summarize(ledger_path))
         return
 
     tasks: List[str] = args.tasks
     methods: List[str] = args.methods
     upload: bool = args.upload_if_recomputed
-    base_folder: str = args.base_folder
 
     ledger: Optional[RunLedger] = None
     if args.action in ("run", "all") and not args.no_ledger:
-        ledger = RunLedger(args.ledger_path)
+        ledger = RunLedger(ledger_path)
         set_ledger(ledger)
 
     if args.action in ("run", "all"):
