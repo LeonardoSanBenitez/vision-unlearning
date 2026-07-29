@@ -62,6 +62,10 @@ coverage.xml
 *.mo
 *.pot
 
+# Pipeline execution ledger (pipeline_08_run_all_rts.py --ledger-path): debugging /
+# traceability output only, not a paper artifact, not a Result Template.
+logs/*.jsonl
+
 # Django stuff:
 *.log
 local_settings.py

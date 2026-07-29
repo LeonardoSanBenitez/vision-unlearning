@@ -55,6 +55,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger, summarize  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +113,29 @@ def list_hf_result_files(
         return frozenset()
 
 
+# ---------------------------------------------------------------------------
+# Run ledger — a module-level, optional sink for per-attempt outcomes.
+#
+# Threading a ledger argument through every one of the ~40 RT-construction call sites
+# below would touch every runner function for a purely additive debugging feature. A
+# single module-level slot, installed once in main() before the run starts and read by
+# _compute_and_report (and the two loops that do not go through it), keeps every existing
+# call site -- and the test suite, which calls _compute_and_report directly with no
+# ledger installed -- completely unaffected when logging is disabled (the default: None).
+# ---------------------------------------------------------------------------
+_ledger: Optional[RunLedger] = None
+
+
+def set_ledger(ledger: Optional[RunLedger]) -> None:
+    """Install (or clear, with ``None``) the run ledger used for this process."""
+    global _ledger
+    _ledger = ledger
+
+
+def _get_ledger() -> Optional[RunLedger]:
+    return _ledger
+
+
 def _should_skip(
     rt: "vb.ResultTemplate",  # type: ignore[name-defined]
     hf_files: FrozenSet[str],
@@ -167,14 +191,24 @@ def _compute_and_report(
     ``rt_factory()`` is invoked synchronously (not deferred/stored), the closures are
     evaluated immediately and are not subject to the late-binding-in-loops pitfall.
     """
+    ledger = _get_ledger()
     try:
         rt = rt_factory()
         if _should_skip(rt, hf_files, upload_if_recomputed):
+            if ledger is not None:
+                ledger.record(error_context, status="skipped")
             return
         rt.compute()
         print(".", end="", flush=True)
+        if ledger is not None:
+            ledger.record(error_context, status="ok")
     except Exception as exc:
         logger.warning("%s failed: %s", error_context, exc, exc_info=True)
+        if ledger is not None:
+            ledger.record(
+                error_context, status="failed",
+                exception_type=type(exc).__name__, message=str(exc),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -385,12 +419,21 @@ def run_significant_relationship(
     falls back to Numerical on InvalidAttributeTypeError.
     """
     me_list = _ALL_ME
+    ledger = _get_ledger()
     for model in _ALL_MODELS:
         for task in tasks:
             attributes = _sr_attributes_for_task(task)
             for unlearning_algorithm in methods:
                 for interference_entity in me_list:
                     for attribute in attributes:
+                        cat_context = (
+                            f"SignificantRelationshipCategorical for {model}/{task}/"
+                            f"{unlearning_algorithm}/{interference_entity}/{attribute}"
+                        )
+                        num_context = (
+                            f"SignificantRelationshipNumerical for {model}/{task}/"
+                            f"{unlearning_algorithm}/{interference_entity}/{attribute}"
+                        )
                         try:
                             rt_cat = vb.ResultTemplateSignificantRelationshipCategorical(  # type: ignore[arg-type]
                                 model=model,
@@ -403,8 +446,12 @@ def run_significant_relationship(
                                 base_folder=base_folder,
                             )
                             if _should_skip(rt_cat, hf_files, upload_if_recomputed):
+                                if ledger is not None:
+                                    ledger.record(cat_context, status="skipped")
                                 continue
                             rt_cat.compute()
+                            if ledger is not None:
+                                ledger.record(cat_context, status="ok")
                         except vb.InvalidAttributeTypeError:
                             try:
                                 rt_num = vb.ResultTemplateSignificantRelationshipNumerical(
@@ -418,8 +465,12 @@ def run_significant_relationship(
                                     base_folder=base_folder,
                                 )
                                 if _should_skip(rt_num, hf_files, upload_if_recomputed):
+                                    if ledger is not None:
+                                        ledger.record(num_context, status="skipped")
                                     continue
                                 rt_num.compute()
+                                if ledger is not None:
+                                    ledger.record(num_context, status="ok")
                             except Exception as e2:
                                 logger.warning(
                                     "SignificantRelationshipNumerical failed for "
@@ -427,8 +478,17 @@ def run_significant_relationship(
                                     model, task, unlearning_algorithm,
                                     interference_entity, attribute, e2,
                                 )
-                        except vb.InsufficientSamplesError:
-                            pass
+                                if ledger is not None:
+                                    ledger.record(
+                                        num_context, status="failed",
+                                        exception_type=type(e2).__name__, message=str(e2),
+                                    )
+                        except vb.InsufficientSamplesError as e_ins:
+                            if ledger is not None:
+                                ledger.record(
+                                    cat_context, status="failed",
+                                    exception_type=type(e_ins).__name__, message=str(e_ins),
+                                )
                         except Exception as e:
                             logger.warning(
                                 "SignificantRelationshipCategorical failed for "
@@ -436,6 +496,11 @@ def run_significant_relationship(
                                 model, task, unlearning_algorithm,
                                 interference_entity, attribute, e,
                             )
+                            if ledger is not None:
+                                ledger.record(
+                                    cat_context, status="failed",
+                                    exception_type=type(e).__name__, message=str(e),
+                                )
                         else:
                             print(".", end="", flush=True)
                 print("")
@@ -877,11 +942,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--action",
         default="run",
-        choices=["run", "aggregate", "all"],
+        choices=["run", "aggregate", "all", "ledger-summary"],
         help=(
             "What to do: 'run' computes RTs (default), "
             "'aggregate' builds rt_results.csv from existing JSONs, "
-            "'all' does both in sequence."
+            "'all' does both in sequence, "
+            "'ledger-summary' prints a grouped ok/skipped/failed report from --ledger-path "
+            "without running or aggregating anything."
         ),
     )
     parser.add_argument(
@@ -973,6 +1040,23 @@ def parse_args() -> argparse.Namespace:
             "Default: off."
         ),
     )
+    parser.add_argument(
+        "--ledger-path",
+        default="logs/pipeline_08_ledger.jsonl",
+        metavar="PATH",
+        help=(
+            "Where to append the per-attempt run ledger (one JSON line per RT "
+            "computation: ok/skipped/failed, with the commit SHA and a timestamp). "
+            "Debugging/traceability only -- not a Result Template, not a paper artifact. "
+            "Default: 'logs/pipeline_08_ledger.jsonl'. Also read by --action ledger-summary."
+        ),
+    )
+    parser.add_argument(
+        "--no-ledger",
+        action="store_true",
+        default=False,
+        help="Disable writing the run ledger for this invocation.",
+    )
     return parser.parse_args()
 
 
@@ -1001,10 +1085,20 @@ def resolve_rt_names(requested: List[str]) -> List[str]:
 
 def main() -> None:
     args = parse_args()
+
+    if args.action == "ledger-summary":
+        print(summarize(args.ledger_path))
+        return
+
     tasks: List[str] = args.tasks
     methods: List[str] = args.methods
     upload: bool = args.upload_if_recomputed
     base_folder: str = args.base_folder
+
+    ledger: Optional[RunLedger] = None
+    if args.action in ("run", "all") and not args.no_ledger:
+        ledger = RunLedger(args.ledger_path)
+        set_ledger(ledger)
 
     if args.action in ("run", "all"):
         rt_names = resolve_rt_names(args.rts)
@@ -1084,6 +1178,11 @@ def main() -> None:
             output_path=args.csv_output,
         )
         logger.info("Aggregation complete: %s", csv_path)
+
+    if ledger is not None:
+        logger.info("Run ledger: %d records written to %s", ledger.count, ledger.path)
+        set_ledger(None)
+        ledger.close()
 
 
 if __name__ == "__main__":
