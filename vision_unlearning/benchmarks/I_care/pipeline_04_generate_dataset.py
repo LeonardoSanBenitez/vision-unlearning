@@ -36,6 +36,8 @@ from typing import Any, Dict, List, Literal, Optional
 import dotenv
 import torch
 
+from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -107,6 +109,21 @@ def _parse_args() -> argparse.Namespace:
         default="assets",
         help="Local assets folder (default: assets).",
     )
+    parser.add_argument(
+        "--ledger-path",
+        default="",
+        metavar="PATH",
+        help=(
+            "Where to append the per-entity run ledger (debugging/traceability only, "
+            "not a paper artifact). Default (empty): '{base_folder}/logs/pipeline_04_ledger.jsonl'."
+        ),
+    )
+    parser.add_argument(
+        "--no-ledger",
+        action="store_true",
+        default=False,
+        help="Disable writing the run ledger for this invocation.",
+    )
     return parser.parse_args()
 
 
@@ -120,6 +137,7 @@ def run_baseline(
     replace_if_exists: bool,
     upload_if_recomputed: bool,
     base_folder: str,
+    ledger: Optional[RunLedger] = None,
 ) -> None:
     """Generate method-agnostic baseline images (original SD, no LoRA)."""
     from vision_unlearning.utils.logger import get_logger, setup_loggers
@@ -159,6 +177,8 @@ def run_baseline(
         "ALL DONE. folder=%s  elapsed=%.1f s  (avg %.2f s/image)",
         result_folder, elapsed, elapsed / n_images if n_images else 0.0,
     )
+    if ledger is not None:
+        ledger.record(f"GeneratedDatasetBaseline for {task}", status="ok")
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +195,7 @@ def run_normal(
     seeds: List[int],
     limit_prompts: Optional[int],
     base_folder: str,
+    ledger: Optional[RunLedger] = None,
 ) -> None:
     """Unlearn the model and generate the per-entity evaluation dataset."""
     import pandas as pd
@@ -488,6 +509,15 @@ def run_normal(
             "-" * 100 + "\nFinished: target='%s' (%d/%d)\n" + "-" * 100,
             target_preprocessed, index, index_start + max_identities - 1,
         )
+        if ledger is not None:
+            # A single "ok" per entity, not distinguishing unlearning-skipped from
+            # dataset-generation-skipped -- the two stages above already log their own
+            # skip/recompute decision; this is the entity-level completion marker (the
+            # assert above is the actual, existing correctness check for it).
+            ledger.record(
+                f"GeneratedDataset for {task}/{method}/{num_train_epochs}/index={index}",
+                status="ok",
+            )
 
     logger.info("ALL DONE.")
 
@@ -510,31 +540,43 @@ def main() -> None:
     args = _parse_args()
     task: Literal["scenes", "breeds", "people"] = args.task  # type: ignore[assignment]
 
-    if args.baseline:
-        run_baseline(
-            task=task,
-            seeds=args.seeds,
-            replace_if_exists=args.replace_if_exists,
-            upload_if_recomputed=args.upload_if_recomputed,
-            base_folder=args.base_folder,
-        )
-    else:
-        if args.method is None:
-            raise SystemExit("--method is required in normal mode (or use --baseline).")
-        if args.num_train_epochs is None:
-            raise SystemExit("--num-train-epochs is required in normal mode (or use --baseline).")
-        method: Literal["uce", "munba", "distil"] = args.method  # type: ignore[assignment]
-        run_normal(
-            task=task,
-            method=method,
-            num_train_epochs=args.num_train_epochs,
-            index_start=args.index_start,
-            max_identities=args.max_identities,
-            replace_if_exists=args.replace_if_exists,
-            seeds=args.seeds,
-            limit_prompts=args.limit_prompts,
-            base_folder=args.base_folder,
-        )
+    ledger: Optional[RunLedger] = None
+    if not args.no_ledger:
+        ledger_path = args.ledger_path or os.path.join(args.base_folder, "logs", "pipeline_04_ledger.jsonl")
+        ledger = RunLedger(ledger_path)
+
+    try:
+        if args.baseline:
+            run_baseline(
+                task=task,
+                seeds=args.seeds,
+                replace_if_exists=args.replace_if_exists,
+                upload_if_recomputed=args.upload_if_recomputed,
+                base_folder=args.base_folder,
+                ledger=ledger,
+            )
+        else:
+            if args.method is None:
+                raise SystemExit("--method is required in normal mode (or use --baseline).")
+            if args.num_train_epochs is None:
+                raise SystemExit("--num-train-epochs is required in normal mode (or use --baseline).")
+            method: Literal["uce", "munba", "distil"] = args.method  # type: ignore[assignment]
+            run_normal(
+                task=task,
+                method=method,
+                num_train_epochs=args.num_train_epochs,
+                index_start=args.index_start,
+                max_identities=args.max_identities,
+                replace_if_exists=args.replace_if_exists,
+                seeds=args.seeds,
+                limit_prompts=args.limit_prompts,
+                base_folder=args.base_folder,
+                ledger=ledger,
+            )
+    finally:
+        if ledger is not None:
+            print(f"Run ledger: {ledger.count} records written to {ledger.path}")
+            ledger.close()
 
 
 if __name__ == "__main__":
