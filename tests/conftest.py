@@ -17,6 +17,7 @@ import pytest
 # classify it here or keep it torch-free. That failure is the intended rot-protection
 # behaviour, not a bug.
 _HEAVY_TEST_FILES = [
+    "test_epoch_checkpoint_hook.py",
     "test_data_generation.py",
     "test_gradient_weighting.py",
     "test_model_management.py",

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 import random
 from typing import List, Optional, Tuple, Dict, Any
-from pydantic import Field
+from pydantic import Field, field_validator
 from abc import abstractmethod
 from PIL import Image
 import numpy as np
@@ -107,6 +107,17 @@ def unlearn_lora(
     return pipeline_original, pipeline_learned, pipeline_unlearned
 
 
+def epochs_to_save(save_lora_at_epochs: Optional[List[int]], epoch_1based: int) -> bool:
+    """Whether an intermediate LoRA adapter checkpoint is requested at this 1-based epoch.
+
+    Pure and side-effect free, so the checkpoint scheduling can be unit-tested without
+    running any training. Returns False when no epochs are requested.
+    """
+    if save_lora_at_epochs is None:
+        return False
+    return epoch_1based in save_lora_at_epochs
+
+
 class UnlearnerLora(Unlearner):
     '''
     Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
@@ -200,6 +211,7 @@ class UnlearnerLora(Unlearner):
     checkpointing_steps: int = Field(500, description="Save training state checkpoint every X updates.")
     checkpoints_total_limit: Optional[int] = Field(None, description="Maximum number of checkpoints to store.")
     resume_from_checkpoint: Optional[str] = Field(None, description="Resume training from a previous checkpoint.")
+    save_lora_at_epochs: Optional[List[int]] = Field(default=None, description="1-based epoch numbers at which to also save the LoRA adapter into output_dir/epoch-{n}/. None disables (default). Entries must be positive ints; the list is deduplicated and sorted. On resume_from_checkpoint, epochs already passed are not re-saved.")
     noise_offset: float = Field(0.0, description="Scale of noise offset.")
 
     # Internal attributes
@@ -227,6 +239,22 @@ class UnlearnerLora(Unlearner):
     _lora_layers: Any = None
 
     _peak_mem: int = 0
+
+    @field_validator('save_lora_at_epochs', mode='before')
+    @classmethod
+    def _validate_save_lora_at_epochs(cls, value: Any) -> Optional[List[int]]:
+        if value is None:
+            return None
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("save_lora_at_epochs must be a list of positive integers, or None.")
+        cleaned: List[int] = []
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, int):
+                raise ValueError(f"save_lora_at_epochs entries must be int, got {type(item).__name__}: {item!r}")
+            if item < 1:
+                raise ValueError(f"save_lora_at_epochs entries must be >= 1 (1-based epochs), got {item}")
+            cleaned.append(item)
+        return sorted(set(cleaned))
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         self._output_dir_checkpoints = self.output_dir
@@ -283,6 +311,43 @@ class UnlearnerLora(Unlearner):
         unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
         StableDiffusionPipeline.save_lora_weights(
             save_directory=self.output_dir,
+            unet_lora_layers=unet_lora_state_dict,
+            safe_serialization=True,
+        )
+
+    def _assert_save_epochs_within_training(self) -> None:
+        '''
+        Fail fast if an intermediate checkpoint is requested beyond the training horizon.
+
+        A requested epoch greater than num_train_epochs is a configuration error, not a
+        silently-skipped no-op. Called at train-start once num_train_epochs is finalized.
+        '''
+        if self.save_lora_at_epochs is not None and max(self.save_lora_at_epochs) > self.num_train_epochs:
+            raise ValueError(
+                f"save_lora_at_epochs requests epoch {max(self.save_lora_at_epochs)}, but training runs only "
+                f"{self.num_train_epochs} epochs; a requested checkpoint beyond training is a configuration error."
+            )
+
+    def _save_lora_layers_to(self, target_dir: str) -> None:
+        '''
+        Save the current LoRA adapter into target_dir WITHOUT mutating training state.
+
+        Unlike _save_lora_layers, this does not cast self._unet to float32 in place, so it is
+        safe to call at intermediate epochs while training continues. Under mixed_precision="no"
+        the unet is already float32, so the saved adapter is identical to the one _save_lora_layers
+        would write at the same point.
+
+        Known limitation: this saves the base LoRA adapter. A subclass that overrides the final
+        _save_lora_layers with different artifact semantics (e.g. UnlearnerLoraDistillationSparsePerWeight,
+        which writes separate super/sub adapters) would need to override _save_lora_layers_to as well to
+        emit matching intermediate checkpoints; those subclasses simply do not set save_lora_at_epochs.
+        '''
+        assert self._unet is not None
+        os.makedirs(target_dir, exist_ok=True)
+        unwrapped_unet = unwrap_model(self._unet, self._accelerator)
+        unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
+        StableDiffusionPipeline.save_lora_weights(
+            save_directory=target_dir,
             unet_lora_layers=unet_lora_state_dict,
             safe_serialization=True,
         )
@@ -451,6 +516,8 @@ class UnlearnerLora(Unlearner):
                 )
         self.num_train_epochs = math.ceil(self.max_train_steps / num_update_steps_per_epoch)  # Recalculate our number of training epochs
 
+        self._assert_save_epochs_within_training()
+
         # Initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
         if self._accelerator.is_main_process:
@@ -607,6 +674,11 @@ class UnlearnerLora(Unlearner):
 
                     del pipeline
                     torch.cuda.empty_cache()
+
+                if epochs_to_save(self.save_lora_at_epochs, epoch + 1):
+                    # epoch is 0-based; save_lora_at_epochs is 1-based. On resume, epochs before
+                    # first_epoch are never entered by this loop, so they are not re-saved.
+                    self._save_lora_layers_to(os.path.join(self.output_dir, f"epoch-{epoch + 1}"))
 
         self._accelerator.wait_for_everyone()
         if self._accelerator.is_main_process:
