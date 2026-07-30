@@ -1,7 +1,11 @@
 from typing import List
 import copy
 import numpy as np
-from torchvision import datasets, transforms
+# Imported under leading-underscore names so that `from vision_unlearning.datasets.cifar
+# import *` does NOT re-export torchvision's `datasets`/`transforms`. Leaking `datasets`
+# shadowed the `vision_unlearning.datasets` subpackage and broke `import
+# vision_unlearning.datasets.testbed` after this module was star-imported.
+from torchvision import datasets as _tv_datasets, transforms as _tv_transforms
 from vision_unlearning.datasets.base import UnlearnDataset, UnlearnDatasetSplit
 
 
@@ -13,12 +17,12 @@ class UnlearnDatasetCifar(UnlearnDataset):
         self.mean = (0.485, 0.456, 0.406)
         self.std = (0.229, 0.224, 0.225)
 
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(self.mean, self.std)
+        transform = _tv_transforms.Compose([
+            _tv_transforms.ToTensor(),
+            _tv_transforms.Normalize(self.mean, self.std)
         ])
-        train_set = datasets.CIFAR10(self.download_path, train=True, transform=transform, download=True)
-        test_set = datasets.CIFAR10(self.download_path, train=False, transform=transform, download=True)
+        train_set = _tv_datasets.CIFAR10(self.download_path, train=True, transform=transform, download=True)
+        test_set = _tv_datasets.CIFAR10(self.download_path, train=False, transform=transform, download=True)
 
         self._classes = train_set.classes
         assert self._classes is not None
