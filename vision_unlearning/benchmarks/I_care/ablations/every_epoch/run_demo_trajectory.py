@@ -7,8 +7,10 @@ and assembles a single strip figure showing the concept degrade across epochs. T
 proof that the whole per-epoch machinery works: hook -> intermediate adapters -> generation -> metric.
 
 Uses the three local adaptations validated by the spike (num_workers=0, batch-1 x accum-4, small
-inference batch) and the same 3-axis CPU/RAM/VRAM monitor with a hard RAM-abort floor. Paths resolve
-from __file__; run with PYTHONPATH at the repo root, HF_TOKEN set, HF_HUB_DISABLE_XET=1.
+inference batch) and the same 3-axis CPU/RAM/VRAM monitor with a hard RAM-abort floor. The learning
+rate is a CLI argument (default = the canonical 6e-4) and ``--run-suffix`` isolates the model directory
+and every output file, so hyperparameter variants can be trained without overwriting each other. Paths
+resolve from __file__; run with PYTHONPATH at the repo root, HF_TOKEN set, HF_HUB_DISABLE_XET=1.
 """
 from __future__ import annotations
 
@@ -90,13 +92,19 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--checkpoints", type=str, default="1,2,3,5,10,20,30")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--learning-rate", type=float, default=6e-4,
+                        help="LoRA learning rate; 6e-4 is the canonical pipeline_03 distil value.")
+    parser.add_argument("--run-suffix", type=str, default="",
+                        help="Appended to the model directory and to every output filename, so several "
+                             "hyperparameter variants of this run can coexist on disk.")
     args = parser.parse_args()
     n_epochs = args.epochs
     checkpoints = sorted({int(x) for x in args.checkpoints.split(",")})
     assert max(checkpoints) <= n_epochs
+    suffix = args.run_suffix
 
     _OUT.mkdir(parents=True, exist_ok=True)
-    monitor_log = _OUT / "demo_monitor.log"
+    monitor_log = _OUT / f"demo_monitor{suffix}.log"
     monitor_log.write_text("", encoding="utf-8")
 
     target_pre, target_over = get_target_overwrite(_TASK, _METHOD, _TARGET)
@@ -108,7 +116,7 @@ def main() -> int:
     logger.info("target=%r prompt=%r overwrite=%r epochs=%d checkpoints=%s", target_pre, prompt, target_over, n_epochs, checkpoints)
 
     split_base = _ICARE_ASSETS / "datasets" / "taras_breeds_splits_filtered" / _TARGET
-    model_dir = _OUT / "models" / f"{_TASK}_bouvier_demo_{_METHOD}_{n_epochs}"
+    model_dir = _OUT / "models" / f"{_TASK}_bouvier_demo{suffix}_{_METHOD}_{n_epochs}"
     if model_dir.exists():
         shutil.rmtree(model_dir)
 
@@ -120,7 +128,7 @@ def main() -> int:
         "dataset_retain_name": str(split_base / "train_retain"),
         "validation_prompt": prompt,
         "dataloader_num_workers": 0, "resolution": 512, "num_validation_images": 1,
-        "mixed_precision": "no", "learning_rate": 6e-4, "max_grad_norm": 5.0,
+        "mixed_precision": "no", "learning_rate": args.learning_rate, "max_grad_norm": 5.0,
         "num_train_epochs": n_epochs, "validation_epochs": n_epochs + 1,
         "checkpointing_steps": 100000, "lr_scheduler_type": "constant", "lr_warmup_steps": 0,
         "save_strategy": "epoch", "save_total_limit": 2, "random_flip": True,
@@ -148,7 +156,7 @@ def main() -> int:
         logger.info("training done in %.0fs (%.1f min)", train_s, train_s / 60)
 
         # generate the target concept at each checkpoint + baseline (base model)
-        gen_dir = _OUT / "demo_generated"
+        gen_dir = _OUT / f"demo_generated{suffix}"
         gen_dir.mkdir(parents=True, exist_ok=True)
 
         def gen(lora: Any, fname: str) -> Path:
@@ -180,12 +188,13 @@ def main() -> int:
     result = {
         "task": _TASK, "method": _METHOD, "target": target_pre, "overwrite": target_over,
         "prompt": prompt, "seed": args.seed, "epochs": n_epochs, "checkpoints": checkpoints,
+        "learning_rate": args.learning_rate,
         "train_seconds": round(train_s, 1), "trajectory": traj,
         "peak_vram_used_gb": round(monitor.peak_vram_used_gb, 2),
         "min_ram_free_gb": round(monitor.min_ram_free_gb, 2),
         "off_image": str(off_path), "on_images": {n: str(p) for n, p in on_paths.items()},
     }
-    (_OUT / "demo_trajectory.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    (_OUT / f"demo_trajectory{suffix}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     # strip figure: baseline off | each epoch, titled with clip_diff
     cols = 1 + len(checkpoints)
@@ -199,12 +208,13 @@ def main() -> int:
         axes[i].set_title(f"epoch {n}\nclip_diff {cd:.2f}", fontsize=9)
         axes[i].axis("off")
     fig.suptitle(
-        f"SPARE unlearning of '{target_pre}' -> '{target_over}', per epoch (seed {args.seed})\n"
+        f"SPARE unlearning of '{target_pre}' -> '{target_over}', per epoch "
+        f"(seed {args.seed}, learning rate {args.learning_rate:g})\n"
         f"prompt: {prompt}  |  clip_diff = clip_on - clip_off (more negative = more forgotten)",
         fontsize=10,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.9))
-    strip = _OUT / "demo_trajectory_strip.png"
+    strip = _OUT / f"demo_trajectory_strip{suffix}.png"
     fig.savefig(strip, dpi=110)
     plt.close(fig)
     logger.info("strip figure -> %s", strip)

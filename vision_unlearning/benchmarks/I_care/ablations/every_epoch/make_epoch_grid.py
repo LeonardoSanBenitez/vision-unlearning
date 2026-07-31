@@ -16,7 +16,9 @@ consecutive-row mean-abs pixel change over the CONTROL breeds (those not strongl
 evolve smoothly) and flags any transition that is an outlier vs the median - in particular the
 original->epoch1 transition, whose being an outlier is the fingerprint of a badly-generated reference row.
 
-Writes, per seed, epoch_grid_seed{seed}.png and epoch_grid_seed{seed}.json (clip_diff per cell + audit).
+Writes, per seed, epoch_grid{run-suffix}_seed{seed}.png and .json (clip_diff per cell + audit). The
+adapters to render, the learning rate shown in the title, and the run suffix are CLI arguments, so a
+hyperparameter variant (e.g. a smaller learning rate) is rendered by the same code into its own files.
 Run with PYTHONPATH at the repo root, HF_TOKEN set, HF_HUB_DISABLE_XET=1.
 """
 from __future__ import annotations
@@ -54,10 +56,18 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="Every-epoch x every-entity grid (one grid per seed).")
     parser.add_argument("--seeds", default="42", help="comma-separated seeds, e.g. 42,43")
+    parser.add_argument("--model-dir", default=str(_OUT / "models" / "breeds_bouvier_demo_distil_30"),
+                        help="Directory holding the epoch-{n} LoRA adapters to render.")
+    parser.add_argument("--learning-rate", type=float, default=6e-4,
+                        help="Learning rate the adapters were trained with; used in the figure title.")
+    parser.add_argument("--run-suffix", type=str, default="",
+                        help="Appended to the generated-image directory and to every output filename, so "
+                             "several hyperparameter variants of this grid can coexist on disk.")
     args = parser.parse_args()
     seeds = [int(s) for s in args.seeds.split(",")]
+    suffix = args.run_suffix
 
-    model_dir = _OUT / "models" / "breeds_bouvier_demo_distil_30"
+    model_dir = Path(args.model_dir)
     epochs: List[int] = sorted(
         int(p.name.split("-")[1]) for p in model_dir.glob("epoch-*")
         if (p / "pytorch_lora_weights.safetensors").exists()
@@ -70,7 +80,7 @@ def main() -> int:
     breeds.sort(key=lambda x: x[1])  # most interfered (target) first
     prompt_of = {n: f"An image of {get_target_overwrite(_TASK, _METHOD, n)[0]}" for n, _ in breeds}
 
-    grid_dir = _OUT / "epoch_grid"
+    grid_dir = _OUT / f"epoch_grid{suffix}"
     grid_dir.mkdir(parents=True, exist_ok=True)
     m = MetricImageTextSimilarity(metrics=["clip"])
 
@@ -149,18 +159,20 @@ def main() -> int:
             axes[0][bi].set_title(f"{name.replace(' dog', '')}\ninterf {cd:.1f}", fontsize=6)
         audit_txt = "AUDIT OK" if not outliers else f"AUDIT WARNING: outlier transitions {outliers}"
         fig.suptitle(
-            f"SPARE unlearning of 'a bouvier des flandres dog' -> 'a cat', per epoch (seed {seed}, distil, lr 6e-4)\n"
+            f"SPARE unlearning of 'a bouvier des flandres dog' -> 'a cat', per epoch "
+            f"(seed {seed}, distil, learning rate {args.learning_rate:g})\n"
             f"rows = original + saved epochs; columns = 10 breeds by canonical interference (target col 0); "
             f"cell = clip_diff vs original  |  {audit_txt}",
             fontsize=9,
         )
         fig.tight_layout(rect=(0, 0, 1, 0.96))
-        out_png = _OUT / f"epoch_grid_seed{seed}.png"
+        out_png = _OUT / f"epoch_grid{suffix}_seed{seed}.png"
         fig.savefig(out_png, dpi=120)
         plt.close(fig)
 
         result = {
-            "seed": seed, "epochs": epochs, "rows": rows,
+            "seed": seed, "epochs": epochs, "rows": rows, "learning_rate": args.learning_rate,
+            "model_dir": str(model_dir),
             "breeds_by_interference": [{"name": n, "canonical_clip_diff": cd} for n, cd in breeds],
             "clip_diff": {f"{ri},{bi}": clip_diff[(ri, bi)] for ri in range(nrows) for bi in range(ncols)},
             "audit": {
@@ -172,7 +184,7 @@ def main() -> int:
                 "passed": not outliers,
             },
         }
-        (_OUT / f"epoch_grid_seed{seed}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        (_OUT / f"epoch_grid{suffix}_seed{seed}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         logger.info("[seed %d] grid -> %s", seed, out_png)
         return result
 
