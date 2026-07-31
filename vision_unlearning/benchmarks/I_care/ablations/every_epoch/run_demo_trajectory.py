@@ -56,7 +56,11 @@ class ResourceMonitor:
             ram_free = vm.available / 1024 ** 3
             self.peak_vram_used_gb = max(self.peak_vram_used_gb, used_v)
             self.min_ram_free_gb = min(self.min_ram_free_gb, ram_free)
-            line = f"[monitor] CPU {cpu:.0f}% | RAM {vm.percent:.0f}% ({ram_free:.2f}GB free) | VRAM {used_v:.2f}/{tot_v / 1024 ** 3:.2f}GB"
+            # the timestamp lets a later analysis align each sample with the epoch-adapter mtimes,
+            # which is how free memory is attributed to a training epoch
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+            line = (f"[monitor] {stamp} | CPU {cpu:.0f}% | RAM {vm.percent:.0f}% ({ram_free:.2f}GB free) | "
+                    f"VRAM {used_v:.2f}/{tot_v / 1024 ** 3:.2f}GB")
             with self._log_path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
             if ram_free < _RAM_ABORT_GB:
