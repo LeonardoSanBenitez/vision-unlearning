@@ -2,9 +2,15 @@
 
 Rows = [original base model, then each saved epoch]; columns = the 10 selected breeds ordered by canonical
 interference (target at column 0). Each cell is the entity's own concept prompt generated from that epoch's
-adapter, seed 42, batch_size=1 (dedicated-VRAM path). Reuses the base (off) and epoch-10 (on) images already
-produced by seed_validation.py; generates the intermediate epochs it is missing. Writes epoch_grid.png and
-epoch_grid.json (clip_diff per cell). Run with PYTHONPATH at the repo root, HF_TOKEN set, HF_HUB_DISABLE_XET=1.
+adapter, seed 42, batch_size=1 (dedicated-VRAM path).
+
+Seed-matching invariant (critical): the baseline AND every epoch are generated within THIS script using the
+SAME 10-prompt list in the SAME order, so a given breed sits at the same RNG position in every call and
+therefore starts from IDENTICAL initial noise in every row (generate_dataset reseeds to `seed` at the start
+of each call and advances the generator once per prompt). We deliberately do NOT reuse images from
+seed_validation.py, whose 30-prompt (10 breeds x 3 templates) ordering would put a breed at a different RNG
+position and break the seed match across rows. Writes epoch_grid.png and epoch_grid.json (clip_diff per cell).
+Run with PYTHONPATH at the repo root, HF_TOKEN set, HF_HUB_DISABLE_XET=1.
 """
 from __future__ import annotations
 
@@ -52,33 +58,28 @@ def main() -> int:
 
     grid_dir = _OUT / "epoch_grid"
     grid_dir.mkdir(parents=True, exist_ok=True)
-    seedval = _OUT / "seed_validation"  # base_s42_b{bi}_t0.png (off), on_s42_b{bi}_t0.png (epoch-10)
 
     def off_path(bi: int) -> Path:
-        reuse = seedval / f"base_s{_SEED}_b{bi}_t0.png"
-        return reuse if reuse.exists() else grid_dir / f"off_b{bi}.png"
+        return grid_dir / f"off_b{bi}.png"
 
     def on_path(bi: int, n: int) -> Path:
-        if n == max(epochs) and (seedval / f"on_s{_SEED}_b{bi}_t0.png").exists():
-            return seedval / f"on_s{_SEED}_b{bi}_t0.png"
         return grid_dir / f"on_ep{n}_b{bi}.png"
 
-    # generate any missing images, one generate_dataset call per (epoch or baseline), batch_size=1
-    def gen(lora: Any, targets: List[Tuple[int, Path]]) -> None:
-        todo = [(bi, p) for bi, p in targets if not p.exists()]
-        if not todo:
-            return
-        prompts = [prompt_of[breeds[bi][0]] for bi, _ in todo]
+    # Generate one row (baseline or one epoch) as a SINGLE generate_dataset call over ALL 10 breeds in
+    # order, so breed bi is always at RNG position bi -> identical initial noise across rows. Always
+    # regenerate the full row (no per-file skip) so a partial re-run can't shift positions.
+    def gen(lora: Any, paths: List[Path]) -> None:
+        prompts = [prompt_of[breeds[bi][0]] for bi in range(len(breeds))]
         generate_dataset(
             model_base_name=_MODEL_ID, lora_name=lora, prompts=prompts, output_path=str(grid_dir),
-            seeds=[_SEED], filenames=[p.name for _, p in todo], batch_size=1, lora_requires_inversion=False,
+            seeds=[_SEED], filenames=[p.name for p in paths], batch_size=1, lora_requires_inversion=False,
         )
 
-    logger.info("ensuring baseline (off) images ...")
-    gen(None, [(bi, off_path(bi)) for bi in range(len(breeds))])
+    logger.info("generating baseline (off) row ...")
+    gen(None, [off_path(bi) for bi in range(len(breeds))])
     for n in epochs:
-        logger.info("ensuring epoch-%d (on) images ...", n)
-        gen(str(model_dir / f"epoch-{n}"), [(bi, on_path(bi, n)) for bi in range(len(breeds))])
+        logger.info("generating epoch-%d (on) row ...", n)
+        gen(str(model_dir / f"epoch-{n}"), [on_path(bi, n) for bi in range(len(breeds))])
 
     # clip_diff per cell
     m = MetricImageTextSimilarity(metrics=["clip"])
