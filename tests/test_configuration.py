@@ -57,7 +57,7 @@ class TestDerivedValuesMatchRegistries:
     def test_domain_mp_pretty_names_come_from_registry(self) -> None:
         for pretty_name in config.domain_mp:
             assert pretty_name in {v.name_pretty for v in config.MP_REGISTRY.values()}
-
+ 
     def test_gui_to_backend_unlearning_algorithm_is_inverse_of_registry_pretty_names(self) -> None:
         for backend_name, spec in config.ALGORITHM_REGISTRY.items():
             assert config.GUI_TO_BACKEND["unlearning_algorithm"][spec.name_pretty] == backend_name

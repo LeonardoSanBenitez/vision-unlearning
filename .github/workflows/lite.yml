@@ -65,7 +65,6 @@ jobs:
           echo '----------- Pycodestyle check (lite tier) ----------'
           pycodestyle --max-line-length=300 \
             --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 \
-            --exclude=vision_unlearning/benchmarks/u_care \
             ./vision_unlearning
 
       - name: Pytest (lite tier -- heavy files excluded via tests/conftest.py collect_ignore)

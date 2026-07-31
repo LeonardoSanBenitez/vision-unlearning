@@ -5,13 +5,25 @@ import numpy as np
 from PIL import Image
 from PIL.Image import Image as PILImage
 import torch
-from transformers import (
-    pipeline,
-    AutoImageProcessor,
-    SiglipForImageClassification,
-)
-from transformers.pipelines.image_classification import ImageClassificationPipeline
-import piq
+from torchvision import transforms
+
+try:
+    from transformers import (
+        pipeline,
+        AutoImageProcessor,
+        SiglipForImageClassification,
+    )
+    from transformers.pipelines.image_classification import ImageClassificationPipeline
+except ImportError:  # pragma: no cover - optional in lightweight environments
+    pipeline = None  # type: ignore[assignment]
+    AutoImageProcessor = None  # type: ignore[assignment]
+    SiglipForImageClassification = None  # type: ignore[assignment]
+    ImageClassificationPipeline = Any  # type: ignore[assignment]
+
+try:
+    import piq
+except ImportError:  # pragma: no cover - optional in lightweight environments
+    piq = None
 
 from vision_unlearning.metrics.base import Metric
 
@@ -38,6 +50,8 @@ class MetricPaintingStyle(MetricImage):
     _pipeline: Optional[ImageClassificationPipeline] = None
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
+        if pipeline is None:
+            raise ImportError("transformers is required for MetricPaintingStyle")
         self._pipeline = pipeline('image-classification', model=self.model_path, device=self.device)
 
     def score(self, image: Image.Image) -> Dict[str, bool | float]:
@@ -117,6 +131,8 @@ class MetricGender(MetricImage):
     _processor: Any
 
     def model_post_init(self, __context):
+        if AutoImageProcessor is None or SiglipForImageClassification is None:
+            raise ImportError("transformers is required for MetricGender")
         # load processor & model from HF
         self._processor = AutoImageProcessor.from_pretrained(self._model_name)
         self._model = SiglipForImageClassification.from_pretrained(self._model_name)
@@ -189,6 +205,9 @@ class MetricQuality(MetricImage):
         assert 0.0 <= float(image_tensor.min())
         assert float(image_tensor.max()) <= 1.0
 
+        if piq is None:
+            raise ImportError("piq is required for MetricQuality")
+
         with torch.no_grad():
             score: torch.Tensor = piq.brisque(
                 image_tensor, data_range=1.0
@@ -215,6 +234,9 @@ class MetricQuality(MetricImage):
         assert batch.dtype == torch.float32
         assert 0.0 <= float(batch.min())
         assert float(batch.max()) <= 1.0
+
+        if piq is None:
+            raise ImportError("piq is required for MetricQuality")
 
         with torch.no_grad():
             scores: torch.Tensor = piq.brisque(  # [N]
@@ -244,3 +266,79 @@ metric_quality = MetricQuality()
 result = metric_quality.score(image)
 print(result)
 '''
+
+
+class MetricImageClassifier(MetricImage):
+    """Classify an image with a fine-tuned timm backbone whose head was replaced.
+
+    Loads a checkpoint saved as {"model_state_dict": ...} over
+    timm.create_model(backbone, pretrained=True) with model.head replaced by
+    Linear(head_in_features, len(labels)). Transform and softmax/argmax reproduce
+    UnlearnCanvas' accuracy.py exactly: Resize((224,224)) -> ToTensor() -> Normalize([0.5],[0.5]).
+    """
+
+    from vision_unlearning.benchmarks.u_care.configuration import STYLE_ENTITIES, OBJECT_ENTITIES
+
+    checkpoint_path: str
+    labels: List[str] = STYLE_ENTITIES + OBJECT_ENTITIES
+    backbone: str = "vit_large_patch16_224.augreg_in21k"
+    head_in_features: int = 1024
+    _model: Optional[torch.nn.Module] = None
+    _transform: Optional[transforms.Compose] = None
+
+    def model_post_init(self, __context: Optional[dict] = None) -> None:
+        import timm
+
+        device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if isinstance(device, torch.device):
+            device_str = str(device)
+        else:
+            device_str = str(device)
+
+        model = timm.create_model(self.backbone, pretrained=True)
+        model.head = torch.nn.Linear(self.head_in_features, len(self.labels))
+        checkpoint = torch.load(self.checkpoint_path, map_location=device_str)
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+        else:
+            state_dict = checkpoint
+        model.load_state_dict(state_dict)
+        model.to(device_str).eval()
+
+        self._model = model
+        self._transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
+
+    def score(self, image: Image.Image) -> Dict[str, Any]:
+        """Return {"predicted_label": str, "probabilities": Dict[str, float]}."""
+        assert self._model is not None
+        assert self._transform is not None
+
+        device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if isinstance(device, torch.device):
+            device_str = str(device)
+        else:
+            device_str = str(device)
+
+        image_tensor = self._transform(image.convert("RGB")).unsqueeze(0).to(device_str)
+
+        with torch.no_grad():
+            logits = self._model(image_tensor)
+            probs = torch.softmax(logits, dim=1)[0]
+            predicted_idx = int(torch.argmax(probs).item())
+
+        probabilities = {}
+        for label, prob in zip(self.labels, probs.cpu().tolist()):
+            if isinstance(prob, torch.Tensor):
+                value = float(prob.item())
+            else:
+                value = float(prob)
+            probabilities[label] = value
+        return {
+            "predicted_label": self.labels[predicted_idx],
+            "probabilities": probabilities,
+        }
+

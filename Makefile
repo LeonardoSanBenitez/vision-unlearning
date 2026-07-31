@@ -81,7 +81,7 @@ test: run-interactive-docker
 	# from prior local research sessions) has ~100 pre-existing style violations of its
 	# own. Excluding it here matches `make test-lite`'s exclusion and keeps this check
 	# testing the tracked repo, not whatever a developer happens to have on disk locally.
-	docker compose exec notebooks poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 --exclude=vision_unlearning/benchmarks/u_care,vision_unlearning/benchmarks/I_care/reports ./vision_unlearning
+	docker compose exec notebooks poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 --exclude=vision_unlearning/benchmarks/I_care/reports ./vision_unlearning
 
 	echo '\n\n-------\nPytest checks\n-------'
 	$(call exec_docker, poetry run --quiet pytest ./tests)
@@ -117,7 +117,7 @@ test-lite:
 	echo '\n\n------------------------\nPycodestyle Check (lite tier)\n------------------------'
 	# --exclude adds reports/ on top of the CI ignore list: reports/ is git-ignored (never
 	# seen by CI) but exists on disk locally with looser research-script style.
-	$(VENV_LITE_PY) -m pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 --exclude=vision_unlearning/benchmarks/u_care,vision_unlearning/benchmarks/I_care/reports ./vision_unlearning
+	$(VENV_LITE_PY) -m pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 --exclude=vision_unlearning/benchmarks/I_care/reports ./vision_unlearning
 
 	echo '\n\n-------\nPytest checks (lite tier -- heavy files excluded via tests/conftest.py)\n-------'
 	PYTHONPATH=. $(VENV_LITE_PY) -m pytest -m "not gpu" tests/

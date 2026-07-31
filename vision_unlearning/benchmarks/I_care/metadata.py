@@ -248,7 +248,7 @@ def _me_column_fragment(interference_entity: type_me) -> str:
     return interference_entity.lower().replace(' ', '_')
 
 
-def choose_metric_column_interference_per_entity(
+def choose_metric_column_interference_per_entity( 
     unlearning_algorithm: type_unlearning_algorithm,
     interference_entity: type_me,
     metric_cols: List[str],

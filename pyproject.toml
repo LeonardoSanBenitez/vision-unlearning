@@ -40,6 +40,7 @@ diffusers = "~0.30.0"
 peft = "~0.17.0"
 torchvision = "*"
 torchmetrics = "*"
+timm = "*"
 torchsde = "*"
 accelerate = ">=0.31.0"
 huggingface-hub = ">=0.27.0"
@@ -128,9 +129,9 @@ filterwarnings = [
     "ignore:.*builtin type swigvarlink.*"
 ]
 asyncio_default_fixture_loop_scope = "function"
-# u_care requires timm and prettytable which are not in the published dependencies.
-# Exclude it from test discovery; it is tested separately in its own environment.
-norecursedirs = ["u_care"]
+# u_care is part of the standard test and lint surface now that its shared code is
+# typed and import-safe in the lite tier.
+norecursedirs = []
 
 
 [tool.mypy]
@@ -147,5 +148,4 @@ non_interactive = true
 # and contain research scripts that intentionally use loose typing.
 exclude = [
     'vision_unlearning/benchmarks/I_care/reports/',
-    'vision_unlearning/benchmarks/u_care/',
 ]
