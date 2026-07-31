@@ -105,10 +105,13 @@ def main() -> int:
     monitor.start()
 
     def gen(prompts: List[str], filenames: List[str], seed: int, lora: Any) -> None:
+        # batch_size=1: on this ROCm GPU, generate_dataset at batch_size>1 with deterministic
+        # algorithms falls into a slow shared-memory kernel path (~10x). Batch 1 keeps generation on
+        # dedicated VRAM (~18s/image). Same images, one at a time.
         generate_dataset(
             model_base_name=_MODEL_ID, lora_name=lora, prompts=prompts,
             output_path=str(gen_dir), seeds=[seed], filenames=filenames,
-            batch_size=2, lora_requires_inversion=False,
+            batch_size=1, lora_requires_inversion=False,
         )
 
     def load(fname: str) -> "np.ndarray":
