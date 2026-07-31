@@ -51,7 +51,9 @@ def main() -> int:
                 f"but {declared_learning_rate} was declared on the command line")
         row = meta["rows"].index(f"epoch {_EPOCH}")
         img_dir = _OUT / f"epoch_grid{suffix}"
-        names = [b["name"] for b in meta["breeds_by_interference"]]
+        # grids written before the script was generalized beyond breeds use the older key name
+        ordered = meta.get("entities_by_interference") or meta["breeds_by_interference"]
+        names = [b["name"] for b in ordered]
         pixel_change: List[float] = []
         for bi in range(len(names)):
             off = np.asarray(Image.open(img_dir / f"off_s{_SEED}_b{bi}.png").convert("RGB"), dtype=np.int64)

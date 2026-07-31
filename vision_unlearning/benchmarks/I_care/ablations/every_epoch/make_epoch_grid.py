@@ -1,18 +1,18 @@
-"""Every-epoch x every-entity grid (the W6 deliverable format), for the breeds selection.
+"""Every-epoch x every-entity grid (the W6 deliverable format), for one task's selection.
 
-Rows = [original base model, then each saved epoch]; columns = the 10 selected breeds ordered by canonical
+Rows = [original base model, then each saved epoch]; columns = the 10 selected entities ordered by canonical
 interference (target at column 0). Each cell is the entity's own concept prompt generated from that epoch's
 adapter, at a fixed seed, batch_size=1 (dedicated-VRAM path). Runs for one or more seeds (--seeds).
 
 Seed-matching invariant (critical): for a given seed, the baseline AND every epoch are generated within
-THIS script from the SAME prompt list in the SAME order, so a breed sits at the same RNG position in every
+THIS script from the SAME prompt list in the SAME order, so an entity sits at the same RNG position in every
 call and starts from IDENTICAL initial noise in every row (generate_dataset reseeds to `seed` at the start
 of each call and advances the generator once per prompt). Images are therefore NOT reused across scripts or
-across different orderings (doing so puts a breed at a different RNG position and silently breaks the seed
+across different orderings (doing so puts an entity at a different RNG position and silently breaks the seed
 match) - the reason the grid generates all its own cells with one ordering.
 
 Self-audit (so a seed/reference mismatch can't pass silently): for each seed the script computes the
-consecutive-row mean-abs pixel change over the CONTROL breeds (those not strongly forgotten, which should
+consecutive-row mean-abs pixel change over the CONTROL entities (those not strongly forgotten, which should
 evolve smoothly) and flags any transition that is an outlier vs the median - in particular the
 original->epoch1 transition, whose being an outlier is the fingerprint of a badly-generated reference row.
 
@@ -33,9 +33,8 @@ _THIS = Path(__file__).resolve()
 _ICARE_DIR = _THIS.parents[2]
 _OUT = _THIS.parent / "assets"
 _MODEL_ID = "CompVis/stable-diffusion-v1-4"
-_TASK: Literal["breeds"] = "breeds"
 _METHOD: Literal["distil"] = "distil"
-_FORGOTTEN_CLIPDIFF = -5.0   # a breed with last-epoch clip_diff below this is "being forgotten" (not a control)
+_FORGOTTEN_CLIPDIFF = -5.0   # an entity with last-epoch clip_diff below this is "being forgotten" (not a control)
 _OUTLIER_FACTOR = 2.0        # a consecutive transition > this x median (over controls) is flagged
 
 
@@ -56,7 +55,10 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="Every-epoch x every-entity grid (one grid per seed).")
     parser.add_argument("--seeds", default="42", help="comma-separated seeds, e.g. 42,43")
-    parser.add_argument("--model-dir", default=str(_OUT / "models" / "breeds_bouvier_demo_distil_30"),
+    parser.add_argument("--task", choices=["breeds", "people", "scenes"], default="breeds",
+                        help="Which task's selection to render; entities and their canonical "
+                             "interference come from assets/selection_{task}.json.")
+    parser.add_argument("--model-dir", default=str(_OUT / "models" / "breeds_demo_distil_30"),
                         help="Directory holding the epoch-{n} LoRA adapters to render.")
     parser.add_argument("--learning-rate", type=float, default=6e-4,
                         help="Learning rate the adapters were trained with; used in the figure title.")
@@ -74,12 +76,14 @@ def main() -> int:
     )
     logger.info("epochs available: %s | seeds: %s", epochs, seeds)
 
-    sel = json.loads((_OUT / "selection_breeds.json").read_text(encoding="utf-8"))
-    breeds: List[Tuple[str, float]] = [(sel["target"]["name"], sel["target"]["self_clip_diff"])]
-    breeds += [(r["name"], r["clip_diff"]) for r in sel["receivers"]]
-    breeds.sort(key=lambda x: x[1])  # most interfered (target) first
-    prompt_of = {n: f"An image of {get_target_overwrite(_TASK, _METHOD, n)[0]}" for n, _ in breeds}
+    task: Any = args.task
+    sel = json.loads((_OUT / f"selection_{task}.json").read_text(encoding="utf-8"))
+    entities: List[Tuple[str, float]] = [(sel["target"]["name"], sel["target"]["self_clip_diff"])]
+    entities += [(r["name"], r["clip_diff"]) for r in sel["receivers"]]
+    entities.sort(key=lambda x: x[1])  # most interfered (target) first
+    prompt_of = {n: f"An image of {get_target_overwrite(task, _METHOD, n)[0]}" for n, _ in entities}
 
+    target_pre, target_over = get_target_overwrite(task, _METHOD, sel["target"]["name"])
     grid_dir = _OUT / f"epoch_grid{suffix}"
     grid_dir.mkdir(parents=True, exist_ok=True)
     m = MetricImageTextSimilarity(metrics=["clip"])
@@ -97,24 +101,24 @@ def main() -> int:
         def on_path(bi: int, n: int) -> Path:
             return grid_dir / f"on_ep{n}_s{seed}_b{bi}.png"
 
-        # one generate_dataset call per row over ALL breeds in order -> breed bi always at RNG position bi
+        # one generate_dataset call per row over ALL entities in order -> entity bi always at RNG position bi
         def gen(lora: Any, paths: List[Path]) -> None:
-            prompts = [prompt_of[breeds[bi][0]] for bi in range(len(breeds))]
+            prompts = [prompt_of[entities[bi][0]] for bi in range(len(entities))]
             generate_dataset(
                 model_base_name=_MODEL_ID, lora_name=lora, prompts=prompts, output_path=str(grid_dir),
                 seeds=[seed], filenames=[p.name for p in paths], batch_size=1, lora_requires_inversion=False,
             )
 
         logger.info("[seed %d] generating baseline (off) row ...", seed)
-        gen(None, [off_path(bi) for bi in range(len(breeds))])
+        gen(None, [off_path(bi) for bi in range(len(entities))])
         for n in epochs:
             logger.info("[seed %d] generating epoch-%d (on) row ...", seed, n)
-            gen(str(model_dir / f"epoch-{n}"), [on_path(bi, n) for bi in range(len(breeds))])
+            gen(str(model_dir / f"epoch-{n}"), [on_path(bi, n) for bi in range(len(entities))])
 
         rows = ["original"] + [f"epoch {n}" for n in epochs]
         cell: Dict[Tuple[int, int], Path] = {}
         clip_diff: Dict[Tuple[int, int], float] = {}
-        for bi, (name, _) in enumerate(breeds):
+        for bi, (name, _) in enumerate(entities):
             off = Image.open(off_path(bi)).convert("RGB")
             clip_off = m.score_batch_same_text([off], prompt_of[name])[0]["clip"]
             cell[(0, bi)] = off_path(bi)
@@ -124,9 +128,9 @@ def main() -> int:
                 on = Image.open(on_path(bi, n)).convert("RGB")
                 clip_diff[(ri, bi)] = m.score_batch_same_text([on], prompt_of[name])[0]["clip"] - clip_off
 
-        nrows, ncols = len(rows), len(breeds)
+        nrows, ncols = len(rows), len(entities)
 
-        # --- self-audit: consecutive-row change over CONTROL breeds (not strongly forgotten) ---
+        # --- self-audit: consecutive-row change over CONTROL entities (not strongly forgotten) ---
         controls = [bi for bi in range(ncols) if clip_diff[(nrows - 1, bi)] > _FORGOTTEN_CLIPDIFF]
         transitions = []
         for ri in range(1, nrows):
@@ -155,13 +159,13 @@ def main() -> int:
                     ax.set_title(f"{clip_diff[(ri, bi)]:.0f}", fontsize=6)
                 if bi == 0:
                     ax.set_ylabel(rows[ri], fontsize=8, rotation=0, ha="right", va="center")
-        for bi, (name, cd) in enumerate(breeds):
+        for bi, (name, cd) in enumerate(entities):
             axes[0][bi].set_title(f"{name.replace(' dog', '')}\ninterf {cd:.1f}", fontsize=6)
         audit_txt = "AUDIT OK" if not outliers else f"AUDIT WARNING: outlier transitions {outliers}"
         fig.suptitle(
-            f"SPARE unlearning of 'a bouvier des flandres dog' -> 'a cat', per epoch "
-            f"(seed {seed}, distil, learning rate {args.learning_rate:g})\n"
-            f"rows = original + saved epochs; columns = 10 breeds by canonical interference (target col 0); "
+            f"SPARE unlearning of '{target_pre}' -> '{target_over}', per epoch "
+            f"(task {task}, seed {seed}, distil, learning rate {args.learning_rate:g})\n"
+            f"rows = original + saved epochs; columns = 10 entities by canonical interference (target col 0); "
             f"cell = clip_diff vs original  |  {audit_txt}",
             fontsize=9,
         )
@@ -171,9 +175,10 @@ def main() -> int:
         plt.close(fig)
 
         result = {
-            "seed": seed, "epochs": epochs, "rows": rows, "learning_rate": args.learning_rate,
+            "seed": seed, "task": task, "epochs": epochs, "rows": rows,
+            "learning_rate": args.learning_rate,
             "model_dir": str(model_dir),
-            "breeds_by_interference": [{"name": n, "canonical_clip_diff": cd} for n, cd in breeds],
+            "entities_by_interference": [{"name": n, "canonical_clip_diff": cd} for n, cd in entities],
             "clip_diff": {f"{ri},{bi}": clip_diff[(ri, bi)] for ri in range(nrows) for bi in range(ncols)},
             "audit": {
                 "control_breed_indices": controls,

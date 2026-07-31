@@ -28,10 +28,14 @@ _ICARE_DIR = _THIS.parents[2]
 _ICARE_ASSETS = _ICARE_DIR / "assets"
 _OUT = _THIS.parent / "assets"
 _MODEL_ID = "CompVis/stable-diffusion-v1-4"
-_TARGET = "bouvier des flandres dog"
-_TASK: Literal["breeds"] = "breeds"
 _METHOD: Literal["distil"] = "distil"
 _RAM_ABORT_GB = 0.6
+# pipeline_03 reads the per-target forget/retain splits from one of these per-task directories
+_SPLIT_DIR_OF_TASK = {
+    "breeds": "taras_breeds_splits_filtered",
+    "people": "lfw_splits_filtered",
+    "scenes": "SUN_splits_filtered",
+}
 
 
 class ResourceMonitor:
@@ -92,7 +96,10 @@ def main() -> int:
     logger = get_logger("every_epoch_demo")
     setup_loggers(modules_info=["unlearning"])
 
-    parser = argparse.ArgumentParser(description="Every-epoch degradation demo (breeds target).")
+    parser = argparse.ArgumentParser(description="Every-epoch degradation run for one selected target.")
+    parser.add_argument("--task", choices=sorted(_SPLIT_DIR_OF_TASK), default="breeds",
+                        help="Which task's selected target to unlearn; the target is read from "
+                             "assets/selection_{task}.json, produced by select_entities.py.")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--checkpoints", type=str, default="1,2,3,5,10,20,30")
     parser.add_argument("--seed", type=int, default=42)
@@ -111,16 +118,21 @@ def main() -> int:
     monitor_log = _OUT / f"demo_monitor{suffix}.log"
     monitor_log.write_text("", encoding="utf-8")
 
-    target_pre, target_over = get_target_overwrite(_TASK, _METHOD, _TARGET)
-    metadata = json.loads((_ICARE_ASSETS / f"metadata_{_TASK}_2_enriched_filtered.json").read_text(encoding="utf-8"))
+    task: Any = args.task
+    target = json.loads((_OUT / f"selection_{task}.json").read_text(encoding="utf-8"))["target"]["name"]
+    target_pre, target_over = get_target_overwrite(task, _METHOD, target)
+    metadata = json.loads((_ICARE_ASSETS / f"metadata_{task}_2_enriched_filtered.json").read_text(encoding="utf-8"))
     names = [m["name"] for m in metadata]
-    idx = names.index(_TARGET)
-    target_pre_next, _ = get_target_overwrite(_TASK, _METHOD, names[(idx + 1) % 100])
+    idx = names.index(target)
+    target_pre_next, _ = get_target_overwrite(task, _METHOD, names[(idx + 1) % 100])
     prompt = f"An image of {target_pre}"
-    logger.info("target=%r prompt=%r overwrite=%r epochs=%d checkpoints=%s", target_pre, prompt, target_over, n_epochs, checkpoints)
+    logger.info("task=%s target=%r prompt=%r overwrite=%r epochs=%d checkpoints=%s",
+                task, target_pre, prompt, target_over, n_epochs, checkpoints)
 
-    split_base = _ICARE_ASSETS / "datasets" / "taras_breeds_splits_filtered" / _TARGET
-    model_dir = _OUT / "models" / f"{_TASK}_bouvier_demo{suffix}_{_METHOD}_{n_epochs}"
+    split_base = _ICARE_ASSETS / "datasets" / _SPLIT_DIR_OF_TASK[task] / target
+    assert (split_base / "train_forget").is_dir() and (split_base / "train_retain").is_dir(), \
+        f"forget/retain splits missing for {task}/{target} under {split_base}"
+    model_dir = _OUT / "models" / f"{task}_demo{suffix}_{_METHOD}_{n_epochs}"
     if model_dir.exists():
         shutil.rmtree(model_dir)
 
@@ -190,7 +202,7 @@ def main() -> int:
         logger.info("epoch %d: clip_on=%.3f clip_off=%.3f clip_diff=%.3f", n, clip_on, clip_off, clip_on - clip_off)
 
     result = {
-        "task": _TASK, "method": _METHOD, "target": target_pre, "overwrite": target_over,
+        "task": task, "method": _METHOD, "target": target_pre, "overwrite": target_over,
         "prompt": prompt, "seed": args.seed, "epochs": n_epochs, "checkpoints": checkpoints,
         "learning_rate": args.learning_rate,
         "train_seconds": round(train_s, 1), "trajectory": traj,
