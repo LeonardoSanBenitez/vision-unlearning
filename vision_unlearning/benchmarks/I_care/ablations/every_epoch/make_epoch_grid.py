@@ -62,6 +62,10 @@ def main() -> int:
                         help="Directory holding the epoch-{n} LoRA adapters to render.")
     parser.add_argument("--learning-rate", type=float, default=6e-4,
                         help="Learning rate the adapters were trained with; used in the figure title.")
+    parser.add_argument("--reuse-existing-images", action="store_true",
+                        help="Re-render the figure from the images a previous run already wrote, instead of "
+                             "generating them again, when every expected file is present and readable. Only "
+                             "the presentation changes; the images themselves are identical.")
     parser.add_argument("--run-suffix", type=str, default="",
                         help="Appended to the generated-image directory and to every output filename, so "
                              "several hyperparameter variants of this grid can coexist on disk.")
@@ -80,8 +84,16 @@ def main() -> int:
     sel = json.loads((_OUT / f"selection_{task}.json").read_text(encoding="utf-8"))
     entities: List[Tuple[str, float]] = [(sel["target"]["name"], sel["target"]["self_clip_diff"])]
     entities += [(r["name"], r["clip_diff"]) for r in sel["receivers"]]
-    entities.sort(key=lambda x: x[1])  # most interfered (target) first
+    entities.sort(key=lambda x: x[1])  # generation order: most interfered first
     prompt_of = {n: f"An image of {get_target_overwrite(task, _METHOD, n)[0]}" for n, _ in entities}
+
+    # Generation order fixes each entity's position in the random-number sequence, so it must stay as it
+    # is; the columns are a presentation choice on top of it. The target goes first and the receivers
+    # follow by decreasing interference. Sorting alone does not achieve that: it puts the target first
+    # only when the target happens to be the most interfered entity of the ten, which is true for breeds
+    # and people but not for scenes, where four receivers are canonically more damaged than the target.
+    target_index = next(i for i, (n, _) in enumerate(entities) if n == sel["target"]["name"])
+    display_order: List[int] = [target_index] + [i for i in range(len(entities)) if i != target_index]
 
     target_pre, target_over = get_target_overwrite(task, _METHOD, sel["target"]["name"])
     grid_dir = _OUT / f"epoch_grid{suffix}"
@@ -109,11 +121,18 @@ def main() -> int:
                 seeds=[seed], filenames=[p.name for p in paths], batch_size=1, lora_requires_inversion=False,
             )
 
-        logger.info("[seed %d] generating baseline (off) row ...", seed)
-        gen(None, [off_path(bi) for bi in range(len(entities))])
-        for n in epochs:
-            logger.info("[seed %d] generating epoch-%d (on) row ...", seed, n)
-            gen(str(model_dir / f"epoch-{n}"), [on_path(bi, n) for bi in range(len(entities))])
+        wanted = ([off_path(bi) for bi in range(len(entities))]
+                  + [on_path(bi, n) for n in epochs for bi in range(len(entities))])
+        if args.reuse_existing_images and all(p.exists() for p in wanted):
+            for p in wanted:
+                Image.open(p).convert("RGB").close()  # every reused file must be a readable image
+            logger.info("[seed %d] reusing %d existing images; nothing is generated", seed, len(wanted))
+        else:
+            logger.info("[seed %d] generating baseline (off) row ...", seed)
+            gen(None, [off_path(bi) for bi in range(len(entities))])
+            for n in epochs:
+                logger.info("[seed %d] generating epoch-%d (on) row ...", seed, n)
+                gen(str(model_dir / f"epoch-{n}"), [on_path(bi, n) for bi in range(len(entities))])
 
         rows = ["original"] + [f"epoch {n}" for n in epochs]
         cell: Dict[Tuple[int, int], Path] = {}
@@ -150,22 +169,24 @@ def main() -> int:
         # --- figure ---
         fig, axes = plt.subplots(nrows, ncols, figsize=(1.7 * ncols, 1.9 * nrows))
         for ri in range(nrows):
-            for bi in range(ncols):
-                ax = axes[ri][bi]
+            for ci, bi in enumerate(display_order):
+                ax = axes[ri][ci]
                 ax.imshow(np.asarray(Image.open(cell[(ri, bi)]).convert("RGB")))
                 ax.set_xticks([])
                 ax.set_yticks([])
                 if ri > 0:
                     ax.set_title(f"{clip_diff[(ri, bi)]:.0f}", fontsize=6)
-                if bi == 0:
+                if ci == 0:
                     ax.set_ylabel(rows[ri], fontsize=8, rotation=0, ha="right", va="center")
-        for bi, (name, cd) in enumerate(entities):
-            axes[0][bi].set_title(f"{name.replace(' dog', '')}\ninterf {cd:.1f}", fontsize=6)
+        for ci, bi in enumerate(display_order):
+            name, cd = entities[bi]
+            label = f"{name.replace(' dog', '')}\ninterf {cd:.1f}"
+            axes[0][ci].set_title(f"TARGET {label}" if ci == 0 else label, fontsize=6)
         audit_txt = "AUDIT OK" if not outliers else f"AUDIT WARNING: outlier transitions {outliers}"
         fig.suptitle(
             f"SPARE unlearning of '{target_pre}' -> '{target_over}', per epoch "
             f"(task {task}, seed {seed}, distil, learning rate {args.learning_rate:g})\n"
-            f"rows = original + saved epochs; columns = 10 entities by canonical interference (target col 0); "
+            f"rows = original + saved epochs; columns = the target then 9 receivers by canonical interference; "
             f"cell = clip_diff vs original  |  {audit_txt}",
             fontsize=9,
         )
@@ -178,7 +199,10 @@ def main() -> int:
             "seed": seed, "task": task, "epochs": epochs, "rows": rows,
             "learning_rate": args.learning_rate,
             "model_dir": str(model_dir),
+            # entities and every clip_diff key are in GENERATION order, which is also the order the image
+            # filenames are indexed by; display_column_order maps figure columns onto those indices
             "entities_by_interference": [{"name": n, "canonical_clip_diff": cd} for n, cd in entities],
+            "display_column_order": display_order,
             "clip_diff": {f"{ri},{bi}": clip_diff[(ri, bi)] for ri in range(nrows) for bi in range(ncols)},
             "audit": {
                 "control_breed_indices": controls,
