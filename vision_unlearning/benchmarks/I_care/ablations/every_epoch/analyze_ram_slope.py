@@ -72,28 +72,44 @@ def main() -> int:
         epochs.append(n)
         free_at_epoch.append(float(free[int(np.argmin(np.abs(times - boundary)))]))
 
-    slope_gb, intercept_gb = np.polyfit(np.array(epochs, dtype=float), np.array(free_at_epoch), 1)
-    slope_mb = float(slope_gb) * 1024.0
-    is_leak = slope_mb < -_LEAK_THRESHOLD_MB_PER_EPOCH
+    def fit(idx: List[int]) -> Tuple[float, float]:
+        s, i = np.polyfit(np.array([epochs[k] for k in idx], dtype=float),
+                          np.array([free_at_epoch[k] for k in idx]), 1)
+        return float(s), float(i)
+
+    slope_gb, intercept_gb = fit(list(range(len(epochs))))
+    slope_mb = slope_gb * 1024.0
+
+    # The first checkpoints still include the allocation ramp of model loading, and the last one is
+    # written as training ends, so it can be sampled after the process has already released memory.
+    # Both distort a straight line fitted over the whole run, so the verdict uses the steady state.
+    steady = list(range(2, len(epochs) - 1))
+    steady_slope_gb, steady_intercept_gb = fit(steady) if len(steady) >= 3 else (slope_gb, intercept_gb)
+    steady_slope_mb = steady_slope_gb * 1024.0
+    is_leak = steady_slope_mb < -_LEAK_THRESHOLD_MB_PER_EPOCH
     result: Dict[str, Any] = {
         "monitor_log": str(monitor),
         "model_dir": args.model_dir,
         "epochs_measured": epochs,
         "free_gigabytes_at_each_epoch_boundary": [round(v, 2) for v in free_at_epoch],
         "minimum_free_gigabytes_during_run": round(float(free.min()), 2),
-        "slope_megabytes_per_epoch": round(slope_mb, 1),
+        "slope_megabytes_per_epoch_whole_run": round(slope_mb, 1),
+        "steady_state_epochs": [epochs[k] for k in steady],
+        "slope_megabytes_per_epoch_steady_state": round(steady_slope_mb, 1),
         "leak_threshold_megabytes_per_epoch": -_LEAK_THRESHOLD_MB_PER_EPOCH,
         "verdict": "leak" if is_leak else "no leak",
+        "verdict_basis": "steady state, excluding the loading ramp and the final sample",
         "projected_free_gigabytes_after": {
-            str(args.project_epochs): round(float(intercept_gb + slope_gb * args.project_epochs), 2)},
+            str(args.project_epochs): round(steady_intercept_gb + steady_slope_gb * args.project_epochs, 2)},
     }
     (_OUT / f"ram_slope{args.run_suffix}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.plot(epochs, free_at_epoch, "o-", color="#2471a3", label="free memory at the epoch boundary")
-    fit = [float(intercept_gb + slope_gb * e) for e in epochs]
-    ax.plot(epochs, fit, "--", color="#c0392b",
-            label=f"linear fit, {slope_mb:.0f} megabytes per epoch")
+    steady_epochs = [epochs[k] for k in steady]
+    ax.plot(steady_epochs, [steady_intercept_gb + steady_slope_gb * e for e in steady_epochs], "--",
+            color="#c0392b",
+            label=f"linear fit over the steady state, {steady_slope_mb:.0f} megabytes per epoch")
     ax.axhline(0.6, color="grey", linestyle=":", label="watchdog abort floor")
     ax.set_xlabel("training epoch")
     ax.set_ylabel("free system memory (gigabytes)")
