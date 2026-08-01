@@ -34,13 +34,46 @@ _SUN_DB_URL = "https://cs.brown.edu/people/gmpatter/Attributes/SUNAttributeDB.ta
 _SUN_IMG_URL = "https://cs.brown.edu/people/gmpatter/Attributes/SUNAttributeDB_Images.tar.gz"
 
 
-def _download(url: str, dest: Path) -> None:
-    if dest.exists() and dest.stat().st_size > 0:
+def _remote_size(url: str) -> int:
+    """Byte count the server declares for the archive, used to prove a download is complete."""
+    request = urllib.request.Request(url, method="HEAD")
+    with urllib.request.urlopen(request, timeout=60) as r:  # noqa: S310 (trusted URL)
+        return int(r.headers["Content-Length"])
+
+
+def _download(url: str, dest: Path, attempts: int = 4) -> None:
+    """Download to dest, resuming and retrying until the file matches the size the server declares.
+
+    A dropped connection ends the response stream without raising, so copying until the stream ends
+    silently yields a truncated file. That happened here: 1.08 GB of a 1.82 GB archive was accepted as
+    complete, extraction stopped part-way through, and the split then failed on a missing image. The
+    size check is what makes the download verifiable, and the server supports ranged requests, so an
+    interrupted attempt resumes rather than starting over.
+    """
+    expected = _remote_size(url)
+    if dest.exists() and dest.stat().st_size == expected:
         return
+    if dest.exists():
+        dest.unlink()  # a wrong-sized file at the final name is a previously accepted truncation
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(url, timeout=120) as r, tmp.open("wb") as f:  # noqa: S310 (trusted URL)
-        shutil.copyfileobj(r, f, length=1024 * 1024)
-    tmp.rename(dest)
+    for attempt in range(1, attempts + 1):
+        have = tmp.stat().st_size if tmp.exists() else 0
+        if have > expected:
+            tmp.unlink()
+            have = 0
+        request = urllib.request.Request(url)
+        if have:
+            request.add_header("Range", f"bytes={have}-")
+        with urllib.request.urlopen(request, timeout=120) as r:  # noqa: S310 (trusted URL)
+            resuming = have > 0 and r.status == 206
+            with tmp.open("ab" if resuming else "wb") as f:
+                shutil.copyfileobj(r, f, length=1024 * 1024)
+        size = tmp.stat().st_size
+        if size == expected:
+            tmp.rename(dest)
+            return
+        print(f"  attempt {attempt}: {size} of {expected} bytes, retrying", flush=True)
+    raise RuntimeError(f"{url}: got {tmp.stat().st_size} bytes, expected {expected} after {attempts} attempts")
 
 
 def _copy_as_symlink_substitute(src: str, dst: str) -> None:
@@ -77,23 +110,36 @@ def main() -> int:
         logger.error("Target %r not among the 100 filtered scenes.", target)
         return 2
 
-    # Step 1: download + extract SUN (idempotent)
+    # Step 1: download + extract SUN. Skipping is decided by a marker naming the archive sizes that were
+    # actually extracted, not by the presence of the directories: a truncated download extracts part of
+    # the tree, which looks identical to a finished one to any existence check, and the failure then
+    # surfaces much later as a missing image during the split.
     sun_dir.mkdir(parents=True, exist_ok=True)
-    if not (sun_dir / "SUNAttributeDB").exists() or not (sun_dir / "images").exists():
-        t0 = time.time()
-        db_tar = sun_dir / "SUNAttributeDB.tar.gz"
-        img_tar = sun_dir / "SUNAttributeDB_Images.tar.gz"
-        logger.info("downloading SUN attribute DB (~0.5MB) ...")
-        _download(_SUN_DB_URL, db_tar)
-        logger.info("downloading SUN images (~1.8GB, this is the slow part) ...")
-        _download(_SUN_IMG_URL, img_tar)
-        logger.info("download done in %.0fs; extracting ...", time.time() - t0)
+    db_tar = sun_dir / "SUNAttributeDB.tar.gz"
+    img_tar = sun_dir / "SUNAttributeDB_Images.tar.gz"
+    marker = sun_dir / "extraction_complete.json"
+    t0 = time.time()
+    logger.info("downloading SUN attribute DB (~0.5MB) ...")
+    _download(_SUN_DB_URL, db_tar)
+    logger.info("downloading SUN images (~1.8GB, this is the slow part) ...")
+    _download(_SUN_IMG_URL, img_tar)
+    sizes = {p.name: p.stat().st_size for p in (db_tar, img_tar)}
+    if marker.exists() and json.loads(marker.read_text(encoding="utf-8")) == sizes:
+        logger.info("SUN already extracted from archives of exactly these sizes, skipping.")
+    else:
+        logger.info("download verified in %.0fs; extracting ...", time.time() - t0)
         for tar_path in (db_tar, img_tar):
             with tarfile.open(tar_path, "r:gz") as tf:
                 tf.extractall(sun_dir)  # noqa: S202 (trusted archive)
+        marker.write_text(json.dumps(sizes, indent=2), encoding="utf-8")
         logger.info("extracted.")
-    else:
-        logger.info("SUN already downloaded+extracted, skipping.")
+
+    target_images = sorted((sun_dir / "images" / target[0] / target).glob("*.jpg"))
+    if len(target_images) < smallest_entity:
+        logger.error("Target %r has %d images under %s, need at least %d - the extracted tree is incomplete.",
+                     target, len(target_images), sun_dir / "images" / target[0] / target, smallest_entity)
+        return 3
+    logger.info("target %r has %d extracted images (need >= %d)", target, len(target_images), smallest_entity)
 
     if not (sun_dir / "SUNAttributeDB" / "images.mat").exists():
         logger.error("SUNAttributeDB/images.mat missing after extract at %s", sun_dir)
