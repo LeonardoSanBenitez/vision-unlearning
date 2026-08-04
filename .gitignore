@@ -136,3 +136,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# environments
+.vu/
+
+# secrets
+.api_key.txt
