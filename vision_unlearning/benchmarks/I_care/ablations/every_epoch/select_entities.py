@@ -470,21 +470,33 @@ def render_scatter(selection: Dict[str, Any], out_path: str) -> None:
     target = selection["target"]
     ax.scatter([scatter["target_self_similarity"]], [target["self_clip_diff"]],
                s=200, color="black", marker="*", label="target (self)", zorder=4)
-    ax.annotate(
-        f"{target['hf_name']}\nself clip_diff={target['self_clip_diff']:.2f}",
-        (scatter["target_self_similarity"], target["self_clip_diff"]),
-        textcoords="offset points", xytext=(8, 8), fontsize=8,
-    )
+
+    # Every selected entity is named on the figure. The values are not written next to the names: the
+    # position of a point already gives both of them, and repeating them as text only crowds the plot.
+    from vision_unlearning.benchmarks.I_care.result_templates import _short_entity_display
+    similarity_of = {point["name"]: point["clip_similarity"] for point in scatter["all_receivers"]}
+    annotations = [(target["hf_name"], scatter["target_self_similarity"], target["self_clip_diff"])]
+    annotations += [(receiver["hf_name"], similarity_of[receiver["name"]], receiver["clip_diff"])
+                    for receiver in selection["receivers"]]
+    right_edge = max(x for _, x, _ in annotations)
+    for position, (label, x, y) in enumerate(annotations):
+        # A label on a point near the right edge would run off the axes, so those are written to the left
+        # of their point; otherwise consecutive labels alternate sides, which keeps two entities of similar
+        # similarity and interference - the common case, since the pairs are chosen to be alike - apart.
+        to_the_left = x > right_edge - 8 or position % 2 == 1
+        ax.annotate(_short_entity_display(label, max_chars=30), (x, y), textcoords="offset points",
+                    xytext=(-8 if to_the_left else 8, 6), fontsize=7,
+                    ha="right" if to_the_left else "left")
 
     ax.axhline(0.0, color="#dddddd", linewidth=0.8, zorder=0)
     ax.set_xlabel("CLIP similarity (target to receiver)")
     ax.set_ylabel("clip_diff (lower = more interference)")
     diagnostics = selection["target_selection_diagnostics"]
     ax.set_title(
-        f"select_entities | task={task} method={_display_method(METHOD)} | "
-        f"similarity={SIMILARITY_METRIC} vs clip_diff\n"
-        f"target={target['hf_name']} self_clip_diff={target['self_clip_diff']:.2f} | "
-        f"gated_targets={diagnostics['n_gated']}/{diagnostics['n_candidates']}"
+        f"Method: {_display_method(METHOD).upper()} | task={task} | "
+        f"similarity={SIMILARITY_METRIC} against clip_diff, both at the canonical endpoint\n"
+        f"target={target['hf_name']}, self clip_diff={target['self_clip_diff']:.2f} | "
+        f"targets passing the gates={diagnostics['n_gated']}/{diagnostics['n_candidates']}"
     )
     ax.legend(fontsize=8, loc="best")
     fig.tight_layout()

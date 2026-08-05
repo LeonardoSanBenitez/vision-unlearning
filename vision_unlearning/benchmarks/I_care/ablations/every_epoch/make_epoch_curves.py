@@ -85,6 +85,16 @@ def main() -> int:
         ax.plot([0] + epochs, trajectory(index), marker="o", markersize=3, label=label, **style)
 
     ax.axhline(0.0, color="#999999", linewidth=0.9, zorder=1)
+    # The band is what two draws of the same prompt from the UNMODIFIED model already differ by, measured
+    # by metric_progression.py over the ten entities of this task. A trajectory inside it has not moved by
+    # more than the generator's own variation. Two seeds give one difference per entity, so this is an
+    # indication of scale, not an error bar - which is why it is drawn unlabelled in grey and described in
+    # the subtitle rather than entered in the legend as if it were a confidence interval.
+    noise_floor_path = _OUT / f"noise_floor_{args.task}.json"
+    noise_floor = None
+    if noise_floor_path.exists():
+        noise_floor = json.loads(noise_floor_path.read_text(encoding="utf-8"))["summary"]["median"]
+        ax.axhspan(-noise_floor, noise_floor, color="#cccccc", alpha=0.55, zorder=0)
     ax.set_xlabel("training epoch (0 = the original model, before any unlearning)")
     ax.set_ylabel("clip_diff against the original model\n(more negative = further from the entity's own prompt)")
     ax.grid(alpha=0.25)
@@ -97,7 +107,10 @@ def main() -> int:
         f"Overwrite '{target_hf}' to '{overwrite}' | "
         f"seed={args.seed}, learning rate={grid['learning_rate']:g}\n"
         f"one line per entity; markers mark the epochs at which an adapter was saved; "
-        f"colour is the canonical selection group the receiver was chosen for",
+        f"colour is the canonical selection group the receiver was chosen for"
+        + ("" if noise_floor is None else
+           f"\ngrey band = the median difference between the two seeds' base-model scores "
+           f"(±{noise_floor:.2f}), the variation between two draws of the same prompt"),
         fontsize=10,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.94))
@@ -110,16 +123,22 @@ def main() -> int:
     canonical_of = {entry["name"]: entry["canonical_clip_diff"] for entry in grid["entities_by_interference"]}
     lines = [
         "| Entity | Canonical interference | `clip_diff` at epoch "
-        f"{epochs[-1]} | First epoch below −5 |",
-        "|---|---:|---:|---|",
+        f"{epochs[-1]} | Most negative `clip_diff` (epoch) | First epoch below −5 |",
+        "|---|---:|---:|---:|---|",
     ]
     for index in ordered:
         name = names[index]
         values = trajectory(index)
         below = [epoch for epoch, value in zip(epochs, values[1:]) if value < -5.0]
+        # The most negative value over the run alongside the last one: an entity that was damaged in the
+        # middle of training and recovered reads as untouched at the end, and the pair makes that visible
+        # without a second figure.
+        minimum_value = min(values[1:])
+        minimum_epoch = epochs[values[1:].index(minimum_value)]
         label = hf_name_of[name] + (" (target)" if name == target_name else "")
         emphasis = "**" if name == target_name else ""
         lines.append(f"| {emphasis}{label}{emphasis} | {canonical_of[name]:.2f} | {values[-1]:.2f} | "
+                     f"{minimum_value:.2f} (epoch {minimum_epoch}) | "
                      f"{'epoch ' + str(below[0]) if below else 'never'} |")
     out_table = _OUT / f"epoch_curves{args.run_suffix}_seed{args.seed}_table.md"
     out_table.write_text("\n".join(lines) + "\n", encoding="utf-8")
