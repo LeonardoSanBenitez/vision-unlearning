@@ -39,7 +39,7 @@ import argparse
 import json
 import statistics
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Tuple
+from typing import Any, Callable, Dict, List, Literal, Tuple
 
 _THIS = Path(__file__).resolve()
 _ICARE_DIR = _THIS.parents[2]
@@ -48,6 +48,126 @@ _MODEL_ID = "CompVis/stable-diffusion-v1-4"
 _METHOD: Literal["distil"] = "distil"
 _FORGOTTEN_CLIPDIFF = -5.0   # an entity with last-epoch clip_diff below this is "being forgotten" (not a control)
 _OUTLIER_FACTOR = 2.0        # an epoch-to-epoch transition > this x the baseline (over controls) is flagged
+
+
+# --------------------------------------------------------------------------- #
+# The parts a wrong implementation would still make look plausible: the on/off #
+# pairing, the sign of clip_diff, the column order, and the row/column mapping #
+# of the figure. They are module-level and dependency-light so that            #
+# test_make_epoch_grid.py can exercise them without a GPU or a real model.     #
+# --------------------------------------------------------------------------- #
+def score_cells(
+    number_of_entities: int,
+    epochs: List[int],
+    score_off: Callable[[int], float],
+    score_on: Callable[[int, int], float],
+) -> Dict[Tuple[int, int], float]:
+    """clip_diff for every (row, entity), as `on - off` against that SAME entity's original image.
+
+    Row 0 is the original model and is zero by definition; row ``r`` (1-based) is ``epochs[r - 1]``.
+    The two scoring callables receive an entity index (and, for the epochs, the epoch number), which is
+    what keeps an entity paired with its own baseline instead of a neighbour's.
+    """
+    clip_diff: Dict[Tuple[int, int], float] = {}
+    for entity in range(number_of_entities):
+        off = score_off(entity)
+        clip_diff[(0, entity)] = 0.0
+        for row, epoch in enumerate(epochs, start=1):
+            clip_diff[(row, entity)] = score_on(entity, epoch) - off
+    return clip_diff
+
+
+def column_order(last_row: Dict[int, float], names: List[str], target_index: int) -> List[int]:
+    """Figure columns: the target first, then the receivers by ascending clip_diff in the last epoch.
+
+    More negative means more interfered, so the most damaged receiver sits next to the target. Ties break
+    on the entity name, so the order is deterministic. The target is pinned rather than sorted: it is the
+    subject of the figure, and its number measures its own forgetting rather than interference.
+    """
+    receivers = sorted((index for index in last_row if index != target_index),
+                       key=lambda index: (last_row[index], names[index]))
+    return [target_index] + receivers
+
+
+def audit_transitions(transitions: List[float], outlier_factor: float = _OUTLIER_FACTOR) -> Dict[str, Any]:
+    """Judge the row-to-row image changes over the control entities.
+
+    ``transitions[0]`` is the original->epoch-1 change and the rest are epoch-to-epoch. The baseline is the
+    median of the epoch-to-epoch ones ONLY: a reference row generated with the wrong seed or ordering
+    inflates the first transition, and including it in the baseline lets it partly hide itself (measured:
+    a real mismatched reference scored 1.69 against an all-transitions median, below any usable threshold,
+    but 2.09 against this one).
+
+    ``reference_row_over_baseline`` is reported and deliberately not part of ``passed``: it is also raised
+    by the adapter appearing for the first time, which dominates when later epochs move little (measured
+    1.07 and 1.25 on known-good runs, but 1.71 and 1.88 on slow ones, against 2.09 for the mismatched row -
+    overlapping, so it cannot carry a verdict alone).
+    """
+    baseline = statistics.median(transitions[1:])
+    outliers = [row for row, value in enumerate(transitions[1:], start=2)
+                if baseline > 0 and value > outlier_factor * baseline]
+    return {
+        "row_to_row_change_over_controls": [round(value, 2) for value in transitions],
+        "epoch_to_epoch_baseline": round(baseline, 2),
+        "reference_row_over_baseline": round(transitions[0] / baseline, 3) if baseline > 0 else 0.0,
+        "outlier_epoch_transitions": outliers,
+        "passed": not outliers,
+    }
+
+
+def render_grid(
+    cell: Dict[Tuple[int, int], Path],
+    clip_diff: Dict[Tuple[int, int], float],
+    row_labels: List[str],
+    column_labels: List[str],
+    display_order: List[int],
+    title: str,
+    out_png: Path,
+) -> None:
+    """Draw the grid. Row ``r`` of the figure holds row ``r`` of the data, and figure column ``c`` holds
+    the entity ``display_order[c]`` - the one place a transposed or re-sorted axis would go unnoticed,
+    since any wrong mapping still produces a full, plausible-looking figure.
+
+    ``column_labels`` and ``clip_diff`` are indexed by ENTITY, not by column, so the labels cannot drift
+    away from the images when the column order changes.
+    """
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from PIL import Image
+
+    number_of_rows, number_of_columns = len(row_labels), len(display_order)
+    # squeeze=False keeps `axes` two-dimensional even for a single row or column, which subplots would
+    # otherwise collapse into a flat array and break the [row][column] indexing below.
+    fig, axes = plt.subplots(number_of_rows, number_of_columns, squeeze=False,
+                             figsize=(1.7 * number_of_columns, 1.9 * number_of_rows))
+    for row in range(number_of_rows):
+        for column, entity in enumerate(display_order):
+            ax = axes[row][column]
+            ax.imshow(np.asarray(Image.open(cell[(row, entity)]).convert("RGB")))
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if row > 0:  # the original row is zero by definition and is left blank
+                ax.set_title(f"clip_diff={clip_diff[(row, entity)]:.2f}", fontsize=6)
+            if column == 0:
+                ax.set_ylabel(row_labels[row], fontsize=8, rotation=0, ha="right", va="center")
+    for column, entity in enumerate(display_order):
+        label = column_labels[entity]
+        axes[0][column].set_title(f"{label} (target)" if column == 0 else label, fontsize=6)
+    fig.suptitle(title, fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(out_png, dpi=120)
+    plt.close(fig)
+
+
+def manifest_differences(stored: Dict[str, Any], current: Dict[str, Any]) -> List[str]:
+    """Fields in which an existing image folder disagrees with the run about to reuse it.
+
+    The images are named by position in the generation order, so a different entity list would be silently
+    relabelled rather than rejected; every field of the manifest must therefore match exactly.
+    """
+    return sorted(key for key in current if stored.get(key) != current[key])
 
 
 def main() -> int:
@@ -154,7 +274,7 @@ def main() -> int:
                     "what they depict cannot be confirmed. Re-render without --reuse-existing-images."
                 )
             stored = json.loads(manifest_path.read_text(encoding="utf-8"))
-            differing = sorted(k for k in manifest if stored.get(k) != manifest[k])
+            differing = manifest_differences(stored, manifest)
             if differing:
                 raise ValueError(
                     f"{manifest_path} describes a different run; fields that differ: {differing}. Reusing "
@@ -172,85 +292,57 @@ def main() -> int:
             manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
         rows = ["original"] + [f"epoch {n}" for n in epochs]
-        cell: Dict[Tuple[int, int], Path] = {}
-        clip_diff: Dict[Tuple[int, int], float] = {}
-        for bi, (name, _) in enumerate(entities):
-            off = Image.open(off_path(bi)).convert("RGB")
-            clip_off = m.score_batch_same_text([off], prompt_of[name])[0]["clip"]
-            cell[(0, bi)] = off_path(bi)
-            clip_diff[(0, bi)] = 0.0
+        cell: Dict[Tuple[int, int], Path] = {(0, bi): off_path(bi) for bi in range(len(entities))}
+        for bi in range(len(entities)):
             for ri, n in enumerate(epochs, start=1):
                 cell[(ri, bi)] = on_path(bi, n)
-                on = Image.open(on_path(bi, n)).convert("RGB")
-                clip_diff[(ri, bi)] = m.score_batch_same_text([on], prompt_of[name])[0]["clip"] - clip_off
+
+        def score(path: Path, entity: int) -> float:
+            image = Image.open(path).convert("RGB")
+            return float(m.score_batch_same_text([image], prompt_of[entities[entity][0]])[0]["clip"])
+
+        clip_diff = score_cells(
+            number_of_entities=len(entities), epochs=epochs,
+            score_off=lambda entity: score(off_path(entity), entity),
+            score_on=lambda entity, epoch: score(on_path(entity, epoch), entity),
+        )
 
         nrows, ncols = len(rows), len(entities)
 
         # --- self-audit: row-to-row change over CONTROL entities (not strongly forgotten) ---
-        # The baseline is the median of the EPOCH-to-epoch transitions only. It therefore never involves
-        # the reference row, so a badly generated reference row cannot raise the bar it is judged against.
         controls = [bi for bi in range(ncols) if clip_diff[(nrows - 1, bi)] > _FORGOTTEN_CLIPDIFF]
-        transitions = []
-        for ri in range(1, nrows):
-            transitions.append(statistics.mean(mean_abs(cell[(ri - 1, bi)], cell[(ri, bi)]) for bi in controls))
-        baseline = statistics.median(transitions[1:])
-        outliers = [ri for ri, t in enumerate(transitions[1:], start=2) if baseline > 0
-                    and t > _OUTLIER_FACTOR * baseline]
-        # Reported, deliberately NOT a pass/fail criterion. The original->epoch-1 change is inflated by two
-        # different causes that a single run cannot tell apart: a mismatched reference row, and the fact
-        # that this is the only transition where the adapter appears at all (which dominates when later
-        # epochs move little). Measured: 1.07 and 1.25 on runs whose reference row is known good, but also
-        # 1.71 and 1.88 on runs with small epoch-to-epoch movement, against 2.09 for a deliberately
-        # mismatched reference row - overlapping ranges, so no threshold on this ratio is trustworthy.
-        reference_ratio = (transitions[0] / baseline) if baseline > 0 else 0.0
+        transitions = [
+            statistics.mean(mean_abs(cell[(ri - 1, bi)], cell[(ri, bi)]) for bi in controls)
+            for ri in range(1, nrows)
+        ]
+        audit = audit_transitions(transitions)
         logger.info("[seed %d] row-to-row change over %d controls: %s "
                     "(epoch-to-epoch baseline %.1f, original->epoch1 is %.2f x baseline)",
-                    seed, len(controls), [round(t, 1) for t in transitions], baseline, reference_ratio)
-        if outliers:
+                    seed, len(controls), [round(t, 1) for t in transitions],
+                    audit["epoch_to_epoch_baseline"], audit["reference_row_over_baseline"])
+        if audit["outlier_epoch_transitions"]:
             logger.warning("[seed %d] AUDIT: epoch transition(s) %s exceed %.1f x the baseline",
-                           seed, outliers, _OUTLIER_FACTOR)
+                           seed, audit["outlier_epoch_transitions"], _OUTLIER_FACTOR)
         else:
             logger.info("[seed %d] AUDIT OK: no epoch transition is an outlier", seed)
-        passed = not outliers
 
-        # --- column order: the target, then the receivers by their clip_diff in the last rendered epoch ---
-        # (most negative = most interfered = nearest the target). Computed per seed from this run's own
-        # numbers, so the bottom row of the figure is visibly the sort key. This is a presentation order
-        # only; the images were generated in the fixed order above.
-        receivers_by_last_epoch = sorted(
-            (bi for bi in range(ncols) if bi != target_index),
-            key=lambda bi: (clip_diff[(nrows - 1, bi)], entities[bi][0]),
+        display_order = column_order(
+            last_row={bi: clip_diff[(nrows - 1, bi)] for bi in range(ncols)},
+            names=[name for name, _ in entities], target_index=target_index,
         )
-        display_order: List[int] = [target_index] + receivers_by_last_epoch
 
-        # --- figure ---
-        fig, axes = plt.subplots(nrows, ncols, figsize=(1.7 * ncols, 1.9 * nrows))
-        for ri in range(nrows):
-            for ci, bi in enumerate(display_order):
-                ax = axes[ri][ci]
-                ax.imshow(np.asarray(Image.open(cell[(ri, bi)]).convert("RGB")))
-                ax.set_xticks([])
-                ax.set_yticks([])
-                if ri > 0:
-                    ax.set_title(f"clip_diff={clip_diff[(ri, bi)]:.2f}", fontsize=6)
-                if ci == 0:
-                    ax.set_ylabel(rows[ri], fontsize=8, rotation=0, ha="right", va="center")
-        for ci, bi in enumerate(display_order):
-            label = _short_entity_display(hf_name_of[entities[bi][0]])
-            axes[0][ci].set_title(f"{label} (target)" if ci == 0 else label, fontsize=6)
-        fig.suptitle(
-            f"Method: {_display_unlearning_algorithm(_METHOD).upper()} | "
-            f"Overwrite '{target_pre}' to '{target_over}' | "
-            f"seed={seed}, learning rate={args.learning_rate:g}\n"
-            f"rows = the original model then each saved epoch; columns = the target then the receivers "
-            f"sorted by clip_diff in the last epoch; cell = clip_diff against the original row, "
-            f"which is zero there and therefore not shown",
-            fontsize=9,
-        )
-        fig.tight_layout(rect=(0, 0, 1, 0.96))
         out_png = _OUT / f"epoch_grid{suffix}_seed{seed}.png"
-        fig.savefig(out_png, dpi=120)
-        plt.close(fig)
+        render_grid(
+            cell=cell, clip_diff=clip_diff, row_labels=rows,
+            column_labels=[_short_entity_display(hf_name_of[name]) for name, _ in entities],
+            display_order=display_order, out_png=out_png,
+            title=(f"Method: {_display_unlearning_algorithm(_METHOD).upper()} | "
+                   f"Overwrite '{target_pre}' to '{target_over}' | "
+                   f"seed={seed}, learning rate={args.learning_rate:g}\n"
+                   f"rows = the original model then each saved epoch; columns = the target then the "
+                   f"receivers sorted by clip_diff in the last epoch; cell = clip_diff against the "
+                   f"original row, which is zero there and therefore not shown"),
+        )
 
         result = {
             "seed": seed, "task": task, "epochs": epochs, "rows": rows,
@@ -261,14 +353,7 @@ def main() -> int:
             "entities_by_interference": [{"name": n, "canonical_clip_diff": cd} for n, cd in entities],
             "display_column_order": display_order,
             "clip_diff": {f"{ri},{bi}": clip_diff[(ri, bi)] for ri in range(nrows) for bi in range(ncols)},
-            "audit": {
-                "control_entity_indices": controls,
-                "row_to_row_change_over_controls": [round(t, 2) for t in transitions],
-                "epoch_to_epoch_baseline": round(baseline, 2),
-                "reference_row_over_baseline": round(reference_ratio, 3),
-                "outlier_epoch_transitions": outliers,
-                "passed": passed,
-            },
+            "audit": dict(audit, control_entity_indices=controls),
         }
         (_OUT / f"epoch_grid{suffix}_seed{seed}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         logger.info("[seed %d] grid -> %s", seed, out_png)
