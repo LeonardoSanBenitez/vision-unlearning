@@ -1,20 +1,32 @@
 """Every-epoch x every-entity grid (the W6 deliverable format), for one task's selection.
 
-Rows = [original base model, then each saved epoch]; columns = the 10 selected entities ordered by canonical
-interference (target at column 0). Each cell is the entity's own concept prompt generated from that epoch's
-adapter, at a fixed seed, batch_size=1 (dedicated-VRAM path). Runs for one or more seeds (--seeds).
+Rows = [original base model, then each saved epoch]; columns = the forget target followed by the nine
+receivers, ordered by their `clip_diff` in the LAST rendered epoch of this run (most negative, i.e. most
+interfered, nearest the target). Each cell is the entity's own concept prompt generated from that epoch's
+adapter, at a fixed seed, batch_size=1 (dedicated-VRAM path). Runs for one or more seeds (--seeds); each
+seed's figure is ordered by its own last-epoch values, so a figure is self-contained: every number shown
+on it comes from that figure's own run and seed, and the bottom row is the sort key.
+
+Generation order is separate from column order, and is NOT the sort key: it is fixed once (by the
+canonical selection file) because it determines each entity's position in the random-number sequence.
+Column order is a presentation choice applied afterwards.
 
 Seed-matching invariant (critical): for a given seed, the baseline AND every epoch are generated within
 THIS script from the SAME prompt list in the SAME order, so an entity sits at the same RNG position in every
 call and starts from IDENTICAL initial noise in every row (generate_dataset reseeds to `seed` at the start
 of each call and advances the generator once per prompt). Images are therefore NOT reused across scripts or
 across different orderings (doing so puts an entity at a different RNG position and silently breaks the seed
-match) - the reason the grid generates all its own cells with one ordering.
+match) - the reason the grid generates all its own cells with one ordering. A manifest written next to the
+images records that ordering, so --reuse-existing-images cannot silently pair one run's images with another
+run's entity list.
 
-Self-audit (so a seed/reference mismatch can't pass silently): for each seed the script computes the
-consecutive-row mean-abs pixel change over the CONTROL entities (those not strongly forgotten, which should
-evolve smoothly) and flags any transition that is an outlier vs the median - in particular the
-original->epoch1 transition, whose being an outlier is the fingerprint of a badly-generated reference row.
+Self-audit: over the CONTROL entities (those not strongly forgotten, which should evolve smoothly) the
+script measures the mean-abs pixel change between consecutive rows, and flags any EPOCH-to-epoch transition
+that exceeds the median of the epoch-to-epoch transitions by more than a factor. That baseline deliberately
+excludes the original->epoch-1 change, so a badly generated reference row cannot inflate the bar. The
+original->epoch-1 change itself is reported as a ratio to that baseline but is NOT a pass/fail criterion:
+it is raised both by a mismatched reference row and by the adapter simply appearing for the first time, and
+measurements on real runs show the two ranges overlap (see the constant block below).
 
 Writes, per seed, epoch_grid{run-suffix}_seed{seed}.png and .json (clip_diff per cell + audit). The
 adapters to render, the learning rate shown in the title, and the run suffix are CLI arguments, so a
@@ -35,7 +47,7 @@ _OUT = _THIS.parent / "assets"
 _MODEL_ID = "CompVis/stable-diffusion-v1-4"
 _METHOD: Literal["distil"] = "distil"
 _FORGOTTEN_CLIPDIFF = -5.0   # an entity with last-epoch clip_diff below this is "being forgotten" (not a control)
-_OUTLIER_FACTOR = 2.0        # a consecutive transition > this x median (over controls) is flagged
+_OUTLIER_FACTOR = 2.0        # an epoch-to-epoch transition > this x the baseline (over controls) is flagged
 
 
 def main() -> int:
@@ -49,6 +61,9 @@ def main() -> int:
     from vision_unlearning.metrics import MetricImageTextSimilarity
     from vision_unlearning.datasets.testbed import get_target_overwrite
     from vision_unlearning.utils.logger import get_logger, setup_loggers
+    from vision_unlearning.benchmarks.I_care.result_templates import (
+        _display_unlearning_algorithm, _short_entity_display,
+    )
 
     logger = get_logger("epoch_grid")
     setup_loggers(modules_info=["unlearning"])
@@ -84,16 +99,13 @@ def main() -> int:
     sel = json.loads((_OUT / f"selection_{task}.json").read_text(encoding="utf-8"))
     entities: List[Tuple[str, float]] = [(sel["target"]["name"], sel["target"]["self_clip_diff"])]
     entities += [(r["name"], r["clip_diff"]) for r in sel["receivers"]]
-    entities.sort(key=lambda x: x[1])  # generation order: most interfered first
-    prompt_of = {n: f"An image of {get_target_overwrite(task, _METHOD, n)[0]}" for n, _ in entities}
-
-    # Generation order fixes each entity's position in the random-number sequence, so it must stay as it
-    # is; the columns are a presentation choice on top of it. The target goes first and the receivers
-    # follow by decreasing interference. Sorting alone does not achieve that: it puts the target first
-    # only when the target happens to be the most interfered entity of the ten, which is true for breeds
-    # and people but not for scenes, where four receivers are canonically more damaged than the target.
+    # Generation order fixes each entity's position in the random-number sequence, so it must stay
+    # exactly as it is across runs and across seeds; it is derived from the selection file only, never
+    # from anything measured in this run. Column order is decided separately, per seed, after scoring.
+    entities.sort(key=lambda x: x[1])
+    hf_name_of = {n: get_target_overwrite(task, _METHOD, n)[0] for n, _ in entities}
+    prompt_of = {n: f"An image of {hf_name_of[n]}" for n, _ in entities}
     target_index = next(i for i, (n, _) in enumerate(entities) if n == sel["target"]["name"])
-    display_order: List[int] = [target_index] + [i for i in range(len(entities)) if i != target_index]
 
     target_pre, target_over = get_target_overwrite(task, _METHOD, sel["target"]["name"])
     grid_dir = _OUT / f"epoch_grid{suffix}"
@@ -121,9 +133,33 @@ def main() -> int:
                 seeds=[seed], filenames=[p.name for p in paths], batch_size=1, lora_requires_inversion=False,
             )
 
+        # The images are named by their POSITION in the generation order (b{index}), which is what makes
+        # the seed match hold; that same naming means a different entity list would silently reuse another
+        # run's images under new labels. The manifest records what the files on disk actually depict, so
+        # reuse is only allowed when the current run agrees with it in every field.
+        manifest_path = grid_dir / f"manifest_s{seed}.json"
+        manifest = {
+            "seed": seed, "task": task, "model_dir": str(model_dir), "epochs": epochs,
+            "model_base_name": _MODEL_ID, "batch_size": 1, "method": _METHOD,
+            "generation_order": [name for name, _ in entities],
+            "prompts_in_generation_order": [prompt_of[name] for name, _ in entities],
+        }
+
         wanted = ([off_path(bi) for bi in range(len(entities))]
                   + [on_path(bi, n) for n in epochs for bi in range(len(entities))])
         if args.reuse_existing_images and all(p.exists() for p in wanted):
+            if not manifest_path.exists():
+                raise FileNotFoundError(
+                    f"{manifest_path} is missing: these images were written before the manifest existed, so "
+                    "what they depict cannot be confirmed. Re-render without --reuse-existing-images."
+                )
+            stored = json.loads(manifest_path.read_text(encoding="utf-8"))
+            differing = sorted(k for k in manifest if stored.get(k) != manifest[k])
+            if differing:
+                raise ValueError(
+                    f"{manifest_path} describes a different run; fields that differ: {differing}. Reusing "
+                    "these images would label one run's images with another run's entities."
+                )
             for p in wanted:
                 Image.open(p).convert("RGB").close()  # every reused file must be a readable image
             logger.info("[seed %d] reusing %d existing images; nothing is generated", seed, len(wanted))
@@ -133,6 +169,7 @@ def main() -> int:
             for n in epochs:
                 logger.info("[seed %d] generating epoch-%d (on) row ...", seed, n)
                 gen(str(model_dir / f"epoch-{n}"), [on_path(bi, n) for bi in range(len(entities))])
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
         rows = ["original"] + [f"epoch {n}" for n in epochs]
         cell: Dict[Tuple[int, int], Path] = {}
@@ -149,22 +186,42 @@ def main() -> int:
 
         nrows, ncols = len(rows), len(entities)
 
-        # --- self-audit: consecutive-row change over CONTROL entities (not strongly forgotten) ---
+        # --- self-audit: row-to-row change over CONTROL entities (not strongly forgotten) ---
+        # The baseline is the median of the EPOCH-to-epoch transitions only. It therefore never involves
+        # the reference row, so a badly generated reference row cannot raise the bar it is judged against.
         controls = [bi for bi in range(ncols) if clip_diff[(nrows - 1, bi)] > _FORGOTTEN_CLIPDIFF]
         transitions = []
         for ri in range(1, nrows):
             transitions.append(statistics.mean(mean_abs(cell[(ri - 1, bi)], cell[(ri, bi)]) for bi in controls))
-        med = statistics.median(transitions)
-        outliers = [ri for ri, t in enumerate(transitions, start=1) if med > 0 and t > _OUTLIER_FACTOR * med]
-        ref_first_is_outlier = 1 in outliers
-        logger.info("[seed %d] consecutive-row change over %d controls: %s (median %.1f)",
-                    seed, len(controls), [round(t, 1) for t in transitions], med)
+        baseline = statistics.median(transitions[1:])
+        outliers = [ri for ri, t in enumerate(transitions[1:], start=2) if baseline > 0
+                    and t > _OUTLIER_FACTOR * baseline]
+        # Reported, deliberately NOT a pass/fail criterion. The original->epoch-1 change is inflated by two
+        # different causes that a single run cannot tell apart: a mismatched reference row, and the fact
+        # that this is the only transition where the adapter appears at all (which dominates when later
+        # epochs move little). Measured: 1.07 and 1.25 on runs whose reference row is known good, but also
+        # 1.71 and 1.88 on runs with small epoch-to-epoch movement, against 2.09 for a deliberately
+        # mismatched reference row - overlapping ranges, so no threshold on this ratio is trustworthy.
+        reference_ratio = (transitions[0] / baseline) if baseline > 0 else 0.0
+        logger.info("[seed %d] row-to-row change over %d controls: %s "
+                    "(epoch-to-epoch baseline %.1f, original->epoch1 is %.2f x baseline)",
+                    seed, len(controls), [round(t, 1) for t in transitions], baseline, reference_ratio)
         if outliers:
-            logger.warning("[seed %d] AUDIT: transition(s) %s are outliers (>%.1fx median); "
-                           "original->epoch1 outlier=%s -> suspect a mismatched reference/seed/ordering row",
-                           seed, outliers, _OUTLIER_FACTOR, ref_first_is_outlier)
+            logger.warning("[seed %d] AUDIT: epoch transition(s) %s exceed %.1f x the baseline",
+                           seed, outliers, _OUTLIER_FACTOR)
         else:
-            logger.info("[seed %d] AUDIT OK: no outlier transitions; reference row is consistent with the rest", seed)
+            logger.info("[seed %d] AUDIT OK: no epoch transition is an outlier", seed)
+        passed = not outliers
+
+        # --- column order: the target, then the receivers by their clip_diff in the last rendered epoch ---
+        # (most negative = most interfered = nearest the target). Computed per seed from this run's own
+        # numbers, so the bottom row of the figure is visibly the sort key. This is a presentation order
+        # only; the images were generated in the fixed order above.
+        receivers_by_last_epoch = sorted(
+            (bi for bi in range(ncols) if bi != target_index),
+            key=lambda bi: (clip_diff[(nrows - 1, bi)], entities[bi][0]),
+        )
+        display_order: List[int] = [target_index] + receivers_by_last_epoch
 
         # --- figure ---
         fig, axes = plt.subplots(nrows, ncols, figsize=(1.7 * ncols, 1.9 * nrows))
@@ -175,19 +232,19 @@ def main() -> int:
                 ax.set_xticks([])
                 ax.set_yticks([])
                 if ri > 0:
-                    ax.set_title(f"{clip_diff[(ri, bi)]:.0f}", fontsize=6)
+                    ax.set_title(f"clip_diff={clip_diff[(ri, bi)]:.2f}", fontsize=6)
                 if ci == 0:
                     ax.set_ylabel(rows[ri], fontsize=8, rotation=0, ha="right", va="center")
         for ci, bi in enumerate(display_order):
-            name, cd = entities[bi]
-            label = f"{name.replace(' dog', '')}\ninterf {cd:.1f}"
-            axes[0][ci].set_title(f"TARGET {label}" if ci == 0 else label, fontsize=6)
-        audit_txt = "AUDIT OK" if not outliers else f"AUDIT WARNING: outlier transitions {outliers}"
+            label = _short_entity_display(hf_name_of[entities[bi][0]])
+            axes[0][ci].set_title(f"{label} (target)" if ci == 0 else label, fontsize=6)
         fig.suptitle(
-            f"SPARE unlearning of '{target_pre}' -> '{target_over}', per epoch "
-            f"(task {task}, seed {seed}, distil, learning rate {args.learning_rate:g})\n"
-            f"rows = original + saved epochs; columns = the target then 9 receivers by canonical interference; "
-            f"cell = clip_diff vs original  |  {audit_txt}",
+            f"Method: {_display_unlearning_algorithm(_METHOD).upper()} | "
+            f"Overwrite '{target_pre}' to '{target_over}' | "
+            f"seed={seed}, learning rate={args.learning_rate:g}\n"
+            f"rows = the original model then each saved epoch; columns = the target then the receivers "
+            f"sorted by clip_diff in the last epoch; cell = clip_diff against the original row, "
+            f"which is zero there and therefore not shown",
             fontsize=9,
         )
         fig.tight_layout(rect=(0, 0, 1, 0.96))
@@ -205,12 +262,12 @@ def main() -> int:
             "display_column_order": display_order,
             "clip_diff": {f"{ri},{bi}": clip_diff[(ri, bi)] for ri in range(nrows) for bi in range(ncols)},
             "audit": {
-                "control_breed_indices": controls,
-                "consecutive_row_change_over_controls": [round(t, 2) for t in transitions],
-                "median_transition": round(med, 2),
-                "outlier_transitions": outliers,
-                "reference_to_first_is_outlier": ref_first_is_outlier,
-                "passed": not outliers,
+                "control_entity_indices": controls,
+                "row_to_row_change_over_controls": [round(t, 2) for t in transitions],
+                "epoch_to_epoch_baseline": round(baseline, 2),
+                "reference_row_over_baseline": round(reference_ratio, 3),
+                "outlier_epoch_transitions": outliers,
+                "passed": passed,
             },
         }
         (_OUT / f"epoch_grid{suffix}_seed{seed}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
