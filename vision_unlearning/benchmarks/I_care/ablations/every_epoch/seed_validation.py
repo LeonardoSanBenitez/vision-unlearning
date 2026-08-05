@@ -78,6 +78,7 @@ def main() -> int:
     from vision_unlearning.metrics import MetricImageTextSimilarity
     from vision_unlearning.datasets.testbed import get_target_overwrite
     from vision_unlearning.utils.logger import get_logger, setup_loggers
+    from vision_unlearning.benchmarks.I_care.result_templates import _short_entity_display
 
     logger = get_logger("seed_validation")
     setup_loggers(modules_info=["unlearning"])
@@ -205,7 +206,7 @@ def main() -> int:
     for name, cd in breeds:
         y = float(np.mean(by_breed[name]))
         ax.scatter(cd, y, s=40)
-        ax.annotate(name.replace(" dog", ""), (cd, y), fontsize=6, xytext=(3, 3), textcoords="offset points")
+        ax.annotate(_short_entity_display(name), (cd, y), fontsize=6, xytext=(3, 3), textcoords="offset points")
     ax.set_xlabel("canonical interference clip_diff (more negative = more interfered)")
     ax.set_ylabel("base vs unlearned mean abs pixel change")
     ax.set_title("Selectivity: does image change track interference?\n(low-interference breeds bottom-right should have low change)")
