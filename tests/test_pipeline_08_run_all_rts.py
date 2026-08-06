@@ -212,5 +212,36 @@ class TestMpArgument:
             parse_args()
 
 
+class TestSimilaritiesArgument:
+    """--similarities is what makes a with-and-without comparison of one similarity metric
+    expressible: the joint regression takes it as the exact ordered feature list."""
+
+    def test_defaults_to_the_default_enumeration(self, monkeypatch: Any) -> None:
+        from vision_unlearning.benchmarks.I_care.pipeline_08_run_all_rts import _ALL_S
+        monkeypatch.setattr("sys.argv", ["pipeline_08_run_all_rts.py"])
+        args = parse_args()
+        assert args.similarities == list(_ALL_S)
+
+    def test_default_excludes_the_candidate_metric(self, monkeypatch: Any) -> None:
+        """A default run must not attempt unet_latent, whose matrices do not all exist."""
+        monkeypatch.setattr("sys.argv", ["pipeline_08_run_all_rts.py"])
+        assert "unet_latent" not in parse_args().similarities
+
+    def test_builds_exactly_the_requested_ordered_list(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "sys.argv",
+            ["pipeline_08_run_all_rts.py", "--similarities", "clip", "jacc", "dino", "act",
+             "unet_latent"],
+        )
+        assert parse_args().similarities == ["clip", "jacc", "dino", "act", "unet_latent"]
+
+    def test_rejects_unknown_metric(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(
+            "sys.argv", ["pipeline_08_run_all_rts.py", "--similarities", "not_a_real_metric"]
+        )
+        with pytest.raises(SystemExit):
+            parse_args()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -32,6 +32,14 @@ InterferenceMatrix, MetricSimilarityAlignment(Multi), and InterferenceVisualSumm
 ``interference_pair="clip_diff"``, so a cluster run backing that flow only needs
 ``--mp clip_diff``.
 
+``--similarities`` restricts which pairwise similarity metric(s) are used by
+SimilarityMatrix, MetricSimilarityAlignment, and MetricSimilarityAlignmentMulti — where
+it is the exact *ordered feature list* of the joint regression, and therefore what makes
+a with-and-without comparison of a single metric expressible (two runs differing in one
+feature and nothing else, since the feature list is serialised into the result filename).
+The default is the standard enumeration; a candidate metric that does not yet have a
+matrix for every task is requested explicitly rather than being in that default.
+
 By default (``--upload-if-recomputed``) each newly computed RT result is uploaded to
 HuggingFace immediately after computation.  Set ``HF_TOKEN`` in the environment.
 
@@ -72,6 +80,9 @@ _ALL_TASKS: List[str] = ["breeds", "scenes", "people"]
 _ALL_METHODS: List[str] = ["distil", "munba", "uce"]
 _ALL_MP: List[vb.type_mp] = cast(List[vb.type_mp], ["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"])
 _ALL_S: List[vb.type_s] = cast(List[vb.type_s], ["clip", "jacc", "dino", "act", "weight_overlap"])
+# Every registered similarity metric, so --similarities can request one that is deliberately
+# not part of the default enumeration above (a candidate metric under evaluation).
+_S_CHOICES: List[vb.type_s] = cast(List[vb.type_s], list(get_args(vb.type_s)))
 _ALL_L: List[vb.type_l] = cast(List[vb.type_l], ["clip_embedding", "dino_embedding"])
 _ALL_ME: List[vb.type_me] = cast(List[vb.type_me], list(get_args(vb.type_me)))  # type: ignore[misc]
 _ALL_REG_ALGOS: List[str] = ["linear_regression", "random_forest"]
@@ -254,15 +265,18 @@ def run_metric_similarity_alignment(
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
     base_folder: str = "assets",
+    s_list: Optional[List[vb.type_s]] = None,
 ) -> None:
     """MetricSimilarityAlignment: (model, task, unlearning_algorithm, mp, s)."""
     if mp_list is None:
         mp_list = _ALL_MP
+    if s_list is None:
+        s_list = _ALL_S
     for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
                 for interference_pair in mp_list:
-                    for similarity_metric in _ALL_S:
+                    for similarity_metric in s_list:
                         _compute_and_report(
                             lambda: vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
                                 model=model,
@@ -289,16 +303,19 @@ def run_metric_similarity_alignment_multi(
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
     base_folder: str = "assets",
+    s_list: Optional[List[vb.type_s]] = None,
 ) -> None:
     """MetricSimilarityAlignmentMulti: (model, task, unlearning_algorithm, mp, s_list, reg_algo).
 
-    Runs with all three similarity metrics combined and both regression algorithms.
-    The combined run (clip+dino+jacc) is the primary analysis; the individual-metric
-    runs (clip-only, dino-only, jacc-only) serve as within-model baselines.
+    Runs one joint regression over the similarity metrics combined, for both regression
+    algorithms. ``s_list`` is the exact ordered feature list; it is what makes a
+    with-and-without comparison of a single metric expressible (two runs differing in one
+    feature and in nothing else, since the feature list is serialised into the result
+    filename).
     """
     if mp_list is None:
         mp_list = _ALL_MP
-    all_metrics = _ALL_S
+    all_metrics = _ALL_S if s_list is None else s_list
     regression_algorithms = _ALL_REG_ALGOS
     similarity_sets = [all_metrics]  # primary: all combined
 
@@ -368,11 +385,14 @@ def run_similarity_matrix(
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
     base_folder: str = "assets",
+    s_list: Optional[List[vb.type_s]] = None,
 ) -> None:
     """SimilarityMatrix: (model, task, similarity_metric)."""
+    if s_list is None:
+        s_list = _ALL_S
     for model in _ALL_MODELS:
         for task in tasks:
-            for similarity_metric in _ALL_S:
+            for similarity_metric in s_list:
                 _compute_and_report(
                     lambda: vb.ResultTemplateSimilarityMatrix(
                         model=model,
@@ -993,6 +1013,19 @@ def parse_args() -> argparse.Namespace:
         help="Per-pair interference metric(s) to include (default: all 5).",
     )
     parser.add_argument(
+        "--similarities",
+        nargs="+",
+        default=list(_ALL_S),
+        choices=_S_CHOICES,
+        metavar="METRIC",
+        help=(
+            "Pairwise similarity metric(s) to include, for SimilarityMatrix, "
+            "MetricSimilarityAlignment, and MetricSimilarityAlignmentMulti (where it is the "
+            f"exact ordered feature list of the joint regression). Default: {_ALL_S}. "
+            f"Available: {_S_CHOICES}"
+        ),
+    )
+    parser.add_argument(
         "--entity-count",
         type=int,
         default=100,
@@ -1140,11 +1173,13 @@ def main() -> None:
             elif rt_name == "metricsimilarityalignment":
                 run_metric_similarity_alignment(
                     tasks, methods, hf_files, upload, mp_list=args.mp, base_folder=base_folder,
+                    s_list=args.similarities,
                 )
 
             elif rt_name == "metricsimilarityalignmentmulti":
                 run_metric_similarity_alignment_multi(
                     tasks, methods, hf_files, upload, mp_list=args.mp, base_folder=base_folder,
+                    s_list=args.similarities,
                 )
 
             elif rt_name == "interferencematrix":
@@ -1153,7 +1188,10 @@ def main() -> None:
                 )
 
             elif rt_name == "similaritymatrix":
-                run_similarity_matrix(tasks, hf_files, upload, base_folder=base_folder)
+                run_similarity_matrix(
+                    tasks, hf_files, upload, base_folder=base_folder,
+                    s_list=args.similarities,
+                )
 
             elif rt_name == "significantrelationship":
                 run_significant_relationship(tasks, methods, hf_files, upload, base_folder=base_folder)
