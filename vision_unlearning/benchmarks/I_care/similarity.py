@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
 from vision_unlearning.datasets.testbed import MetadataFiltered, get_target_overwrite
@@ -113,14 +113,35 @@ class UnetLatentSimilarity(BaseModel):
     ``torch``/``diffusers`` are imported inside the GPU methods only, so this module stays
     importable without them.
     """
+    # extra='forbid' so that constructing this with an argument it does not have -- most obviously
+    # seeds=..., which callers may expect to work -- fails loudly instead of being ignored while
+    # the caller believes it took effect.
+    model_config = ConfigDict(extra='forbid', protected_namespaces=())
+
     task: type_task
     model: type_model = 'sd1.4'
     base_folder: str = 'assets'
-    seeds: List[int] = GENERATE_DATASET_SEEDS
     # Explicitly passed to the pipeline. 50 is also the diffusers default, which is what the
     # canonical image generation uses (it passes no num_inference_steps at all); stating it
     # here keeps the value the cache metadata records true of the call that was actually made.
     num_inference_steps: int = 50
+
+    @property
+    def seeds(self) -> List[int]:
+        """The benchmark's generation seeds -- deliberately not a constructor parameter.
+
+        Every entity is captured under these same seeds, and the cache filename does not encode
+        them, so a settable field would let one seed set silently produce or consume a cache
+        written under another: capturing four seeds and later averaging two would return a
+        different vector from the same file with nothing recording the difference. Making the
+        seed set a constant means there is exactly one, benchmark-wide, and comparing two
+        entities is always comparing like with like.
+
+        Averaging a *subset* is still possible where it is meaningful, through the explicit
+        ``seed_indices`` argument of :meth:`entity_vectors` and :meth:`matrix`, which is visible
+        at the call site and used only by the seed-stability diagnostic.
+        """
+        return list(GENERATE_DATASET_SEEDS)
 
     # -- where the cache lives ------------------------------------------------
 
@@ -206,27 +227,34 @@ class UnetLatentSimilarity(BaseModel):
             }
         return payload['metadata'], entities
 
-    def _assert_resumable(
-        self, metadata: Dict[str, Any], entities: Dict[str, Dict[str, Any]],
-        entity_prompts: List[Tuple[str, str]],
-    ) -> None:
-        """Refuse to resume a capture that was made under different conditions.
+    def _assert_metadata_matches(self, metadata: Dict[str, Any], path: str) -> None:
+        """Refuse any cache that was written under different conditions from the current request.
 
-        Silently mixing two generations is the failure this exists to prevent, so every
-        mismatch raises rather than being repaired.
+        Applied on **both** paths that read a cache -- resuming a capture and loading a finished
+        one -- because the filename encodes only the task and the model. A cache captured under
+        other seeds or another step count lives at the same path as this one, so the recorded
+        metadata is the only thing standing between "these two entities were generated the same
+        way" and a silently mixed comparison.
         """
         expected = {
             'task': self.task,
             'model': self.model,
-            'seeds': list(self.seeds),
+            'seeds': self.seeds,
             'num_inference_steps': self.num_inference_steps,
         }
         for key, value in expected.items():
             if metadata.get(key) != value:
                 raise ValueError(
-                    f"cannot resume {self.cache_path_partial()}: it records {key}="
-                    f"{metadata.get(key)!r}, this run wants {value!r}"
+                    f"{path} records {key}={metadata.get(key)!r}, but this run wants {value!r}. "
+                    f"Refusing to mix two capture generations; delete the file to recapture."
                 )
+
+    def _assert_resumable(
+        self, metadata: Dict[str, Any], entities: Dict[str, Dict[str, Any]],
+        entity_prompts: List[Tuple[str, str]],
+    ) -> None:
+        """Refuse to resume a capture whose conditions, prompts or seeds disagree with this run."""
+        self._assert_metadata_matches(metadata, self.cache_path_partial())
         prompt_of = dict(entity_prompts)
         for name, entity in entities.items():
             if name not in prompt_of:
@@ -375,14 +403,22 @@ class UnetLatentSimilarity(BaseModel):
         pipeline = self._load_pipeline(device)
         self._set_determinism(True)
         try:
-            # 1. Determinism: the same (entity, seed) captured twice must be bit-identical.
+            # 1. Determinism AND order-independence: the same (entity, seed) captured twice, with
+            # a different capture in between, must be bit-identical. The intervening call is the
+            # point of the check -- back-to-back repetition would pass even if the noise depended
+            # on how many generations preceded it, and order-independence is exactly the property
+            # that makes an entity's latent comparable with every other entity's and the capture
+            # safe to resume.
             first_seed = self.seeds[0]
             z_a = self._capture_one(pipeline, first_prompt, first_seed, device)
+            self._capture_one(pipeline, other_prompt, self.seeds[-1], device)
             z_b = self._capture_one(pipeline, first_prompt, first_seed, device)
             measurements['determinism_max_abs_difference'] = float(np.max(np.abs(z_a - z_b)))
             assert np.array_equal(z_a, z_b), (
-                "the capture is not bit-reproducible under the determinism regime; "
-                f"max abs difference {measurements['determinism_max_abs_difference']}"
+                "the capture is not reproducible across an intervening generation, so it depends "
+                "on call order: entities are not comparable and a resumed run would differ from "
+                "an uninterrupted one. Max abs difference "
+                f"{measurements['determinism_max_abs_difference']}"
             )
 
             # 2. Canonical-image equivalence for the first entity in prompt order, all seeds.
@@ -484,7 +520,18 @@ class UnetLatentSimilarity(BaseModel):
             raise ArtifactNotAvailableError(
                 f"Final-denoised-latent cache not found at {self.cache_path()}."
             )
-        _, entities = self._read_cache(self.cache_path())
+        metadata, entities = self._read_cache(self.cache_path())
+        self._assert_metadata_matches(metadata, self.cache_path())
+        missing = {
+            name: [str(s) for s in self.seeds if str(s) not in entity['latents']]
+            for name, entity in entities.items()
+        }
+        incomplete = {name: seeds for name, seeds in missing.items() if seeds}
+        if incomplete:
+            raise ValueError(
+                f"{self.cache_path()} is missing seeds for {len(incomplete)} entities "
+                f"(first: {list(incomplete.items())[:3]})"
+            )
         return {
             name: np.stack([entity['latents'][str(seed)] for seed in self.seeds])
             for name, entity in entities.items()

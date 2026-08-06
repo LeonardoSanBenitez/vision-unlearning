@@ -1978,9 +1978,7 @@ class TestUnetLatentSimilarity:
     def test_aggregation_is_mean_then_normalise(self, tmp_path: Any) -> None:
         """Rejects the reversed order of operations: normalising per seed and then
         averaging gives a different unit vector for this input."""
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42, 43],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         _write_unet_latent_cache(
             latents.cache_path(),
             [{
@@ -1988,9 +1986,11 @@ class TestUnetLatentSimilarity:
                 'latents': {
                     42: _single_channel_latent([3.0, 4.0, 0.0, 0.0]),
                     43: _single_channel_latent([1.0, 0.0, 0.0, 0.0]),
+                    44: _single_channel_latent([3.0, 4.0, 0.0, 0.0]),
+                    45: _single_channel_latent([1.0, 0.0, 0.0, 0.0]),
                 },
             }],
-            seeds=[42, 43],
+            seeds=[42, 43, 44, 45],
         )
         vector = latents.entity_vectors()['basenji']
         mean_then_normalise = np.array([2.0, 2.0, 0.0, 0.0]) / np.linalg.norm([2.0, 2.0, 0.0, 0.0])
@@ -2001,9 +2001,7 @@ class TestUnetLatentSimilarity:
 
     def test_seed_selection_is_honoured(self, tmp_path: Any) -> None:
         """Rejects a seed_indices argument that is silently ignored."""
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42, 43],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         _write_unet_latent_cache(
             latents.cache_path(),
             [{
@@ -2011,9 +2009,11 @@ class TestUnetLatentSimilarity:
                 'latents': {
                     42: _single_channel_latent([3.0, 4.0, 0.0, 0.0]),
                     43: _single_channel_latent([0.0, 0.0, 1.0, 0.0]),
+                    44: _single_channel_latent([0.0, 0.0, 1.0, 0.0]),
+                    45: _single_channel_latent([0.0, 0.0, 1.0, 0.0]),
                 },
             }],
-            seeds=[42, 43],
+            seeds=[42, 43, 44, 45],
         )
         all_seeds = latents.entity_vectors()['basenji']
         first_seed = latents.entity_vectors(seed_indices=[0])['basenji']
@@ -2038,31 +2038,32 @@ class TestUnetLatentSimilarity:
 
     def test_zero_vector_raises(self, tmp_path: Any) -> None:
         """A zero vector has no direction; normalising it would emit NaN cosines."""
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         _write_unet_latent_cache(
             latents.cache_path(),
             [{
                 'name': 'basenji', 'prompt': 'An image of a basenji dog',
-                'latents': {42: _single_channel_latent([0.0, 0.0, 0.0, 0.0])},
+                'latents': {
+                    seed: _single_channel_latent([0.0, 0.0, 0.0, 0.0]) for seed in [42, 43, 44, 45]
+                },
             }],
-            seeds=[42],
+            seeds=[42, 43, 44, 45],
         )
         with pytest.raises(ValueError, match='zero vector'):
             latents.entity_vectors()
 
     def test_non_finite_values_raise_on_read(self, tmp_path: Any) -> None:
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         _write_unet_latent_cache(
             latents.cache_path(),
             [{
                 'name': 'basenji', 'prompt': 'An image of a basenji dog',
-                'latents': {42: _single_channel_latent([float('nan'), 0.0, 0.0, 1.0])},
+                'latents': {
+                    seed: _single_channel_latent([float('nan'), 0.0, 0.0, 1.0])
+                    for seed in [42, 43, 44, 45]
+                },
             }],
-            seeds=[42],
+            seeds=[42, 43, 44, 45],
             allow_nan=True,
         )
         with pytest.raises(ValueError, match='non-finite'):
@@ -2085,9 +2086,7 @@ class TestUnetLatentSimilarity:
     def test_json_round_trip_is_bit_identical(self, tmp_path: Any) -> None:
         """Five significant digits round-trip float16 exactly; entity order and the exact
         prompt each entity was captured with must survive too."""
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42, 43],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         rng = np.random.default_rng(0)
         original = {
             name: {
@@ -2095,7 +2094,7 @@ class TestUnetLatentSimilarity:
                 'prompt': f"An image of a {name} dog",
                 'latents': {
                     str(seed): rng.standard_normal((4, 2, 3)).astype(np.float16)
-                    for seed in [42, 43]
+                    for seed in [42, 43, 44, 45]
                 },
             }
             for name in ['zulu', 'alpha', 'mike']
@@ -2104,7 +2103,7 @@ class TestUnetLatentSimilarity:
         metadata, reloaded = latents._read_cache(latents.cache_path())
 
         assert list(reloaded.keys()) == ['zulu', 'alpha', 'mike']
-        assert metadata['seeds'] == [42, 43]
+        assert metadata['seeds'] == [42, 43, 44, 45]
         for name, entity in original.items():
             assert reloaded[name]['prompt'] == entity['prompt']
             for seed, array in entity['latents'].items():
@@ -2116,6 +2115,52 @@ class TestUnetLatentSimilarity:
         stacked = latents.load()['zulu']
         assert stacked.shape == (4, 4, 1, 1)
 
+    def test_seeds_are_the_benchmark_seeds_and_cannot_be_overridden(self, tmp_path: Any) -> None:
+        """The cache filename does not encode the seeds, so a settable seed set would let one
+        seed set consume a cache written under another."""
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        from vision_unlearning.benchmarks.I_care.configuration import GENERATE_DATASET_SEEDS
+        assert latents.seeds == list(GENERATE_DATASET_SEEDS)
+        with pytest.raises(Exception):
+            _sim_mod.UnetLatentSimilarity(
+                task='breeds', base_folder=str(tmp_path), seeds=[42, 43],  # type: ignore[call-arg]
+            )
+
+    def test_loading_a_cache_captured_under_other_seeds_raises(self, tmp_path: Any) -> None:
+        """The silent version of this is the dangerous one: averaging two seeds out of a
+        four-seed cache returns a different vector from the same file, with nothing recording
+        that the two entities were not compared like with like."""
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        _write_unet_latent_cache(
+            latents.cache_path(),
+            [{
+                'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
+                'latents': {
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [1, 2, 3, 4]
+                },
+            }],
+            seeds=[1, 2, 3, 4],
+        )
+        with pytest.raises(ValueError, match='seeds'):
+            latents.load()
+
+    def test_loading_a_cache_with_a_different_step_count_raises(self, tmp_path: Any) -> None:
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        _write_unet_latent_cache(
+            latents.cache_path(),
+            [{
+                'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
+                'latents': {
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0])
+                    for seed in [42, 43, 44, 45]
+                },
+            }],
+            seeds=[42, 43, 44, 45],
+            num_inference_steps=10,
+        )
+        with pytest.raises(ValueError, match='num_inference_steps'):
+            latents.load()
+
     def test_load_without_a_cache_raises_artifact_not_available(self, tmp_path: Any) -> None:
         latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         with pytest.raises(ArtifactNotAvailableError):
@@ -2124,7 +2169,7 @@ class TestUnetLatentSimilarity:
     @pytest.mark.parametrize(
         'field,value,expected',
         [
-            ('seeds', [42, 99], 'seeds'),
+            ('seeds', [42, 43, 44, 99], 'seeds'),
             ('num_inference_steps', 10, 'num_inference_steps'),
             ('task', 'people', 'task'),
         ],
@@ -2137,17 +2182,17 @@ class TestUnetLatentSimilarity:
         monkeypatch.setattr(
             _rt_mod.MetadataFiltered, 'compute', lambda self: [{'name': 'basenji dog'}]
         )
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42, 43],
-        )
-        overrides: Dict[str, Any] = {'seeds': [42, 43], 'num_inference_steps': 50, 'task': 'breeds'}
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        overrides: Dict[str, Any] = {
+            'seeds': [42, 43, 44, 45], 'num_inference_steps': 50, 'task': 'breeds',
+        }
         overrides[field] = value
         _write_unet_latent_cache(
             latents.cache_path_partial(),
             [{
                 'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
                 'latents': {
-                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [42, 43]
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [42, 43, 44, 45]
                 },
             }],
             seeds=overrides['seeds'],
@@ -2163,16 +2208,16 @@ class TestUnetLatentSimilarity:
         monkeypatch.setattr(
             _rt_mod.MetadataFiltered, 'compute', lambda self: [{'name': 'basenji dog'}]
         )
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         _write_unet_latent_cache(
             latents.cache_path_partial(),
             [{
                 'name': 'basenji dog', 'prompt': 'A photograph of a basenji',
-                'latents': {42: _single_channel_latent([1.0, 0.0, 0.0, 0.0])},
+                'latents': {
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [42, 43, 44, 45]
+                },
             }],
-            seeds=[42],
+            seeds=[42, 43, 44, 45],
         )
         with pytest.raises(ValueError, match='prompt'):
             latents.capture(device='cpu')
@@ -2185,16 +2230,16 @@ class TestUnetLatentSimilarity:
         monkeypatch.setattr(
             _rt_mod.MetadataFiltered, 'compute', lambda self: [{'name': 'basenji dog'}]
         )
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         _write_unet_latent_cache(
             latents.cache_path_partial(),
             [{
                 'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
-                'latents': {42: _single_channel_latent([1.0, 0.0, 0.0, 0.0])},
+                'latents': {
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [42, 43, 44, 45]
+                },
             }],
-            seeds=[42],
+            seeds=[42, 43, 44, 45],
         )
         latents.capture(device='cpu')
         assert os.path.exists(latents.cache_path())
@@ -2202,9 +2247,7 @@ class TestUnetLatentSimilarity:
         assert list(latents.load().keys()) == ['basenji dog']
 
     def test_seed_split_stability_reports_both_measures(self, tmp_path: Any) -> None:
-        latents = _sim_mod.UnetLatentSimilarity(
-            task='breeds', base_folder=str(tmp_path), seeds=[42, 43, 44, 45],
-        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
         rng = np.random.default_rng(1)
         _write_unet_latent_cache(
             latents.cache_path(),

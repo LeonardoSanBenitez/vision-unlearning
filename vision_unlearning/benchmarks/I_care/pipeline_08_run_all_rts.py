@@ -40,12 +40,14 @@ feature and nothing else, since the feature list is serialised into the result f
 The default is the standard enumeration; a candidate metric that does not yet have a
 matrix for every task is requested explicitly rather than being in that default.
 
-By default (``--upload-if-recomputed``) each newly computed RT result is uploaded to
-HuggingFace immediately after computation.  Set ``HF_TOKEN`` in the environment.
+With ``--upload-if-recomputed`` each newly computed RT result is uploaded to HuggingFace
+immediately after computation.  Set ``HF_TOKEN`` in the environment.  Off by default, so a
+plain run writes results locally only.
 
-By default (``--skip-if-on-hf``) the HuggingFace ``results/`` tree is listed once at
-startup and any RT whose result file is already on HF is skipped entirely, avoiding
-thousands of per-file HTTP HEAD requests.
+With ``--skip-if-on-hf`` the HuggingFace ``results/`` tree is listed once at startup and any
+RT whose result file is already on HF is skipped entirely, avoiding thousands of per-file
+HTTP HEAD requests.  Off by default: that listing is slow on a repository this size, so it is
+worth paying only for a bulk run that would otherwise recompute many existing results.
 
 Run from: vision-unlearning/vision_unlearning/benchmarks/I_care/
 """
