@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import os
 import random
 from typing import Any, Dict, Iterator, List, Optional, Tuple, cast
@@ -49,10 +50,17 @@ CANONICAL_SEEDING_SCHEME = (
 # benchmark already generated to better than this, as a mean absolute difference over [0, 1] RGB.
 BASELINE_TOLERANCE = 1.0 / 255.0
 
+logger = logging.getLogger(__name__)
+
 # How many entities, in prompt order, the pre-bulk correctness gate covers. Three rather than one
 # because the first entity's noise is the first draw of its seed's stream either way: only an
 # entity after it can tell a correctly advancing generator apart from one re-created per prompt.
 VALIDATION_ENTITIES = 3
+
+# How often the bulk capture logs a progress line. At ~16 s per capture this is a line every ~2.7
+# minutes, against a checkpoint every 100 captures (~27 min) -- so a stalled run is visible from the
+# log long before the next checkpoint would reveal it.
+PROGRESS_EVERY = 10
 
 
 def jacc_metric_score(entity_1: str, entity_2: str, metadata_filtered: List[Dict[str, Any]], entity_col: str = 'name') -> float:
@@ -494,6 +502,30 @@ class UnetLatentSimilarity(BaseModel):
             )
         return difference
 
+    @staticmethod
+    def _resource_sample() -> str:
+        """CPU, RAM and VRAM, sampled **inside this process**, as one log-line fragment.
+
+        VRAM has to be sampled here rather than by an external monitor: on this machine
+        ``torch.cuda.mem_get_info`` reports the calling context's usage, so a separate monitoring
+        process polling it reads an idle GPU no matter what this one has allocated. CPU and RAM are
+        genuinely system-wide, so those would have been fine either way.
+        """
+        import psutil
+        import torch
+        memory = psutil.virtual_memory()
+        sample = (
+            f"CPU {psutil.cpu_percent():.1f}% | "
+            f"RAM {memory.percent:.1f}% used ({memory.available / 1024 ** 3:.2f}GB free)"
+        )
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info(0)
+            sample += (
+                f" | VRAM {(total - free) / 1024 ** 3:.2f}/{total / 1024 ** 3:.2f}GB "
+                f"in this process"
+            )
+        return sample
+
     def _set_determinism(self, enabled: bool) -> None:
         """The determinism regime of ``generate_dataset``, applied identically here."""
         import torch
@@ -591,6 +623,10 @@ class UnetLatentSimilarity(BaseModel):
             self._set_determinism(True)
             try:
                 for seed in remaining:
+                    logger.info(
+                        "unet_latent capture: seed %s of %s, %s prompts | %s",
+                        seed, list(remaining), len(prompts), self._resource_sample(),
+                    )
                     for index, z0 in self._capture_seed(pipeline, prompts, seed, device):
                         name, prompt = entity_prompts[index]
                         difference = self._verify_against_baseline(
@@ -602,10 +638,27 @@ class UnetLatentSimilarity(BaseModel):
                         )
                         entities.setdefault(name, {'name': name, 'prompt': prompt, 'latents': {}})
                         entities[name]['latents'][str(seed)] = z0
+                        # A progress line often enough that a hung run is distinguishable from a
+                        # working one without waiting for the next checkpoint, which is 100
+                        # captures (~27 min) away. The running maximum is on every line because it
+                        # is the number the whole capture scheme rests on: if it ever leaves 0, that
+                        # is visible in the log at the capture it happened, not only at the end.
+                        if (index + 1) % PROGRESS_EVERY == 0 or index + 1 == len(prompts):
+                            logger.info(
+                                "  seed %s: %s/%s captured, %s verified against their baseline "
+                                "images, maximum difference %s (tolerance %s) | %s",
+                                seed, index + 1, len(prompts), verification['n_checked'],
+                                verification['max_mean_abs_difference'], BASELINE_TOLERANCE,
+                                self._resource_sample(),
+                            )
                     self._write_cache(
                         self.cache_path_partial(),
                         self._in_metadata_order(entities, entity_prompts),
                         prompts, verification,
+                    )
+                    logger.info(
+                        "unet_latent capture: seed %s complete, checkpoint written to %s",
+                        seed, self.cache_path_partial(),
                     )
             finally:
                 self._set_determinism(False)
