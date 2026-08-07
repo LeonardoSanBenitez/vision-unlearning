@@ -18,7 +18,11 @@ Supports five similarity metrics (``--similarity`` flag):
                   the VAE decoder consumes).  If the latent cache already exists the
                   matrix is computed from it (CPU).  If the cache is missing, this
                   script loads Stable Diffusion 1.4 and captures it first (requires
-                  GPU): 100 entities x 4 seeds x 50 denoising steps per task.
+                  GPU): 100 entities x 4 seeds x 50 denoising steps per task.  The
+                  capture reproduces the canonical image generation's randomness (one
+                  generator per seed, advanced across the prompt list), so every
+                  latent is decoded and checked against the baseline image the
+                  benchmark already generated for that (entity, seed).
     all           Runs all five in order: clip → dino → jacc → act → unet_latent.
 
 For ``clip``, ``dino``, and ``jacc`` (and the RT step for ``act`` and ``unet_latent``)
@@ -29,9 +33,10 @@ the local-cache / HuggingFace / compute-from-scratch chain automatically.
 value the canonical image generation uses, and is not configurable here.
 
 ``--upload`` uploads a freshly computed matrix to HuggingFace; ``--validate-capture``
-runs the ``unet_latent`` correctness gate (bit-reproducibility, equivalence with the
-canonical baseline images, decoded-latent equivalence, sensitivity, throughput) instead
-of a bulk capture.
+runs the ``unet_latent`` correctness gate instead of a bulk capture: determinism under
+replay, agreement with the baseline images for the first three entities across all four
+seeds, the cache round trip, agreement of the pipeline's own image output, sensitivity to
+seed and prompt, and the measured budget.  About eighteen generations.
 
 Usage
 -----
@@ -255,8 +260,9 @@ def run_unet_latent(
 
     If the latent cache is already present (or the matrix is available on HF via the RT),
     no SD model is loaded.  Otherwise Stable Diffusion 1.4 is loaded and 100 x 4 latents
-    are captured (GPU required).  With ``validate_capture`` the correctness gate runs
-    instead: about ten captures, no bulk pass, figures written to ``report_dir``.
+    are captured (GPU required), each one checked against its baseline image as it is
+    captured.  With ``validate_capture`` the correctness gate runs instead: about eighteen
+    generations, no bulk pass, images and measurements written to ``report_dir``.
     """
     import vision_unlearning.benchmarks.I_care as vb
 
@@ -376,7 +382,7 @@ def main() -> None:
         action="store_true",
         default=False,
         help=(
-            "Run the unet_latent capture correctness gate (about ten captures) instead of "
+            "Run the unet_latent capture correctness gate (about eighteen generations) instead of "
             "a bulk capture, writing its measurements and images to --report-dir."
         ),
     )

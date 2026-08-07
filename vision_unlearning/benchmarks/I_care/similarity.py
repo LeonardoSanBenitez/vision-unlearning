@@ -17,7 +17,7 @@ import datetime
 import json
 import os
 import random
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, Iterator, List, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,24 @@ from vision_unlearning.benchmarks.I_care.configuration import (
 )
 
 SD_MODEL_NAME = "CompVis/stable-diffusion-v1-4"
+
+# How the final-denoised-latent capture consumes randomness: one torch.Generator per seed,
+# advanced across the whole prompt list in order -- the seeded branch of
+# ``vision_unlearning/utils/data_generation.py::generate_dataset``, which is what produced every
+# baseline image in the benchmark. Recorded in every cache and re-checked on every read, because
+# a cache captured under any other scheme holds different tensors under the same filename.
+CANONICAL_SEEDING_SCHEME = (
+    'canonical: one generator per seed, advanced across the prompt list in order'
+)
+
+# One 8-bit grey level. A captured latent, decoded, must agree with the baseline PNG the
+# benchmark already generated to better than this, as a mean absolute difference over [0, 1] RGB.
+BASELINE_TOLERANCE = 1.0 / 255.0
+
+# How many entities, in prompt order, the pre-bulk correctness gate covers. Three rather than one
+# because the first entity's noise is the first draw of its seed's stream either way: only an
+# entity after it can tell a correctly advancing generator apart from one re-created per prompt.
+VALIDATION_ENTITIES = 3
 
 
 def jacc_metric_score(entity_1: str, entity_2: str, metadata_filtered: List[Dict[str, Any]], entity_col: str = 'name') -> float:
@@ -99,11 +117,23 @@ class UnetLatentSimilarity(BaseModel):
     per-seed ``z_0``, flattened in C order and L2-normalised; the similarity between two
     entities is the cosine of their vectors.
 
-    A fresh generator is built per (entity, seed), so every entity sees the same four noise
-    realisations (the ``act`` convention): this is a conditional similarity under common random
-    numbers, and it makes the capture order-independent and resumable at entity granularity.
-    Only the first entity in prompt order coincides with the benchmark's canonical baseline
-    image, which is what :meth:`validate_capture` uses as its correctness gate.
+    The capture reproduces the benchmark's own image generation exactly: one generator per seed,
+    advanced across the whole prompt list in order, as ``generate_dataset`` does. Entity *k*'s
+    ``z_0`` is therefore the latent behind *that entity's* stored baseline image, so this metric
+    reads the same images the rest of the benchmark reads -- the ones interference is measured on,
+    and the ones ``dino`` embeds one step later.
+
+    Two consequences of that, both load bearing. The capture is **order-dependent**: reordering
+    or filtering the prompt list changes every entity's initial noise, so the ordered prompt list
+    is part of a cache's identity and is re-checked on every read. And the correct answer for
+    every capture is **already on disk**: each latent is decoded and compared against its
+    baseline PNG at capture time (:meth:`_verify_against_baseline`), which is what makes a wrong
+    generator state impossible to store silently.
+
+    The nuisance term this accepts is named rather than hidden: entity *k*'s initial noise is the
+    *k*-th draw of the seed's stream, so a cosine between two entities mixes concept difference
+    with two different noise realisations. ``dino`` carries exactly the same term, which is what
+    makes the two comparable; the four-seed average is what reduces it.
 
     The per-(entity, seed) cache this class writes is deliberately **not** an
     :class:`~vision_unlearning.artifact.Artifact`: it is a local debug cache that exists so the
@@ -167,7 +197,20 @@ class UnetLatentSimilarity(BaseModel):
 
     # -- cache serialisation --------------------------------------------------
 
-    def _metadata(self) -> Dict[str, Any]:
+    def _metadata(
+        self,
+        prompts_ordered: List[str],
+        latent_shape: Tuple[int, ...],
+        verification: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """The conditions this cache was captured under, all of which are re-checked on read.
+
+        ``prompts_ordered`` and ``seeding_scheme`` are here because the filename encodes only the
+        task and the model: a capture under a different prompt order or a different seeding scheme
+        occupies the same path and holds different tensors, and this metadata is the only thing
+        that can tell the two apart. ``baseline_verification`` records how many of the latents
+        were confirmed against the baseline image already on disk.
+        """
         return {
             'task': self.task,
             'model': self.model,
@@ -176,8 +219,12 @@ class UnetLatentSimilarity(BaseModel):
             'num_inference_steps': self.num_inference_steps,
             'batch_size': 1,
             'dtype': 'float16',
+            'latent_shape': list(latent_shape),
             'captured_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'aggregation': 'mean over seeds, flatten C order, L2-normalise',
+            'seeding_scheme': CANONICAL_SEEDING_SCHEME,
+            'prompts_ordered': list(prompts_ordered),
+            'baseline_verification': dict(verification),
         }
 
     @staticmethod
@@ -189,18 +236,36 @@ class UnetLatentSimilarity(BaseModel):
             return [float(f"{value:.5g}") for value in array.tolist()]
         return [UnetLatentSimilarity._encode(sub) for sub in array]
 
-    def _write_cache(self, path: str, entities: Dict[str, Dict[str, Any]]) -> None:
-        """Write the cache atomically: temporary file first, then rename."""
+    def _write_cache(
+        self,
+        path: str,
+        entities: Dict[str, Dict[str, Any]],
+        prompts_ordered: List[str],
+        verification: Dict[str, Any],
+    ) -> None:
+        """Write the cache atomically: temporary file first, then rename.
+
+        Only the seeds actually captured are written, in ``self.seeds`` order -- a checkpoint
+        written at a seed boundary legitimately holds fewer seeds than the finished cache.
+        """
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        shapes = {
+            latent.shape
+            for entity in entities.values() for latent in entity['latents'].values()
+        }
+        if len(shapes) > 1:
+            raise ValueError(f"refusing to write a cache with mixed latent shapes {sorted(shapes)}")
         payload = {
-            'metadata': self._metadata(),
+            'metadata': self._metadata(
+                prompts_ordered, shapes.pop() if shapes else (), verification,
+            ),
             'entities': [
                 {
                     'name': entity['name'],
                     'prompt': entity['prompt'],
                     'latents': {
                         str(seed): self._encode(entity['latents'][str(seed)])
-                        for seed in self.seeds
+                        for seed in self.seeds if str(seed) in entity['latents']
                     },
                 }
                 for entity in entities.values()
@@ -241,6 +306,7 @@ class UnetLatentSimilarity(BaseModel):
             'model': self.model,
             'seeds': self.seeds,
             'num_inference_steps': self.num_inference_steps,
+            'seeding_scheme': CANONICAL_SEEDING_SCHEME,
         }
         for key, value in expected.items():
             if metadata.get(key) != value:
@@ -249,12 +315,65 @@ class UnetLatentSimilarity(BaseModel):
                     f"Refusing to mix two capture generations; delete the file to recapture."
                 )
 
+    def _assert_baseline_verified(
+        self, metadata: Dict[str, Any], entities: Dict[str, Dict[str, Any]], path: str,
+    ) -> None:
+        """Refuse a finished cache that does not record *every* latent agreeing with its image.
+
+        This is the load-side check on the capture's identity, and it is stronger than comparing
+        the recorded prompt order against the current one: a latent captured under a wrong prompt
+        order, a wrong step count or a wrong generator state cannot have passed
+        :meth:`_verify_against_baseline`, so a cache that claims a complete verification cannot be
+        one of those. It also rejects a cache written before this record existed, which is exactly
+        what a cache from the superseded per-entity seeding scheme is.
+        """
+        verification = metadata.get('baseline_verification') or {}
+        expected = len(entities) * len(self.seeds)
+        checked = verification.get('n_checked')
+        if checked != expected:
+            raise ValueError(
+                f"{path} records baseline_verification.n_checked={checked!r}, but it holds "
+                f"{len(entities)} entities x {len(self.seeds)} seeds = {expected} latents. Every "
+                f"latent must have been checked against the baseline image the benchmark already "
+                f"generated; delete the file and recapture."
+            )
+        difference = verification.get('max_mean_abs_difference')
+        if not isinstance(difference, (int, float)) or not 0.0 <= difference < BASELINE_TOLERANCE:
+            raise ValueError(
+                f"{path} records baseline_verification.max_mean_abs_difference={difference!r}, "
+                f"which is not inside [0, {BASELINE_TOLERANCE}). The captured latents do not "
+                f"decode to the benchmark's own baseline images."
+            )
+
     def _assert_resumable(
         self, metadata: Dict[str, Any], entities: Dict[str, Dict[str, Any]],
         entity_prompts: List[Tuple[str, str]],
     ) -> None:
-        """Refuse to resume a capture whose conditions, prompts or seeds disagree with this run."""
+        """Refuse to resume a capture whose conditions, prompts or seeds disagree with this run.
+
+        The prompt list is compared **as an ordered sequence**, so a permutation that leaves every
+        entity present is rejected too: the capture advances one generator across that list, so
+        reordering it changes every entity's initial noise while changing nothing else visible.
+        """
         self._assert_metadata_matches(metadata, self.cache_path_partial())
+        prompts_ordered = [prompt for _, prompt in entity_prompts]
+        if list(metadata.get('prompts_ordered') or []) != prompts_ordered:
+            recorded = list(metadata.get('prompts_ordered') or [])
+            reordered_only = sorted(recorded) == sorted(prompts_ordered)
+            raise ValueError(
+                f"cannot resume: {self.cache_path_partial()} records a prompts_ordered list of "
+                f"{len(recorded)} prompts that is "
+                f"{'a reordering of' if reordered_only else 'not'} the {len(prompts_ordered)} "
+                f"prompts this run builds. The capture advances one generator across that list, so "
+                f"its order determines every entity's initial noise; delete the file to recapture."
+            )
+        verification = metadata.get('baseline_verification')
+        if not isinstance(verification, dict) or 'n_checked' not in verification:
+            raise ValueError(
+                f"cannot resume: {self.cache_path_partial()} records no baseline_verification, so "
+                f"there is no evidence its latents were checked against the benchmark's baseline "
+                f"images. Delete the file to recapture."
+            )
         prompt_of = dict(entity_prompts)
         for name, entity in entities.items():
             if name not in prompt_of:
@@ -265,11 +384,6 @@ class UnetLatentSimilarity(BaseModel):
                 raise ValueError(
                     f"cannot resume: cached entity {name!r} used prompt {entity['prompt']!r}, "
                     f"this run wants {prompt_of[name]!r}"
-                )
-            missing_seeds = [str(s) for s in self.seeds if str(s) not in entity['latents']]
-            if missing_seeds:
-                raise ValueError(
-                    f"cannot resume: cached entity {name!r} is missing seeds {missing_seeds}"
                 )
 
     # -- producer side (GPU) --------------------------------------------------
@@ -286,28 +400,23 @@ class UnetLatentSimilarity(BaseModel):
         pipeline.set_progress_bar_config(disable=True)
         return pipeline
 
-    def _capture_one(self, pipeline: Any, prompt: str, seed: int, device: str) -> np.ndarray:
-        """One z_0, under the same determinism regime as the canonical image generation."""
-        import torch
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-        generator = torch.Generator(device=device).manual_seed(seed)
-        with torch.no_grad():
-            latent = pipeline(
-                prompt,                                        # one prompt per call: batch size 1
-                generator=generator,
-                num_inference_steps=self.num_inference_steps,
-                output_type="latent",                          # return z_0, skip the VAE decode
-            ).images                                           # tensor [1, 4, 64, 64]
-        z0: np.ndarray = latent[0].detach().to(torch.float16).cpu().numpy()
-        assert z0.ndim == 3 and z0.shape[0] == 4, f"unexpected latent shape {z0.shape}"
-        return z0
+    def _run_seed(
+        self, pipeline: Any, prompts: List[str], seed: int, device: str, output_type: str,
+    ) -> Iterator[Tuple[int, Any]]:
+        """One pipeline output per prompt, in order, under the canonical generation's RNG regime.
 
-    def _generate_image(self, pipeline: Any, prompt: str, seed: int, device: str) -> np.ndarray:
-        """The decoded image for one (prompt, seed), same regime, as a float array in [0, 1]."""
+        This mirrors ``generate_dataset``'s seeded branch line for line, and it is the only place
+        in this class that seeds anything: the global generators are seeded once **per seed**, not
+        once per prompt, and a single ``torch.Generator`` serves the whole prompt list. Entity *k*
+        therefore receives the *k*-th noise draw of that stream, which is the draw its stored
+        baseline image was generated from. Re-creating the generator inside the loop would hand
+        every entity the *first* draw instead -- the images would then agree for the first entity
+        and for no other, which is the failure :meth:`validate_capture` checks three entities to
+        catch.
+
+        Yields ``(prompt index, pipeline output)``; the index rather than the prompt, so nothing
+        downstream depends on prompts being unique.
+        """
         import torch
         random.seed(seed)
         np.random.seed(seed)
@@ -315,13 +424,75 @@ class UnetLatentSimilarity(BaseModel):
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
         generator = torch.Generator(device=device).manual_seed(seed)
-        with torch.no_grad():
-            image = pipeline(
-                prompt,
-                generator=generator,
-                num_inference_steps=self.num_inference_steps,
-            ).images[0]
-        return np.asarray(image, dtype=np.float64) / 255.0
+        for index, prompt in enumerate(prompts):
+            with torch.no_grad():
+                outputs = pipeline(
+                    [prompt],            # a one-element LIST: generate_dataset passes
+                                         # prompts[start:start + 1] with batch_size=1, and
+                                         # mirroring the call shape removes one place the two
+                                         # paths could differ
+                    generator=generator,  # advanced across the list, never re-created
+                    num_inference_steps=self.num_inference_steps,
+                    output_type=output_type,
+                ).images
+            yield index, outputs[0]
+
+    def _capture_seed(
+        self, pipeline: Any, prompts: List[str], seed: int, device: str,
+    ) -> Iterator[Tuple[int, np.ndarray]]:
+        """Every ``z_0`` for one seed, in prompt order, as a ``(4, 64, 64)`` float16 array."""
+        import torch
+        for index, latent in self._run_seed(pipeline, prompts, seed, device, "latent"):
+            z0: np.ndarray = latent.detach().to(torch.float16).cpu().numpy()
+            assert z0.ndim == 3 and z0.shape[0] == 4, f"unexpected latent shape {z0.shape}"
+            yield index, z0
+
+    def _generate_seed(
+        self, pipeline: Any, prompts: List[str], seed: int, device: str,
+    ) -> Iterator[Tuple[int, np.ndarray]]:
+        """Every decoded image for one seed, in prompt order, as a float array in ``[0, 1]``."""
+        for index, image in self._run_seed(pipeline, prompts, seed, device, "pil"):
+            yield index, np.asarray(image, dtype=np.float64) / 255.0
+
+    def baseline_image_path(self, prompt: str, seed: int) -> str:
+        """The baseline image the benchmark already generated for this (prompt, seed)."""
+        return os.path.join(
+            self.base_folder, 'datasets', f'generated_{self.task}_baseline',
+            f'off_{seed}_{prompt}.png',
+        )
+
+    def _read_baseline_image(self, prompt: str, seed: int) -> np.ndarray:
+        from PIL import Image
+        path = self.baseline_image_path(prompt, seed)
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"baseline image not found: {path}. It is the reference every capture is checked "
+                f"against, so the capture cannot proceed without it."
+            )
+        return np.asarray(Image.open(path).convert('RGB'), dtype=np.float64) / 255.0
+
+    def _verify_against_baseline(
+        self, pipeline: Any, z0: np.ndarray, prompt: str, seed: int, device: str,
+    ) -> float:
+        """Decode ``z_0`` and compare it with the baseline PNG the benchmark already generated.
+
+        Returns the mean absolute difference over ``[0, 1]`` RGB and raises above
+        :data:`BASELINE_TOLERANCE`. This is the whole justification for capturing the way the
+        canonical generation does: the correct answer for every capture is already in the
+        repository, so a wrong generator state -- from a changed prompt order, a different step
+        count, a driver change -- cannot survive a single iteration. One decode (~0.2 s) against a
+        ~15 s denoise, so it runs on every capture rather than on a sample.
+        """
+        decoded = self._decode_latent(pipeline, z0, device)
+        difference = float(np.mean(np.abs(decoded - self._read_baseline_image(prompt, seed))))
+        if difference >= BASELINE_TOLERANCE:
+            raise ValueError(
+                f"the captured latent for prompt {prompt!r} at seed {seed} decodes to an image "
+                f"that differs from {self.baseline_image_path(prompt, seed)} by {difference} "
+                f"(tolerance {BASELINE_TOLERANCE}). The capture is not reproducing the "
+                f"benchmark's own generation; nothing downstream would be comparable with it."
+            )
+        return difference
 
     def _set_determinism(self, enabled: bool) -> None:
         """The determinism regime of ``generate_dataset``, applied identically here."""
@@ -336,40 +507,113 @@ class UnetLatentSimilarity(BaseModel):
         else:
             torch.use_deterministic_algorithms(False)
 
-    def capture(self, device: str, checkpoint_every: int = 5) -> None:
+    def _complete_seeds(
+        self, entities: Dict[str, Dict[str, Any]], entity_prompts: List[Tuple[str, str]],
+    ) -> List[int]:
+        """The seeds a checkpoint holds in full, which must be a prefix of :attr:`seeds`.
+
+        :meth:`capture` writes its checkpoint only at a seed boundary, so a well-formed
+        checkpoint holds the first *n* seeds for every entity and nothing else. Anything else --
+        a seed present for some entities only, or a later seed present while an earlier one is
+        not -- is a file this method did not write, and it raises rather than guessing which
+        latents are trustworthy.
+        """
+        names = [name for name, _ in entity_prompts]
+        complete: List[int] = []
+        for index, seed in enumerate(self.seeds):
+            captured = [
+                name for name in names
+                if str(seed) in entities.get(name, {}).get('latents', {})
+            ]
+            if len(captured) == len(names):
+                if len(complete) != index:
+                    raise ValueError(
+                        f"the checkpoint holds seed {seed} but not every seed before it "
+                        f"({self.seeds[:index]}); capture() fills the seeds in order, so this "
+                        f"file was not written by it. Delete it and recapture."
+                    )
+                complete.append(seed)
+            elif captured:
+                raise ValueError(
+                    f"the checkpoint holds seed {seed} for {len(captured)} of {len(names)} "
+                    f"entities. capture() writes its checkpoint only at a seed boundary, so a "
+                    f"half-captured seed means this file was not written by it. Delete it and "
+                    f"recapture."
+                )
+        return complete
+
+    def capture(self, device: str) -> None:
         """Capture ``z_0`` for every (entity, seed) and write the cache.
 
-        Resumes from the partial checkpoint, skipping entities already present.
+        Iterates seed-major, prompt-minor, exactly as ``generate_dataset`` does, and verifies
+        every latent against its stored baseline image before storing it.
+
+        **Resumption is at seed granularity, and deliberately no finer.** Restoring the generator
+        to the state it had part-way through a prompt list means either replaying its draws or
+        serialising its internal state -- delicate seed code, which is the class of code the
+        earlier seed incidents in this project came from. A seed is a quarter of the run
+        (~25 minutes), the whole run is ~1.7 hours, and the standing instruction is that GPU cost
+        matters far less than the mistake being unrepresentable. So a seed either completes and is
+        checkpointed, or it is captured again from its first prompt: there is no fast-forward to
+        get wrong, and no state to serialise.
         """
         entity_prompts = self.entity_prompts()
+        prompts = [prompt for _, prompt in entity_prompts]
         entities: Dict[str, Dict[str, Any]] = {}
+        verification: Dict[str, Any] = {
+            'n_checked': 0, 'max_mean_abs_difference': 0.0, 'tolerance': BASELINE_TOLERANCE,
+        }
+
         if os.path.exists(self.cache_path_partial()):
             metadata, cached = self._read_cache(self.cache_path_partial())
             self._assert_resumable(metadata, cached, entity_prompts)
             entities = cached
+            verification = dict(metadata['baseline_verification'])
 
-        remaining = [(name, prompt) for name, prompt in entity_prompts if name not in entities]
+        complete = self._complete_seeds(entities, entity_prompts)
+        remaining = [seed for seed in self.seeds if seed not in complete]
         if remaining:
+            # Every capture is checked against a baseline image, so a missing one is fatal. Check
+            # all of them here, for seconds, rather than discovering it 20 minutes into the pass.
+            missing = [
+                self.baseline_image_path(prompt, seed)
+                for seed in remaining for _, prompt in entity_prompts
+                if not os.path.exists(self.baseline_image_path(prompt, seed))
+            ]
+            if missing:
+                raise FileNotFoundError(
+                    f"{len(missing)} of the {len(remaining) * len(entity_prompts)} baseline images "
+                    f"this capture must check itself against are missing (first: {missing[:3]}). "
+                    f"Generate the task's baseline dataset first; capturing latents that cannot be "
+                    f"verified is exactly what this scheme exists to avoid."
+                )
             pipeline = self._load_pipeline(device)
             self._set_determinism(True)
             try:
-                for index, (name, prompt) in enumerate(remaining, start=1):
-                    entities[name] = {
-                        'name': name,
-                        'prompt': prompt,
-                        'latents': {
-                            str(seed): self._capture_one(pipeline, prompt, seed, device)
-                            for seed in self.seeds
-                        },
-                    }
-                    if index % checkpoint_every == 0:
-                        self._write_cache(
-                            self.cache_path_partial(), self._in_metadata_order(entities, entity_prompts),
+                for seed in remaining:
+                    for index, z0 in self._capture_seed(pipeline, prompts, seed, device):
+                        name, prompt = entity_prompts[index]
+                        difference = self._verify_against_baseline(
+                            pipeline, z0, prompt, seed, device,
                         )
+                        verification['n_checked'] += 1
+                        verification['max_mean_abs_difference'] = max(
+                            verification['max_mean_abs_difference'], difference,
+                        )
+                        entities.setdefault(name, {'name': name, 'prompt': prompt, 'latents': {}})
+                        entities[name]['latents'][str(seed)] = z0
+                    self._write_cache(
+                        self.cache_path_partial(),
+                        self._in_metadata_order(entities, entity_prompts),
+                        prompts, verification,
+                    )
             finally:
                 self._set_determinism(False)
 
-        self._write_cache(self.cache_path(), self._in_metadata_order(entities, entity_prompts))
+        self._write_cache(
+            self.cache_path(), self._in_metadata_order(entities, entity_prompts),
+            prompts, verification,
+        )
         if os.path.exists(self.cache_path_partial()):
             os.remove(self.cache_path_partial())
 
@@ -383,120 +627,158 @@ class UnetLatentSimilarity(BaseModel):
     def validate_capture(self, device: str, output_dir: str) -> Dict[str, float]:
         """The correctness gate for the capture, run before any bulk pass (GPU required).
 
-        Ordered cheapest-first, because each check protects the next: bit-reproducibility,
-        then equivalence with the canonical baseline image for the entity whose generator
-        state coincides with the canonical loop's, then equivalence of the *reloaded* latent
-        after decoding, then sensitivity to seed and prompt, then throughput.
+        It covers the first :data:`VALIDATION_ENTITIES` entities in prompt order across **all**
+        seeds, rather than the first entity alone. That is the point of the gate: with one
+        generator advanced across the prompt list, an entity *after* the first is exactly what
+        distinguishes a correctly advancing generator from one re-created per prompt, so "entity 2
+        disagrees with its baseline image while entity 1 agrees" is the specific signature to
+        catch. The checks are ordered cheapest-first, because each protects the next.
 
-        Returns the measured differences it asserts on; also saves the images it compares to
-        ``output_dir`` so they can be looked at.
+        Returns the measured differences it asserts on, and saves every image it compared to
+        ``output_dir`` so a human can look at them. The measurements are written to disk even when
+        a check fails, so a failure leaves the numbers behind rather than only a traceback.
         """
         import time
         from PIL import Image
 
         os.makedirs(output_dir, exist_ok=True)
-        entity_prompts = self.entity_prompts()
-        first_name, first_prompt = entity_prompts[0]
-        other_prompt = entity_prompts[1][1]
+        all_entity_prompts = self.entity_prompts()
+        entity_prompts = all_entity_prompts[:VALIDATION_ENTITIES]
+        prompts = [prompt for _, prompt in entity_prompts]
+        first_seed = self.seeds[0]
         measurements: Dict[str, float] = {}
 
         pipeline = self._load_pipeline(device)
         self._set_determinism(True)
         try:
-            # 1. Determinism AND order-independence: the same (entity, seed) captured twice, with
-            # a different capture in between, must be bit-identical. The intervening call is the
-            # point of the check -- back-to-back repetition would pass even if the noise depended
-            # on how many generations preceded it, and order-independence is exactly the property
-            # that makes an entity's latent comparable with every other entity's and the capture
-            # safe to resume.
-            first_seed = self.seeds[0]
-            z_a = self._capture_one(pipeline, first_prompt, first_seed, device)
-            self._capture_one(pipeline, other_prompt, self.seeds[-1], device)
-            z_b = self._capture_one(pipeline, first_prompt, first_seed, device)
-            measurements['determinism_max_abs_difference'] = float(np.max(np.abs(z_a - z_b)))
-            assert np.array_equal(z_a, z_b), (
-                "the capture is not reproducible across an intervening generation, so it depends "
-                "on call order: entities are not comparable and a resumed run would differ from "
-                "an uninterrupted one. Max abs difference "
-                f"{measurements['determinism_max_abs_difference']}"
+            # 1. Determinism: one seed's pass, replayed from its first prompt, must come back
+            # bit-identical. Replaying a seed's pass is also exactly how an interrupted capture
+            # resumes (capture() checkpoints at seed boundaries), so this is the resume check too.
+            started = time.time()
+            pass_a = dict(self._capture_seed(pipeline, prompts, first_seed, device))
+            measurements['seconds_per_capture'] = float((time.time() - started) / len(prompts))
+            pass_b = dict(self._capture_seed(pipeline, prompts, first_seed, device))
+            measurements['determinism_max_abs_difference'] = max(
+                float(np.max(np.abs(pass_a[index].astype(np.float64)
+                                    - pass_b[index].astype(np.float64))))
+                for index in pass_a
+            )
+            assert all(np.array_equal(pass_a[i], pass_b[i]) for i in pass_a), (
+                "replaying a seed's pass does not reproduce it, so the capture is not "
+                "deterministic and a resumed run would differ from an uninterrupted one. Max abs "
+                f"difference {measurements['determinism_max_abs_difference']}"
             )
 
-            # 2. Canonical-image equivalence for the first entity in prompt order, all seeds.
-            baseline_dir = os.path.join(
-                self.base_folder, 'datasets', f'generated_{self.task}_baseline',
-            )
+            # 2. Baseline agreement -- the production check, on every entity and every seed. This
+            # is the check the whole capture scheme exists to make possible.
+            captured: Dict[int, Dict[int, np.ndarray]] = {first_seed: pass_a}
+            for seed in self.seeds[1:]:
+                captured[seed] = dict(self._capture_seed(pipeline, prompts, seed, device))
+            started = time.time()
+            worst = 0.0
             for seed in self.seeds:
-                baseline_path = os.path.join(baseline_dir, f'off_{seed}_{first_prompt}.png')
-                if not os.path.exists(baseline_path):
-                    raise FileNotFoundError(
-                        f"canonical baseline image not found: {baseline_path}. It is the only "
-                        f"reference this gate can compare against."
+                for index, (name, prompt) in enumerate(entity_prompts):
+                    difference = self._verify_against_baseline(
+                        pipeline, captured[seed][index], prompt, seed, device,
                     )
-                canonical = np.asarray(
-                    Image.open(baseline_path).convert('RGB'), dtype=np.float64,
-                ) / 255.0
-                generated = self._generate_image(pipeline, first_prompt, seed, device)
-                difference = float(np.mean(np.abs(generated - canonical)))
-                measurements[f'canonical_image_mean_abs_difference_seed_{seed}'] = difference
-                Image.fromarray((generated * 255).round().astype(np.uint8)).save(
-                    os.path.join(output_dir, f'regenerated_{seed}_{first_name}.png'),
-                )
-                assert difference < 1 / 255, (
-                    f"regenerated image for seed {seed} differs from the canonical baseline by "
-                    f"{difference} (tolerance {1 / 255})"
-                )
+                    measurements[f'baseline_mean_abs_difference_seed_{seed}_entity_{index}'] = (
+                        difference
+                    )
+                    worst = max(worst, difference)
+            measurements['baseline_max_mean_abs_difference'] = worst
+            measurements['seconds_per_verification'] = float(
+                (time.time() - started) / (len(self.seeds) * len(prompts)),
+            )
 
-            # 3. Latent-image equivalence, on the RELOADED value (so this tests serialisation).
+            # 3. The cache format itself: the RELOADED latent must be bit-identical and must still
+            # decode to the baseline image. The round-trip file is deleted afterwards -- a stray
+            # cache-shaped document beside the report is exactly what the previous capture left
+            # behind and had to be hunted down before it could be mistaken for the real cache.
             round_trip_path = os.path.join(output_dir, 'validate_capture_roundtrip.json')
-            self._write_cache(
-                round_trip_path,
-                {first_name: {'name': first_name, 'prompt': first_prompt,
-                              'latents': {str(seed): z_a for seed in self.seeds}}},
+            try:
+                self._write_cache(
+                    round_trip_path,
+                    {
+                        name: {
+                            'name': name, 'prompt': prompt,
+                            'latents': {str(first_seed): pass_a[index]},
+                        }
+                        for index, (name, prompt) in enumerate(entity_prompts)
+                    },
+                    prompts,
+                    {'n_checked': 0, 'max_mean_abs_difference': 0.0,
+                     'tolerance': BASELINE_TOLERANCE},
+                )
+                _, reloaded = self._read_cache(round_trip_path)
+            finally:
+                if os.path.exists(round_trip_path):
+                    os.remove(round_trip_path)
+            measurements['round_trip_max_abs_difference'] = max(
+                float(np.max(np.abs(
+                    reloaded[name]['latents'][str(first_seed)].astype(np.float64)
+                    - pass_a[index].astype(np.float64),
+                )))
+                for index, (name, _) in enumerate(entity_prompts)
             )
-            _, reloaded = self._read_cache(round_trip_path)
-            z_reloaded = reloaded[first_name]['latents'][str(first_seed)]
-            measurements['round_trip_max_abs_difference'] = float(np.max(np.abs(z_reloaded - z_a)))
-            assert np.array_equal(z_reloaded, z_a), "the JSON round trip changed the latent"
+            assert all(
+                np.array_equal(reloaded[name]['latents'][str(first_seed)], pass_a[index])
+                for index, (name, _) in enumerate(entity_prompts)
+            ), "the JSON round trip changed a latent"
+            measurements['reloaded_baseline_mean_abs_difference'] = self._verify_against_baseline(
+                pipeline, reloaded[entity_prompts[0][0]]['latents'][str(first_seed)],
+                entity_prompts[0][1], first_seed, device,
+            )
 
-            decoded = self._decode_latent(pipeline, z_reloaded, device)
-            reference = self._generate_image(pipeline, first_prompt, first_seed, device)
-            measurements['decoded_latent_mean_abs_difference'] = float(
-                np.mean(np.abs(decoded - reference)),
-            )
-            Image.fromarray((decoded * 255).round().astype(np.uint8)).save(
-                os.path.join(output_dir, f'decoded_latent_{first_seed}_{first_name}.png'),
-            )
-            assert measurements['decoded_latent_mean_abs_difference'] < 1 / 255, (
-                "decoding the reloaded latent does not reproduce the image generated from the "
-                f"same call: mean abs difference {measurements['decoded_latent_mean_abs_difference']}"
-            )
+            # 4. Skipping the decode does not change the stream: run the same three prompts with
+            # the pipeline's own image output and compare those images with the baselines. If
+            # output_type="latent" perturbed the generator, this would agree and check 2 would not
+            # -- or the other way round -- so the two together pin the capture to the canonical
+            # generation rather than merely to itself.
+            for index, image in self._generate_seed(pipeline, prompts, first_seed, device):
+                name, prompt = entity_prompts[index]
+                difference = float(
+                    np.mean(np.abs(image - self._read_baseline_image(prompt, first_seed))),
+                )
+                measurements[f'image_path_mean_abs_difference_entity_{index}'] = difference
+                Image.fromarray((image * 255).round().astype(np.uint8)).save(
+                    os.path.join(output_dir, f'image_path_seed{first_seed}_entity{index}_{name}.png'),
+                )
+                assert difference < BASELINE_TOLERANCE, (
+                    f"the pipeline's own image output for entity {index} ({name!r}) at seed "
+                    f"{first_seed} differs from its baseline by {difference} "
+                    f"(tolerance {BASELINE_TOLERANCE})"
+                )
 
-            # 4. Sensitivity: a different seed and a different prompt must both change z_0.
-            z_other_seed = self._capture_one(pipeline, first_prompt, self.seeds[1], device)
-            z_other_prompt = self._capture_one(pipeline, other_prompt, first_seed, device)
-            measurements['other_seed_mean_abs_difference'] = float(
-                np.mean(np.abs(z_other_seed.astype(np.float64) - z_a.astype(np.float64))),
-            )
-            measurements['other_prompt_mean_abs_difference'] = float(
-                np.mean(np.abs(z_other_prompt.astype(np.float64) - z_a.astype(np.float64))),
-            )
+            # 5. Sensitivity, from the passes already captured: a different seed and a different
+            # prompt must both change z_0, or the generator or the conditioning is being ignored.
+            measurements['other_seed_mean_abs_difference'] = float(np.mean(np.abs(
+                captured[self.seeds[1]][0].astype(np.float64) - pass_a[0].astype(np.float64),
+            )))
+            measurements['other_prompt_mean_abs_difference'] = float(np.mean(np.abs(
+                pass_a[1].astype(np.float64) - pass_a[0].astype(np.float64),
+            )))
             assert measurements['other_seed_mean_abs_difference'] > 1e-3, "the seed is ignored"
             assert measurements['other_prompt_mean_abs_difference'] > 1e-3, (
                 "the prompt conditioning is ignored"
             )
 
-            # 5. Throughput, so the bulk budget is measured rather than assumed.
-            started = time.time()
-            self._capture_one(pipeline, first_prompt, first_seed, device)
-            measurements['seconds_per_capture'] = float(time.time() - started)
+            # 6. The bulk budget, re-derived from what was just measured rather than estimated.
             measurements['estimated_hours_per_task'] = float(
-                measurements['seconds_per_capture'] * len(entity_prompts) * len(self.seeds) / 3600,
+                (measurements['seconds_per_capture'] + measurements['seconds_per_verification'])
+                * len(all_entity_prompts) * len(self.seeds) / 3600,
             )
+
+            # Every decoded latent, saved for viewing.
+            for seed in self.seeds:
+                for index, (name, _) in enumerate(entity_prompts):
+                    decoded = self._decode_latent(pipeline, captured[seed][index], device)
+                    Image.fromarray((decoded * 255).round().astype(np.uint8)).save(
+                        os.path.join(output_dir, f'decoded_seed{seed}_entity{index}_{name}.png'),
+                    )
         finally:
             self._set_determinism(False)
-
-        with open(os.path.join(output_dir, 'validate_capture.json'), 'w', encoding='utf-8') as f:
-            json.dump(measurements, f, indent=2)
+            with open(os.path.join(output_dir, 'validate_capture.json'), 'w', encoding='utf-8') as f:
+                json.dump(measurements, f, indent=2)
         return measurements
 
     def _decode_latent(self, pipeline: Any, latent: np.ndarray, device: str) -> np.ndarray:
@@ -522,6 +804,7 @@ class UnetLatentSimilarity(BaseModel):
             )
         metadata, entities = self._read_cache(self.cache_path())
         self._assert_metadata_matches(metadata, self.cache_path())
+        self._assert_baseline_verified(metadata, entities, self.cache_path())
         missing = {
             name: [str(s) for s in self.seeds if str(s) not in entity['latents']]
             for name, entity in entities.items()

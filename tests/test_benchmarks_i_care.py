@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 import matplotlib
@@ -1875,18 +1875,38 @@ def _write_unet_latent_cache(
     task: str = 'breeds',
     num_inference_steps: int = 50,
     allow_nan: bool = False,
+    seeding_scheme: Optional[str] = None,
+    prompts_ordered: Optional[List[str]] = None,
+    n_checked: Optional[int] = None,
+    max_mean_abs_difference: float = 0.0,
 ) -> None:
     """Write a cache file directly, so a test can produce contents the class would refuse.
 
     ``entities`` items are ``{'name': ..., 'prompt': ..., 'latents': {seed: np.ndarray}}``.
+    The defaults describe a well-formed cache: the canonical seeding scheme, the prompt list in
+    the order the entities are given, and a baseline verification covering every latent. Each of
+    those is overridable, because a test that a malformed cache is refused needs to write one.
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    latent_counts = [len(entity['latents']) for entity in entities]
     payload = {
         'metadata': {
             'task': task, 'model': 'sd1.4', 'model_name': 'CompVis/stable-diffusion-v1-4',
             'seeds': list(seeds), 'num_inference_steps': num_inference_steps,
             'batch_size': 1, 'dtype': 'float16', 'captured_at': '2026-08-06T00:00:00+00:00',
             'aggregation': 'mean over seeds, flatten C order, L2-normalise',
+            'seeding_scheme': (
+                _sim_mod.CANONICAL_SEEDING_SCHEME if seeding_scheme is None else seeding_scheme
+            ),
+            'prompts_ordered': (
+                [entity['prompt'] for entity in entities]
+                if prompts_ordered is None else list(prompts_ordered)
+            ),
+            'baseline_verification': {
+                'n_checked': sum(latent_counts) if n_checked is None else n_checked,
+                'max_mean_abs_difference': max_mean_abs_difference,
+                'tolerance': 1.0 / 255.0,
+            },
         },
         'entities': [
             {
@@ -2081,6 +2101,8 @@ class TestUnetLatentSimilarity:
                         for seed in latents.seeds
                     },
                 }},
+                ['An image of a basenji dog'],
+                {'n_checked': 4, 'max_mean_abs_difference': 0.0, 'tolerance': 1.0 / 255.0},
             )
 
     def test_json_round_trip_is_bit_identical(self, tmp_path: Any) -> None:
@@ -2099,11 +2121,19 @@ class TestUnetLatentSimilarity:
             }
             for name in ['zulu', 'alpha', 'mike']
         }
-        latents._write_cache(latents.cache_path(), original)
+        prompts = [entity['prompt'] for entity in original.values()]
+        latents._write_cache(
+            latents.cache_path(), original, prompts,
+            {'n_checked': 12, 'max_mean_abs_difference': 0.0, 'tolerance': 1.0 / 255.0},
+        )
         metadata, reloaded = latents._read_cache(latents.cache_path())
 
         assert list(reloaded.keys()) == ['zulu', 'alpha', 'mike']
         assert metadata['seeds'] == [42, 43, 44, 45]
+        assert metadata['seeding_scheme'] == _sim_mod.CANONICAL_SEEDING_SCHEME
+        assert metadata['prompts_ordered'] == prompts
+        assert metadata['latent_shape'] == [4, 2, 3]
+        assert metadata['baseline_verification']['n_checked'] == 12
         for name, entity in original.items():
             assert reloaded[name]['prompt'] == entity['prompt']
             for seed, array in entity['latents'].items():
@@ -2205,6 +2235,7 @@ class TestUnetLatentSimilarity:
     def test_resume_with_a_mismatched_prompt_raises(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The recorded prompt list agrees, but the entity's own recorded prompt does not."""
         monkeypatch.setattr(
             _rt_mod.MetadataFiltered, 'compute', lambda self: [{'name': 'basenji dog'}]
         )
@@ -2218,9 +2249,169 @@ class TestUnetLatentSimilarity:
                 },
             }],
             seeds=[42, 43, 44, 45],
+            prompts_ordered=['An image of a basenji dog'],
         )
-        with pytest.raises(ValueError, match='prompt'):
+        with pytest.raises(ValueError, match='used prompt'):
             latents.capture(device='cpu')
+
+    def test_loading_a_cache_from_another_seeding_scheme_raises(self, tmp_path: Any) -> None:
+        """The superseded scheme captured every entity under the *first* noise draw of its seed
+        rather than the k-th, so its tensors are different data under the same filename -- and it
+        is the one cache most likely to still be lying around on a machine."""
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        _write_unet_latent_cache(
+            latents.cache_path(),
+            [{
+                'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
+                'latents': {
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [42, 43, 44, 45]
+                },
+            }],
+            seeds=[42, 43, 44, 45],
+            seeding_scheme='a fresh generator per (entity, seed)',
+        )
+        with pytest.raises(ValueError, match='seeding_scheme'):
+            latents.load()
+
+    @pytest.mark.parametrize('n_checked', [0, 3, None])
+    def test_loading_a_cache_without_a_complete_baseline_verification_raises(
+        self, tmp_path: Any, n_checked: Optional[int],
+    ) -> None:
+        """A cache must record that *every* one of its latents was confirmed against the baseline
+        image the benchmark already generated -- one entity x four seeds means four, and a cache
+        with no such record at all (``None``) is refused as well."""
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        _write_unet_latent_cache(
+            latents.cache_path(),
+            [{
+                'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
+                'latents': {
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [42, 43, 44, 45]
+                },
+            }],
+            seeds=[42, 43, 44, 45],
+            n_checked=-1 if n_checked is None else n_checked,
+        )
+        if n_checked is None:
+            with open(latents.cache_path(), 'r', encoding='utf-8') as handle:
+                payload = json.load(handle)
+            del payload['metadata']['baseline_verification']
+            with open(latents.cache_path(), 'w', encoding='utf-8') as handle:
+                json.dump(payload, handle)
+        with pytest.raises(ValueError, match='baseline_verification'):
+            latents.load()
+
+    def test_loading_a_cache_whose_baseline_difference_exceeds_the_tolerance_raises(
+        self, tmp_path: Any,
+    ) -> None:
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        _write_unet_latent_cache(
+            latents.cache_path(),
+            [{
+                'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
+                'latents': {
+                    seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in [42, 43, 44, 45]
+                },
+            }],
+            seeds=[42, 43, 44, 45],
+            max_mean_abs_difference=0.5,
+        )
+        with pytest.raises(ValueError, match='max_mean_abs_difference'):
+            latents.load()
+
+    def test_resume_with_a_permuted_prompt_list_raises(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every entity is present and every prompt is present -- only the order differs, which
+        under this capture scheme changes which noise draw each entity receives, and is therefore
+        a different capture wearing the same names."""
+        names = ['basenji dog', 'kuvasz dog']
+        monkeypatch.setattr(
+            _rt_mod.MetadataFiltered, 'compute', lambda self: [{'name': n} for n in names]
+        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        prompts = [f"An image of a {name}" for name in names]
+        _write_unet_latent_cache(
+            latents.cache_path_partial(),
+            [
+                {
+                    'name': name, 'prompt': prompt,
+                    'latents': {
+                        seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0])
+                        for seed in [42, 43, 44, 45]
+                    },
+                }
+                for name, prompt in zip(names, prompts)
+            ],
+            seeds=[42, 43, 44, 45],
+            prompts_ordered=list(reversed(prompts)),
+        )
+        with pytest.raises(ValueError, match='reordering of'):
+            latents.capture(device='cpu')
+
+    def test_resume_with_a_half_captured_seed_raises(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The checkpoint is written only at a seed boundary, so a seed present for some entities
+        and not others is a file capture() did not write -- and guessing which of its latents to
+        trust is exactly the guess that must not be made."""
+        names = ['basenji dog', 'kuvasz dog']
+        monkeypatch.setattr(
+            _rt_mod.MetadataFiltered, 'compute', lambda self: [{'name': n} for n in names]
+        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        _write_unet_latent_cache(
+            latents.cache_path_partial(),
+            [
+                {
+                    'name': name, 'prompt': f"An image of a {name}",
+                    'latents': {
+                        seed: _single_channel_latent([1.0, 0.0, 0.0, 0.0])
+                        for seed in ([42, 43] if index == 0 else [42])
+                    },
+                }
+                for index, name in enumerate(names)
+            ],
+            seeds=[42, 43, 44, 45],
+            prompts_ordered=[f"An image of a {name}" for name in names],
+        )
+        with pytest.raises(ValueError, match='seed boundary'):
+            latents.capture(device='cpu')
+
+    def test_capture_refuses_to_start_without_the_baseline_images(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every capture is checked against a baseline image, so all of them are confirmed present
+        before the model is loaded -- seconds, instead of failing part-way through a 1.7-hour pass.
+        This test also runs in the torch-free tier precisely because it raises before that load."""
+        monkeypatch.setattr(
+            _rt_mod.MetadataFiltered, 'compute', lambda self: [{'name': 'basenji dog'}]
+        )
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        with pytest.raises(FileNotFoundError, match='baseline images'):
+            latents.capture(device='cpu')
+
+    def test_complete_seeds_is_the_resume_point_and_must_be_a_prefix(self, tmp_path: Any) -> None:
+        """The seeds a checkpoint holds in full are where a resumed capture starts; a later seed
+        present while an earlier one is missing is refused rather than resumed around."""
+        latents = _sim_mod.UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+        entity_prompts = [('basenji dog', 'An image of a basenji dog')]
+
+        def cache(seeds: List[int]) -> Dict[str, Dict[str, Any]]:
+            return {
+                'basenji dog': {
+                    'name': 'basenji dog', 'prompt': 'An image of a basenji dog',
+                    'latents': {
+                        str(seed): _single_channel_latent([1.0, 0.0, 0.0, 0.0]) for seed in seeds
+                    },
+                },
+            }
+
+        assert latents._complete_seeds({}, entity_prompts) == []
+        assert latents._complete_seeds(cache([42, 43]), entity_prompts) == [42, 43]
+        assert latents._complete_seeds(cache([42, 43, 44, 45]), entity_prompts) == [42, 43, 44, 45]
+        with pytest.raises(ValueError, match='not every seed before it'):
+            latents._complete_seeds(cache([42, 44]), entity_prompts)
 
     def test_resume_finalises_a_complete_partial_without_loading_a_pipeline(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
