@@ -1,0 +1,31 @@
+# Minimal requirements for Stage 1 (metadata + classifier sanity check)
+# Install inside your Python 3.10/3.11 virtual environment:
+#   python -m pip install -r requirements-stage1.txt
+
+# Core ML stack (pick the appropriate wheel for CUDA or CPU on PyTorch site)
+torch==2.8.0
+torchvision==0.15.2
+
+# Backbone & model helpers
+timm>=0.9.2
+
+# Image processing and numerical libs
+Pillow>=9.0.0
+numpy>=1.23.0
+matplotlib>=3.6.0
+
+# Evaluation / utilities
+scikit-learn>=1.2.0
+pydantic>=1.10.12
+
+# Small utilities
+tqdm>=4.64.0
+
+# Optional, only if you will download from Google Drive via scripts
+requests>=2.28.0
+gdown>=4.6.4
+
+# Notes:
+# - For GPU support, install the appropriate torch+torchvision wheel from https://pytorch.org
+# - The project also includes a full dependency list in pyproject.toml; this file is the minimal
+#   set needed to run the Stage 1 metadata + classifier sanity-check steps.
