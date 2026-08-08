@@ -179,6 +179,25 @@ class TestResolveRtNames:
         assert "interferencevisualsummary" in ALL_RT_NAMES
         assert "unlearningvisualsummary" not in ALL_RT_NAMES
 
+    def test_exact_name_does_not_also_select_the_longer_rt_it_prefixes(self) -> None:
+        """MetricSimilarityAlignment must not drag MetricSimilarityAlignmentMulti in.
+
+        The two share a prefix, so a pure substring match runs the joint-regression RT
+        with the single-metric feature list meant for the pairwise one.
+        """
+        assert resolve_rt_names(["MetricSimilarityAlignment"]) == [
+            "metricsimilarityalignment"
+        ]
+        assert resolve_rt_names(["MetricSimilarityAlignmentMulti"]) == [
+            "metricsimilarityalignmentmulti"
+        ]
+
+    def test_substring_shorthand_still_matches_several(self) -> None:
+        assert resolve_rt_names(["SimilarityAlignment"]) == [
+            "metricsimilarityalignment",
+            "metricsimilarityalignmentmulti",
+        ]
+
     def test_unmatched_name_returns_empty_and_warns(self, caplog: Any) -> None:
         with caplog.at_level(logging.WARNING):
             result = resolve_rt_names(["NotARealRT"])

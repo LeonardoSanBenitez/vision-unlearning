@@ -1111,14 +1111,24 @@ def _resolve_ledger_path(ledger_path: str, base_folder: str) -> str:
 
 
 def resolve_rt_names(requested: List[str]) -> List[str]:
-    """Return normalised RT names that match the requested list."""
+    """Return normalised RT names that match the requested list.
+
+    A name that matches a registered RT exactly resolves to that RT alone. Substring
+    matching is the fallback, and it stays available for the shorthands it was written
+    for -- but it cannot be used to request one RT whose name is a prefix of another's,
+    and asking for MetricSimilarityAlignment must not also run
+    MetricSimilarityAlignmentMulti with whatever arguments were meant for the first.
+    """
     if len(requested) == 1 and _normalize(requested[0]) == "all":
         return list(ALL_RT_NAMES)
 
     matched: List[str] = []
     for req in requested:
         norm_req = _normalize(req)
-        hits = [n for n in ALL_RT_NAMES if norm_req in n]
+        hits = (
+            [norm_req] if norm_req in ALL_RT_NAMES
+            else [n for n in ALL_RT_NAMES if norm_req in n]
+        )
         if not hits:
             logger.warning(
                 "RT name '%s' did not match any known RT. "
