@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Union, Optional, Any, Dict, List, Literal
+from typing import Union, Optional, Any, Dict, List, Literal, ClassVar
 import tempfile
 import numpy as np
 from PIL import Image
@@ -285,6 +285,8 @@ class MetricImageClassifier(MetricImage):
     head_in_features: int = 1024
     _model: Optional[torch.nn.Module] = None
     _transform: Optional[transforms.Compose] = None
+    STYLE_ENTITIES: ClassVar[List[str]] = STYLE_ENTITIES
+    OBJECT_ENTITIES: ClassVar[List[str]] = OBJECT_ENTITIES
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         import timm
