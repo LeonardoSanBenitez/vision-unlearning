@@ -19,14 +19,17 @@ from vision_unlearning.metrics.image import MetricImageClassifier
 
 
 def _repo_root() -> Path:
+    print(">>> _repo_root")
     return Path(__file__).resolve().parents[3]
 
 
 def _assets_root() -> Path:
+    print(">>> _assets_root")
     return _repo_root() / "assets"
 
 
 def ensure_stage1_layout() -> None:
+    print(">>> ensure_stage1_layout")
     assets = _assets_root()
     for path in [
         assets / "datasets" / "reference",
@@ -37,6 +40,7 @@ def ensure_stage1_layout() -> None:
 
 
 def build_metadata(output_path: Optional[Path] = None) -> Path:
+    print(">>> build_metadata")
     ensure_stage1_layout()
     if output_path is None:
         output_path = _assets_root() / "metadata_filtered.json"
@@ -61,6 +65,7 @@ def build_metadata(output_path: Optional[Path] = None) -> Path:
 
 
 def _match_theme_and_object(filename: str) -> Optional[Tuple[str, str]]:
+    print(">>> _match_theme_and_object")
     stem = Path(filename).stem
     for theme in cfg.STYLE_ENTITIES:
         for object_class in cfg.OBJECT_ENTITIES:
@@ -76,7 +81,7 @@ def _save_confusion_matrix(
     output_path: Path,
 ) -> None:
     import sklearn.metrics as metrics
-
+    print(">>> _save_confusion_matrix")
     matrix = metrics.confusion_matrix(true_labels, predicted_labels, labels=labels)
     fig, ax = plt.subplots(figsize=(max(6, len(labels) * 0.8), max(6, len(labels) * 0.8)))
     im = ax.imshow(matrix, cmap="Blues")
@@ -101,7 +106,9 @@ def run_classifier_sanity_check(
     output_dir: Optional[Path] = None,
     device: str = "cpu",
 ) -> Dict[str, Path]:
+    print(">>> run_classifier_sanity_check")
     ensure_stage1_layout()
+
     if reference_dir is None:
         reference_dir = _assets_root() / "datasets" / "reference"
     if style_checkpoint is None:

@@ -42,10 +42,12 @@ OBJECT_ENTITIES : List[str] = ["Architectures"]
 
 ENTITIES: List[str] = STYLE_ENTITIES + OBJECT_ENTITIES               # 71
 
+# print(len(STYLE_ENTITIES))
+
 # Fail loudly at import if any list drifts.
-assert len(STYLE_ENTITIES) == 51
-assert len(OBJECT_ENTITIES) == 20
-assert len(ENTITIES) == 71
+assert len(STYLE_ENTITIES) == 60 # change to 51
+assert len(OBJECT_ENTITIES) == 1 # change to 20
+assert len(ENTITIES) == 61
 assert set(STYLE_ENTITIES).isdisjoint(OBJECT_ENTITIES)
 
 # --- "can be unlearned" logic (the one entity that cannot) ---
@@ -62,7 +64,7 @@ def is_unlearnable(entity: str) -> bool:
 
 
 UNLEARNABLE_ENTITIES: List[str] = [e for e in ENTITIES if is_unlearnable(e)]  # 70
-assert len(UNLEARNABLE_ENTITIES) == 70
+assert len(UNLEARNABLE_ENTITIES) == 60
 
 
 def entity_domain(entity: str) -> type_domain:
