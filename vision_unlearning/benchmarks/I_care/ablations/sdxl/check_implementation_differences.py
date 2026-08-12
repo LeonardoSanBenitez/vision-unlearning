@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import torch
 from pydantic import BaseModel
@@ -46,8 +46,10 @@ def claim_gradient_clipping_is_a_no_op() -> Dict[str, Any]:
     module = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
     for parameter in module.parameters():
         parameter.requires_grad_(False)
+    # Sequential.__getitem__ is typed as returning Module, which has no weight or bias.
+    first = cast(torch.nn.Linear, module[0])
     # Stand-in for the adapter parameters: the only trainable tensors.
-    trainable = list(module[0].parameters())
+    trainable = list(first.parameters())
     for parameter in trainable:
         parameter.requires_grad_(True)
 
@@ -58,14 +60,14 @@ def claim_gradient_clipping_is_a_no_op() -> Dict[str, Any]:
 
     # And the line in fade.py's training step: params_to_clip = self._lora_layers
     remaining = list(lora_layers)
-    module[0].weight.grad = torch.full_like(module[0].weight, 1000.0)
-    module[0].bias.grad = torch.full_like(module[0].bias, 1000.0)
+    first.weight.grad = torch.full_like(first.weight, 1000.0)
+    first.bias.grad = torch.full_like(first.bias, 1000.0)
     total_norm_reported = float(torch.nn.utils.clip_grad_norm_(remaining, max_norm=1.0))
-    largest_gradient_after_clipping = float(module[0].weight.grad.abs().max())
+    largest_gradient_after_clipping = float(first.weight.grad.abs().max())
 
     # The same clipping against a list, which is what the proof of concept does.
     total_norm_with_list = float(torch.nn.utils.clip_grad_norm_(trainable, max_norm=1.0))
-    largest_gradient_after_list_clipping = float(module[0].weight.grad.abs().max())
+    largest_gradient_after_list_clipping = float(first.weight.grad.abs().max())
 
     return {
         "claim": "gradient clipping over the exhausted filter clips nothing",
@@ -87,7 +89,11 @@ def claim_gradient_clipping_is_a_no_op() -> Dict[str, Any]:
 def claim_retain_set_is_sampled_not_iterated() -> Dict[str, Any]:
     """``next(iter(loader))`` in a loop returns first batches of fresh passes, never advances."""
     data = torch.arange(20).unsqueeze(1).float()
-    loader = torch.utils.data.DataLoader(data, batch_size=4, shuffle=True)
+    # A tensor is an indexable, sized object, so DataLoader accepts it directly; the annotation
+    # only tells mypy what the loader yields, since the Dataset protocol is what it expects.
+    loader: "torch.utils.data.DataLoader[torch.Tensor]" = torch.utils.data.DataLoader(
+        cast(Any, data), batch_size=4, shuffle=True,
+    )
 
     torch.manual_seed(0)
     fresh_iterator_batches: List[List[int]] = []
