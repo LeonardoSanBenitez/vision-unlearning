@@ -426,6 +426,12 @@ class UnetLatentSimilarity(BaseModel):
         downstream depends on prompts being unique.
         """
         import torch
+        # SEEDING SITE, PAIRED: the five lines below duplicate the seeded branch of
+        # vision_unlearning/utils/data_generation.py::generate_dataset deliberately, because a
+        # captured latent is only the latent behind a stored baseline image while the two agree
+        # exactly. The duplication is intentional and must move as a pair: if the corpus is ever
+        # regenerated under a different seeding convention, change both or the capture silently
+        # stops corresponding to the images. The matching comment is at the other site.
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)

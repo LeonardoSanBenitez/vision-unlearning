@@ -32,7 +32,10 @@ the local-cache / HuggingFace / compute-from-scratch chain automatically.
 ``--n-steps`` applies to ``act`` only.  ``unet_latent`` uses 50 denoising steps, the
 value the canonical image generation uses, and is not configurable here.
 
-``--upload`` uploads a freshly computed matrix to HuggingFace; ``--validate-capture``
+``--upload`` uploads a matrix that this run computed.  It is ``upload_if_recomputed``, so a
+matrix already present locally is read rather than recomputed and nothing is uploaded; to
+publish an existing matrix, move it aside first so the resolve has to recompute it (the
+matrix is a deterministic function of its source data, so this is safe).  ``--validate-capture``
 runs the ``unet_latent`` correctness gate instead of a bulk capture: determinism under
 replay, agreement with the baseline images for the first three entities across all four
 seeds, the cache round trip, agreement of the pipeline's own image output, sensitivity to

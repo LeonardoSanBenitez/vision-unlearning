@@ -109,6 +109,12 @@ def generate_dataset(
         try:
             for seed_idx, seed in enumerate(seeds):
                 # Seed all global RNG sources for full determinism.
+                # SEEDING SITE, PAIRED: these five lines and the generator below are duplicated
+                # deliberately in benchmarks/I_care/similarity.py::UnetLatentSimilarity._run_seed,
+                # which captures the final denoised latent of these very images and verifies each
+                # capture against the image written here. The two must move together: changing the
+                # seeding convention on this side alone leaves that capture computing latents for
+                # images that no longer exist. The matching comment is at the other site.
                 random.seed(seed)
                 np.random.seed(seed)
                 torch.manual_seed(seed)
