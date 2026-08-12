@@ -449,6 +449,133 @@ class TestLegacyMode(unittest.TestCase):
         self.assertEqual([r["file_name"] for r in meta], ["0.png", "1.png", "2.png"])
 
 
+class TestResolutionPassthrough(unittest.TestCase):
+    """height/width reach the pipeline when asked for, and are absent otherwise.
+
+    The absence case is the load-bearing one: every existing Stable Diffusion 1.4 artifact was
+    produced by a call that passed neither, so a default that silently started passing 512x512
+    would change the arguments of runs that are compared against those artifacts.
+    """
+
+    def _capture_pipeline_kwargs(self, **generate_kwargs: Any) -> List[Dict[str, Any]]:
+        captured: List[Dict[str, Any]] = []
+
+        def _fake_pipeline(prompts_batch: List[str], **kw: Any) -> Any:
+            captured.append(kw)
+            result = MagicMock()
+            result.images = [_make_stub_image() for _ in prompts_batch]
+            return result
+
+        pipeline_stub = MagicMock(side_effect=_fake_pipeline)
+        pipeline_stub.to = MagicMock(return_value=pipeline_stub)
+        _apit = MagicMock()
+        _apit.from_pretrained = MagicMock(return_value=pipeline_stub)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "AutoPipelineForText2Image", _apit):
+                with patch.object(data_generation, "torch", _make_torch_stub()):
+                    data_generation.generate_dataset(
+                        model_base_name="stub-model",
+                        lora_name=None,
+                        prompts=["An image of Alice"],
+                        output_path=tmp,
+                        **generate_kwargs,
+                    )
+        return captured
+
+    def test_absent_by_default_seeded(self) -> None:
+        captured = self._capture_pipeline_kwargs(seeds=[42])
+        self.assertEqual(len(captured), 1)
+        self.assertNotIn("height", captured[0])
+        self.assertNotIn("width", captured[0])
+
+    def test_absent_by_default_legacy(self) -> None:
+        captured = self._capture_pipeline_kwargs()
+        self.assertEqual(len(captured), 1)
+        self.assertNotIn("height", captured[0])
+        self.assertNotIn("width", captured[0])
+
+    def test_passed_through_when_given(self) -> None:
+        captured = self._capture_pipeline_kwargs(seeds=[42], height=512, width=512)
+        self.assertEqual(captured[0]["height"], 512)
+        self.assertEqual(captured[0]["width"], 512)
+
+    def test_one_without_the_other_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError) as ctx:
+                data_generation.generate_dataset(
+                    model_base_name="stub-model",
+                    lora_name=None,
+                    prompts=["An image of Alice"],
+                    output_path=tmp,
+                    seeds=[42],
+                    height=512,
+                )
+            self.assertIn("together", str(ctx.exception))
+
+
+class TestVariantPassthrough(unittest.TestCase):
+    """variant reaches from_pretrained when asked for, and is absent otherwise.
+
+    Absent is again the load-bearing case: every existing artifact was produced by a call that read
+    the full-precision weights and cast them, and a default of "fp16" would silently change which
+    weight files a Stable Diffusion 1.4 run reads.
+    """
+
+    def _capture_from_pretrained_kwargs(self, **generate_kwargs: Any) -> Dict[str, Any]:
+        captured: Dict[str, Any] = {}
+
+        def _fake_from_pretrained(model: str, **kw: Any) -> Any:
+            captured.update(kw)
+            pipeline_stub = _make_pipeline_stub()
+            return pipeline_stub
+
+        _apit = MagicMock()
+        _apit.from_pretrained = MagicMock(side_effect=_fake_from_pretrained)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "AutoPipelineForText2Image", _apit):
+                with patch.object(data_generation, "torch", _make_torch_stub()):
+                    data_generation.generate_dataset(
+                        model_base_name="stub-model",
+                        lora_name=None,
+                        prompts=["An image of Alice"],
+                        output_path=tmp,
+                        seeds=[42],
+                        **generate_kwargs,
+                    )
+        return captured
+
+    def test_absent_by_default(self) -> None:
+        captured = self._capture_from_pretrained_kwargs()
+        self.assertNotIn("variant", captured)
+
+    def test_passed_through_when_given(self) -> None:
+        captured = self._capture_from_pretrained_kwargs(variant="fp16")
+        self.assertEqual(captured["variant"], "fp16")
+
+    def test_forwarded_to_unlearn_lora(self) -> None:
+        """The adapter path builds its pipeline inside unlearn_lora, so variant must reach it too."""
+        captured: Dict[str, Any] = {}
+
+        def _fake_unlearn_lora(*args: Any, **kw: Any) -> Any:
+            captured.update(kw)
+            return None, None, _make_pipeline_stub()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "unlearn_lora", MagicMock(side_effect=_fake_unlearn_lora)):
+                with patch.object(data_generation, "torch", _make_torch_stub()):
+                    data_generation.generate_dataset(
+                        model_base_name="stub-model",
+                        lora_name="stub-adapter",
+                        prompts=["An image of Alice"],
+                        output_path=tmp,
+                        seeds=[42],
+                        variant="fp16",
+                    )
+        self.assertEqual(captured["variant"], "fp16")
+
+
 class TestGlobalRNGSeeding(unittest.TestCase):
     """Verify that torch/numpy/random are seeded at the start of each seed iteration."""
 

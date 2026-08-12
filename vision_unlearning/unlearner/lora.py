@@ -51,10 +51,17 @@ def unlearn_lora(
     requires_inversion: bool = True,
     return_original: bool = True,
     return_learned: bool = True,
+    variant: Optional[str] = None,
 ) -> Tuple[Optional[StableDiffusionPipeline], Optional[StableDiffusionPipeline], StableDiffusionPipeline]:
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
+
+    variant selects the weight files to read, e.g. "fp16". When None (the default) the argument is
+    not passed at all and the full-precision weights are read and then cast, which is what every
+    Stable Diffusion 1.x caller has always done. Stable Diffusion XL cannot be loaded that way on a
+    16 GB machine: its full-precision denoiser alone is 10.3 GB and the read fills system memory
+    before the cast can shrink it.
 
     Inspired by @inproceedings{zhang2023composing,
         title={Composing Parameter-Efficient Modules with Arithmetic Operations},
@@ -64,16 +71,18 @@ def unlearn_lora(
     }
     Source: https://github.com/hkust-nlp/PEM_composition/tree/main/exps/composition_for_unlearning
     '''
+    variant_kwargs: Dict[str, Any] = {} if variant is None else {"variant": variant}
+
     pipeline_original: Optional[StableDiffusionPipeline] = None
     if return_original:
-        pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+        pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None, **variant_kwargs).to(device)
 
     pipeline_learned: Optional[StableDiffusionPipeline] = None
     if return_learned:
-        pipeline_learned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+        pipeline_learned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None, **variant_kwargs).to(device)
         pipeline_learned.load_lora_weights(model_lora_id, weight_name=weight_name)  # type: ignore
 
-    pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+    pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None, **variant_kwargs).to(device)
     pipeline_unlearned.load_lora_weights(model_lora_id, weight_name=weight_name)
 
     # TODO: put inversion in function

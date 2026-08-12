@@ -1,6 +1,6 @@
 import os
 import random
-from typing import List, Dict, Optional, Union
+from typing import Any, List, Dict, Optional, Union
 import numpy as np
 import torch
 from diffusers import AutoPipelineForText2Image
@@ -19,6 +19,9 @@ def generate_dataset(
     lora_requires_inversion: bool = False,
     model_pipeline: Optional[AutoPipelineForText2Image] = None,
     seeds: Optional[List[int]] = None,
+    height: Optional[int] = None,
+    width: Optional[int] = None,
+    variant: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     '''
     Generate images for the given prompts and save them to output_path.
@@ -52,6 +55,16 @@ def generate_dataset(
     @param lora_requires_inversion: Passed to unlearn_lora if lora_name is set.
     @param model_pipeline: Pre-loaded pipeline (skips loading if provided).
     @param seeds: List of integer seeds.  When provided the generation loop is seeded.
+    @param height: Image height in pixels.  When None (the default) the argument is not
+        passed to the pipeline at all, so the pipeline's own default applies: 512 for
+        Stable Diffusion 1.x, 1024 for Stable Diffusion XL.  Both height and width must
+        be given together.
+    @param width: Image width in pixels.  See height.
+    @param variant: Weight variant to load, e.g. "fp16".  When None (the default) the argument
+        is not passed, so the checkpoint's full-precision weights are read and then cast to
+        float16.  That is fine for Stable Diffusion 1.x (~4 GB) and impossible for Stable
+        Diffusion XL on a 16 GB machine: its full-precision denoiser alone is 10.3 GB, and the
+        read fills system memory before the cast can shrink it.
     '''
     # --- parameter validation ---
     if seeds is not None and filenames is not None:
@@ -63,6 +76,17 @@ def generate_dataset(
                 f"(seed0_prompt0, seed0_prompt1, ..., seed1_prompt0, ...); "
                 f"got {len(filenames)}."
             )
+
+    if (height is None) != (width is None):
+        raise ValueError(
+            f"height and width must be given together or not at all; got height={height}, width={width}."
+        )
+
+    # Kept empty unless the caller asked for an explicit resolution, so that every call which does
+    # not pass one reaches the pipeline with exactly the arguments it did before this parameter existed.
+    resolution_kwargs: Dict[str, Any] = {} if height is None else {"height": height, "width": width}
+    # Same construction, same reason: a call that names no variant loads exactly what it always did.
+    variant_kwargs: Dict[str, Any] = {} if variant is None else {"variant": variant}
 
     if not os.path.exists(output_path):
         os.makedirs(output_path, exist_ok=True)
@@ -78,12 +102,14 @@ def generate_dataset(
             requires_inversion=lora_requires_inversion,
             return_original=False,
             return_learned=False,
+            variant=variant,
         )
     elif model_base_name:
         pipeline = AutoPipelineForText2Image.from_pretrained(
             model_base_name,
             torch_dtype=torch.float16,
             safety_checker=None,
+            **variant_kwargs,
         ).to(device)
     elif model_pipeline:
         pipeline = model_pipeline.to(device)  # type: ignore
@@ -128,6 +154,7 @@ def generate_dataset(
                     batch_outputs = pipeline(  # type: ignore
                         batch_prompts,
                         generator=generator,
+                        **resolution_kwargs,
                     ).images
 
                     for i, image in enumerate(batch_outputs):
@@ -157,7 +184,7 @@ def generate_dataset(
 
         for start in range(0, len(prompts), batch_size):
             batch_prompts = prompts[start:start + batch_size]
-            batch_outputs = pipeline(batch_prompts).images  # type: ignore
+            batch_outputs = pipeline(batch_prompts, **resolution_kwargs).images  # type: ignore
 
             for i, image in enumerate(batch_outputs):
                 idx = start + i
