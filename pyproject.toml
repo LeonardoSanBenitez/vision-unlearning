@@ -131,6 +131,9 @@ asyncio_default_fixture_loop_scope = "function"
 # u_care requires timm and prettytable which are not in the published dependencies.
 # Exclude it from test discovery; it is tested separately in its own environment.
 norecursedirs = ["u_care"]
+markers = [
+    "network: test cannot avoid a real network call, because a third-party dependency fetches something at call time. These tests are reported but are not a merge gate; see CONTRIBUTING.md section 6.",  # noqa: E501
+]
 
 
 [tool.mypy]

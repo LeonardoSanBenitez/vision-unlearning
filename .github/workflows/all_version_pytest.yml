@@ -55,13 +55,26 @@ jobs:
       - name: Install package (editable mode)
         run: poetry run pip install -e .
 
+      # The merge gate. Deterministic tests only: a test marked `network` depends on a
+      # third-party download at call time and can fail for reasons unrelated to the code
+      # under test.
       - name: Run tests with coverage
         run: |
           echo "------------ Pytest + Coverage on Python ${{ matrix.python-version }} -------------"
-          poetry run pytest --cov=vision_unlearning \
+          poetry run pytest -m "not network" --cov=vision_unlearning \
             --cov-report=xml:coverage-${{ matrix.python-version }}.xml \
             --cov-report=json:coverage-${{ matrix.python-version }}.json \
             --junitxml=reports/tests-results-${{ matrix.python-version }}.xml
+
+      # Reported, never blocking. A single red run here is a transient outage in someone
+      # else's release endpoint; a run of them across several days is a real defect and is
+      # what should be acted on.
+      - name: Run network-dependent tests (reported, not a gate)
+        continue-on-error: true
+        run: |
+          echo "--------- Network-dependent tests on Python ${{ matrix.python-version }} ---------"
+          poetry run pytest -m network \
+            --junitxml=reports/tests-results-network-${{ matrix.python-version }}.xml
 
       # Only create and push the badge on Python 3.10
       - name: Create Coverage Badge (only on Py3.10)
