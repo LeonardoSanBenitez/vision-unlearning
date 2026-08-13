@@ -26,14 +26,23 @@ Two deliberate choices, both of which change what this proves:
    difference between this script running and this script being killed. `unlearn_lora` is the first
    call after the save, so it is replaced with one that raises, and the exception is caught here.
 
-**Scope of the guarantee, and how it was established.** The step is forced onto the CPU, because on
-the GPU it is not reproducible: two runs of identical code on this machine produced different adapter
-hashes, with the same loss to six significant figures and the same file size -- kernel
-non-determinism in the low bits. `accelerate` chooses the device, not the trainer's `device` field, so
-the only reliable way to keep the step off the GPU is to hide the device before torch is imported,
-which this module does at the top. On the CPU in float32 at a fixed seed the comparison is a clean
-equality, and that too is checked rather than assumed: run this twice against unmodified code before
-trusting any hash it records.
+**Scope of the guarantee, and how it was established by measurement.** Byte equality is unobtainable
+on this machine, so `--allow-gpu` is the mode this check is actually used in and the hash is not the
+oracle. Five runs of identical, unmodified trainer code at seed 42 produced five different adapters
+and one forward loss: `step_loss_forget = 0.000885` on 5 of 5, `step_loss_retain` exactly 0 on 5 of 5.
+The forward pass is therefore fully reproducible from the seed, and only the backward and the
+optimizer differ, in the low bits -- ordinary ROCm non-determinism. The CPU, where bit-exactness
+would be achievable, is unreachable: the trainer makes six unconditional `torch.cuda` calls on its
+training path and dies before the first step with the device hidden. The device-hiding at the top of
+this module is kept because it works and is what makes that failure legible, not because the CPU run
+is available.
+
+**So the check is two comparisons, and the second one is `compare_adapters.py`, not this script:**
+the forward loss must still be `0.000885`, which every gross defect a refactor can introduce moves;
+and the adapter's maximum absolute difference from the pre-refactor adapters must stay at the
+measured noise floor of 6.17e-05 absolute (five pairs of identical runs, 102 of 256 tensors differing
+in every pair). A difference within that floor cannot be distinguished from the hardware's own
+jitter, which is a limitation of the machine and is recorded rather than hidden.
 
 '''
 import os
@@ -224,7 +233,7 @@ def main() -> None:
 
     print("")
     print(f"checkpoint      : {MODEL_ID}")
-    print(f"cuda available  : {torch.cuda.is_available()}  (False -- checked before training, not merely reported)")
+    print(f"cuda available  : {torch.cuda.is_available()}  (checked here before training, not merely reported)")
     print(f"adapter bytes   : {size_bytes}")
     print(f"actual   sha256 : {actual}")
     if args.expect is None:
