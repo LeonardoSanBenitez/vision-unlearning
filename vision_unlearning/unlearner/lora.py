@@ -5,7 +5,7 @@ import shutil
 import time
 from pathlib import Path
 import random
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Literal, Optional, Tuple, Dict, Any
 from pydantic import Field, field_validator
 from abc import abstractmethod
 from PIL import Image
@@ -15,14 +15,14 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torchvision import transforms
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
 from transformers import set_seed
 
 from datasets import load_dataset
 from huggingface_hub.repocard_data import EvalResult
 from huggingface_hub import create_repo, upload_folder
 import diffusers
-from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, StableDiffusionPipeline, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, StableDiffusionPipeline, StableDiffusionXLPipeline, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import cast_training_params
 from diffusers.utils import convert_state_dict_to_diffusers
@@ -239,6 +239,10 @@ class UnlearnerLora(Unlearner):
     _tokenizer: Any = None
     _text_encoder: Any = None
     _vae: Any = None
+    # The second tokenizer/text encoder exist only on Stable Diffusion XL checkpoints; see _load_models
+    _tokenizer_2: Any = None
+    _text_encoder_2: Any = None
+    _is_xl: bool = False
     _unet: Optional[diffusers.models.unets.unet_2d_condition.UNet2DConditionModel] = None
 
     _train_forget_dataloader: Optional[torch.utils.data.DataLoader] = None
@@ -311,6 +315,16 @@ class UnlearnerLora(Unlearner):
     def _hook_before_load_model(self):
         return None
 
+    def _lora_pipeline_class(self) -> Any:
+        '''
+        The pipeline class whose save_lora_weights writes an adapter the base model can load back.
+
+        The two classes serialize the same denoiser state dict but under the key prefix their own
+        loader expects, so saving a Stable Diffusion XL adapter through the Stable Diffusion class
+        produces a file that loads into nothing.
+        '''
+        return StableDiffusionXLPipeline if self._is_xl else StableDiffusionPipeline
+
     def _save_lora_layers(self):
         '''
         Side-effects: modifies self._unet in-place (casts to float32), saves two directories self._output_dir_super and self._output_dir_sub
@@ -319,7 +333,7 @@ class UnlearnerLora(Unlearner):
         self._unet = self._unet.to(torch.float32)
         unwrapped_unet = unwrap_model(self._unet, self._accelerator)
         unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
-        StableDiffusionPipeline.save_lora_weights(
+        self._lora_pipeline_class().save_lora_weights(
             save_directory=self.output_dir,
             unet_lora_layers=unet_lora_state_dict,
             safe_serialization=True,
@@ -356,7 +370,7 @@ class UnlearnerLora(Unlearner):
         os.makedirs(target_dir, exist_ok=True)
         unwrapped_unet = unwrap_model(self._unet, self._accelerator)
         unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
-        StableDiffusionPipeline.save_lora_weights(
+        self._lora_pipeline_class().save_lora_weights(
             save_directory=target_dir,
             unet_lora_layers=unet_lora_state_dict,
             safe_serialization=True,
@@ -376,6 +390,73 @@ class UnlearnerLora(Unlearner):
         if self.pretrained_vae_model_name_or_path is not None:
             return self._weight_dtype
         return torch.float32
+
+    def _load_models(self) -> None:
+        '''
+        Load the frozen components of the training stack, and decide which base-model family this
+        checkpoint belongs to.
+
+        The checkpoint is the switch, so the caller never selects a family: a Stable Diffusion XL
+        denoiser declares `addition_embed_type == "text_time"`, meaning it expects pooled text
+        embeddings and the micro-conditioning sizes on every forward call, and its repository
+        carries the second tokenizer and text encoder that produce them. Stable Diffusion 1.x
+        declares neither, and this method then performs exactly the five loads it always did.
+        '''
+        self._noise_scheduler = DDPMScheduler.from_pretrained(self.model_name_or_path, subfolder="scheduler")
+        self._tokenizer = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer")
+        self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder")
+        self._vae = AutoencoderKL.from_pretrained(
+            self.pretrained_vae_model_name_or_path or self.model_name_or_path,
+            subfolder=("vae" if self.pretrained_vae_model_name_or_path is None else None),
+        )
+        self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet")
+
+        self._is_xl = getattr(self._unet.config, "addition_embed_type", None) == "text_time"
+        if self._is_xl:
+            logger.info(f"{self.model_name_or_path} is a Stable Diffusion XL checkpoint: loading its second tokenizer and text encoder")
+            self._tokenizer_2 = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer_2")
+            self._text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(self.model_name_or_path, subfolder="text_encoder_2")
+
+    def _encode_conditioning(self, batch: Dict[str, Any], role: Literal["forget", "retain", "override"]) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        '''
+        The text conditioning for one role of one batch, in the form the loaded denoiser expects.
+
+        The role, rather than a raw dictionary key, is the argument because Stable Diffusion XL
+        needs two tokenizations of the same caption where Stable Diffusion needs one. "forget" and
+        "retain" both read the batch's own caption; "override" reads the overwriting caption that
+        only a forget batch carries.
+
+        Returns the encoder hidden states, and the added conditioning to pass to the denoiser:
+        empty on Stable Diffusion, and on Stable Diffusion XL the pooled output of the second text
+        encoder plus the micro-conditioning sizes (original size, crop offset, target size).
+        '''
+        ids_key = "forget_ids" if role == "override" else "input_ids"
+        if not self._is_xl:
+            return self._text_encoder(batch[ids_key], return_dict=False)[0], {}
+
+        for required in (f"{ids_key}_2", "original_sizes", "crop_top_lefts"):
+            if required not in batch:
+                raise KeyError(
+                    f"Stable Diffusion XL conditioning needs '{required}' in the batch; the dataloader "
+                    f"of {type(self).__name__} does not provide it."
+                )
+
+        # The penultimate hidden state of each encoder, concatenated on the feature dimension, and
+        # the pooled output of the second encoder only -- the convention Stable Diffusion XL was
+        # trained with, and the one its own pipeline uses at inference time.
+        outputs_one = self._text_encoder(batch[ids_key], output_hidden_states=True, return_dict=False)
+        outputs_two = self._text_encoder_2(batch[f"{ids_key}_2"], output_hidden_states=True, return_dict=False)
+        prompt_embeds = torch.concat([outputs_one[-1][-2], outputs_two[-1][-2]], dim=-1)
+        pooled_prompt_embeds = outputs_two[0].view(prompt_embeds.shape[0], -1)
+
+        assert self._accelerator is not None
+        target_size = (self.resolution, self.resolution)
+        time_ids = torch.cat([
+            torch.tensor([list(original_size) + list(crop_top_left) + list(target_size)])
+            for original_size, crop_top_left in zip(batch["original_sizes"], batch["crop_top_lefts"])
+        ]).to(self._accelerator.device, dtype=self._weight_dtype)
+
+        return prompt_embeds, {"text_embeds": pooled_prompt_embeds, "time_ids": time_ids}
 
     def train(self):
         self._pre_checks()
@@ -409,19 +490,15 @@ class UnlearnerLora(Unlearner):
 
         # Load scheduler, tokenizer and models
         self._hook_before_load_model()
-        self._noise_scheduler = DDPMScheduler.from_pretrained(self.model_name_or_path, subfolder="scheduler")
-        self._tokenizer = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer")
-        self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder")
-        self._vae = AutoencoderKL.from_pretrained(
-            self.pretrained_vae_model_name_or_path or self.model_name_or_path,
-            subfolder=("vae" if self.pretrained_vae_model_name_or_path is None else None),
-        )
-        self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet")
+        self._load_models()
         assert self._noise_scheduler is not None
         assert self._tokenizer is not None
         assert self._text_encoder is not None
         assert self._vae is not None
         assert self._unet is not None
+        if self._is_xl:
+            assert self._tokenizer_2 is not None
+            assert self._text_encoder_2 is not None
 
         # freeze parameters of models to save more memory
         self._unet.requires_grad_(False)
@@ -431,6 +508,10 @@ class UnlearnerLora(Unlearner):
         self._unet.to(self._accelerator.device, dtype=self._weight_dtype)
         self._vae.to(self._accelerator.device, dtype=self._vae_dtype())
         self._text_encoder.to(self._accelerator.device, dtype=self._weight_dtype)
+
+        if self._is_xl:
+            self._text_encoder_2.requires_grad_(False)
+            self._text_encoder_2.to(self._accelerator.device, dtype=self._weight_dtype)
 
         t1 = time.time()
         self._train_forget_dataloader, self._train_retain_dataloader = self._prepare_dataloaders()
@@ -623,6 +704,20 @@ class UnlearnerLora(Unlearner):
                 batch_forget["input_ids"] = batch_forget["input_ids"].to(self._accelerator.device)
                 batch_retain["input_ids"] = batch_retain["input_ids"].to(self._accelerator.device)
 
+                if self._is_xl:
+                    # The same truncation and device placement for what Stable Diffusion XL adds to
+                    # a batch, so that the second half of the conditioning stays aligned with the
+                    # images it describes. As with input_ids above, the forget batch comes off a
+                    # prepared dataloader and is already on the device; the retain batch is not.
+                    # A dataloader that does not provide them is reported by _encode_conditioning,
+                    # which names the missing field and the trainer that owns the dataloader.
+                    for batch in (batch_forget, batch_retain):
+                        if "input_ids_2" in batch:
+                            batch["input_ids_2"] = batch["input_ids_2"][:min_length].to(self._accelerator.device)
+                        for key in ("original_sizes", "crop_top_lefts"):
+                            if key in batch:
+                                batch[key] = batch[key][:min_length]
+
                 with self._accelerator.accumulate(self._unet):
                     loss_forget, loss_retain = self._train_one_batch(batch_forget, batch_retain)
                     # Gather the losses across all processes for logging (if we use distributed training).
@@ -672,7 +767,7 @@ class UnlearnerLora(Unlearner):
                                 get_peft_model_state_dict(unwrapped_unet)
                             )
 
-                            StableDiffusionPipeline.save_lora_weights(
+                            self._lora_pipeline_class().save_lora_weights(
                                 save_directory=save_path,
                                 unet_lora_layers=unet_lora_state_dict,
                                 safe_serialization=True,
@@ -717,6 +812,9 @@ class UnlearnerLora(Unlearner):
         del self._tokenizer
         del self._text_encoder
         del self._vae
+        if self._is_xl:
+            del self._tokenizer_2
+            del self._text_encoder_2
         torch.cuda.empty_cache()
 
         ###############################
@@ -953,8 +1051,8 @@ class UnlearnerLoraDirect(UnlearnerLora):
         noisy_latents_retain = self._noise_scheduler.add_noise(latents_retain, noise_forget, timesteps_forget)
 
         # Get the text embedding for conditioning
-        encoder_hidden_states_forget = self._text_encoder(batch_forget["input_ids"], return_dict=False)[0]
-        encoder_hidden_states_retain = self._text_encoder(batch_retain["input_ids"], return_dict=False)[0]
+        encoder_hidden_states_forget, added_cond_kwargs_forget = self._encode_conditioning(batch_forget, "forget")
+        encoder_hidden_states_retain, added_cond_kwargs_retain = self._encode_conditioning(batch_retain, "retain")
 
         # Get the target for loss depending on the prediction type
         if self.prediction_type is not None:
@@ -971,8 +1069,8 @@ class UnlearnerLoraDirect(UnlearnerLora):
             raise ValueError(f"Unknown prediction type {self._noise_scheduler.config.prediction_type}")
 
         # Predict the noise residual and compute loss
-        model_pred_forget = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, return_dict=False)[0]  # type: ignore
-        model_pred_retain = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]  # type: ignore
+        model_pred_forget = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, added_cond_kwargs=added_cond_kwargs_forget, return_dict=False)[0]  # type: ignore
+        model_pred_retain = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]  # type: ignore
 
         loss_forget = F.mse_loss(model_pred_forget.float(), target_forget.float(), reduction="mean")  # This is a Tensor of shape [], aka is a float
         loss_retain = F.mse_loss(model_pred_retain.float(), target_retain.float(), reduction="mean")

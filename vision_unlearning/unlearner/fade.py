@@ -206,25 +206,64 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         # Preprocessing the datasets.
         # We need to tokenize inputs and targets.
         # ''' Ugly version (but works)
-        from vision_unlearning.utils.training import tokenize_captions, preprocess_train, unwrap_model, forget_tokens  # noqa  # type: ignore
+        from vision_unlearning.utils.training import tokenize_captions, preprocess_train, unwrap_model, forget_tokens, compute_crop_top_left  # noqa  # type: ignore
+
+        def add_micro_conditioning(examples, images):  # type: ignore
+            '''
+            Record what Stable Diffusion XL's micro-conditioning is told about each image: its size
+            before any resizing, and the offset of the crop the transforms took out of it (D6 of
+            PLAN-TASK-2026-08-12-SDXL). Recorded for both base models -- Stable Diffusion simply
+            never reads them -- so that a batch has one shape whichever checkpoint is loaded.
+            '''
+            examples["original_sizes"] = [(image.height, image.width) for image in images]
+            examples["crop_top_lefts"] = [
+                compute_crop_top_left((image.height, image.width), self.resolution, self.center_crop)
+                for image in images
+            ]
+            return examples
+
+        def tokenize_for_second_encoder(examples, column):  # type: ignore
+            '''
+            The same captions, tokenized with Stable Diffusion XL's second tokenizer.
+
+            A caption column holding several captions per example is rejected rather than sampled:
+            tokenize_captions draws one at random, so a second call would be free to pick a
+            different caption than the first encoder saw, and the two halves of the conditioning
+            would then describe two different prompts.
+            '''
+            if any(not isinstance(caption, str) for caption in examples[column]):
+                raise NotImplementedError(
+                    f"Column '{column}' holds more than one caption per example, which the Stable "
+                    f"Diffusion XL path does not support: both text encoders must be given the same caption."
+                )
+            return tokenize_captions(examples, self._tokenizer_2, column)
 
         def preprocess_train(examples):  # type: ignore
             images = [image.convert("RGB") for image in examples[self.image_column]]
             examples["pixel_values"] = [train_transforms(image) for image in images]
             examples["input_ids"] = tokenize_captions(examples, self._tokenizer, self.caption_column)
-            return examples
+            if self._is_xl:
+                examples["input_ids_2"] = tokenize_for_second_encoder(examples, self.caption_column)
+            return add_micro_conditioning(examples, images)
 
         def preprocess_forget(examples):
             images = [image.convert("RGB") for image in examples[self.image_column]]
             examples["pixel_values"] = [train_transforms(image) for image in images]
             examples["input_ids"] = tokenize_captions(examples, self._tokenizer, self.caption_column)
+            if self._is_xl:
+                examples["input_ids_2"] = tokenize_for_second_encoder(examples, self.caption_column)
+            add_micro_conditioning(examples, images)
             if (self.json_metafile is None or self.overwrite_column is None):
                 # Case 1: use fixed overwriting concept for all examples
                 assert self.overwritting_concept is not None, "When not using json_metafile+overwrite_column, overwritting_concept cannot be None"
                 examples["forget_ids"] = forget_tokens(examples, self._tokenizer, self.caption_column, f'An image of {self.overwritting_concept}')  # TODO: hardcoded tenmplate
+                if self._is_xl:
+                    examples["forget_ids_2"] = forget_tokens(examples, self._tokenizer_2, self.caption_column, f'An image of {self.overwritting_concept}')
             else:
                 # Case 2: loading datasets using a json metafile
                 examples["forget_ids"] = tokenize_captions(examples, self._tokenizer, self.overwrite_column)
+                if self._is_xl:
+                    examples["forget_ids_2"] = tokenize_for_second_encoder(examples, self.overwrite_column)
             return examples
 
         # Set the training transforms
@@ -247,18 +286,32 @@ class UnlearnerLoraDistillation(UnlearnerLora):
 
         # DataLoaders creation
         # ''' Ugly version (but works)
+        def collate_micro_conditioning(batch, examples):  # type: ignore
+            '''
+            Carry the per-example micro-conditioning through to the batch, plus the second
+            tokenization when a Stable Diffusion XL checkpoint is loaded. The sizes stay Python
+            lists of pairs: they are turned into a tensor in _encode_conditioning, on the device
+            and in the dtype the denoiser wants.
+            '''
+            batch["original_sizes"] = [example["original_sizes"] for example in examples]
+            batch["crop_top_lefts"] = [example["crop_top_lefts"] for example in examples]
+            for key in ("input_ids_2", "forget_ids_2"):
+                if key in examples[0]:
+                    batch[key] = torch.stack([example[key] for example in examples])
+            return batch
+
         def collate_fn(examples):
             pixel_values = torch.stack([example["pixel_values"] for example in examples])
             pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
             input_ids = torch.stack([example["input_ids"] for example in examples])
-            return {"pixel_values": pixel_values, "input_ids": input_ids}
+            return collate_micro_conditioning({"pixel_values": pixel_values, "input_ids": input_ids}, examples)
 
         def collate_forget(examples):
             pixel_values = torch.stack([example["pixel_values"] for example in examples])
             pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
             input_ids = torch.stack([example["input_ids"] for example in examples])
             forget_ids = torch.stack([example["forget_ids"] for example in examples])
-            return {"pixel_values": pixel_values, "input_ids": input_ids, "forget_ids": forget_ids}
+            return collate_micro_conditioning({"pixel_values": pixel_values, "input_ids": input_ids, "forget_ids": forget_ids}, examples)
 
         train_forget_dataloader = torch.utils.data.DataLoader(
             train_dataset_forget,
@@ -339,9 +392,9 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         noisy_latents_retain = self._noise_scheduler.add_noise(latents_retain, noise_retain, timesteps_retain)
 
         # Get the text embedding for conditioning
-        encoder_hidden_states_forget = self._text_encoder(batch_forget["input_ids"], return_dict=False)[0]
-        encoder_hidden_states_retain = self._text_encoder(batch_retain["input_ids"], return_dict=False)[0]
-        encoder_hidden_states_overwt = self._text_encoder(batch_forget["forget_ids"], return_dict=False)[0]
+        encoder_hidden_states_forget, added_cond_kwargs_forget = self._encode_conditioning(batch_forget, "forget")
+        encoder_hidden_states_retain, added_cond_kwargs_retain = self._encode_conditioning(batch_retain, "retain")
+        encoder_hidden_states_overwt, added_cond_kwargs_overwt = self._encode_conditioning(batch_forget, "override")
 
         # Get the target for loss depending on the prediction type
         if self.prediction_type is not None:
@@ -359,14 +412,14 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             raise ValueError(f"Unknown prediction type {self._noise_scheduler.config.prediction_type}")
 
         # Predict the noise residual
-        model_pred_forget_new = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, return_dict=False)[0]
+        model_pred_forget_new = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, added_cond_kwargs=added_cond_kwargs_forget, return_dict=False)[0]
         self._unet.disable_adapters()
-        model_pred_forget_old = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_overwt, return_dict=False)[0]
+        model_pred_forget_old = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_overwt, added_cond_kwargs=added_cond_kwargs_overwt, return_dict=False)[0]
         self._unet.enable_adapters()
 
-        model_pred_retain_new = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]
+        model_pred_retain_new = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]
         self._unet.disable_adapters()
-        model_pred_retain_old = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]
+        model_pred_retain_old = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]
         self._unet.enable_adapters()
 
         # Compute loss
