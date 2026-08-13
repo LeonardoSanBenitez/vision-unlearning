@@ -411,25 +411,37 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         else:
             raise ValueError(f"Unknown prediction type {self._noise_scheduler.config.prediction_type}")
 
-        # Predict the noise residual
+        # Predict the noise residual, and backpropagate each half before the other half is computed.
+        #
+        # The two halves used to be forwarded together and backpropagated from their weighted sum,
+        # which holds both activation graphs in video memory at once. Splitting them is exact rather
+        # than an approximation: gradients accumulate additively into .grad, and the gradient of a
+        # weighted sum is the weighted sum of the gradients, so the parameter update is the same
+        # while only one graph is alive at a time. It is what makes a Stable Diffusion XL step fit
+        # on a 12 GB card.
+        #
+        # Everything the halves draw from the random number generator -- the latents, the noise and
+        # the timesteps -- is still drawn above, in the order it always was, so the split changes
+        # when memory is released and nothing about what is computed.
+        loss_weighting = self.gradient_weighting_method  # This weights the losses, not the gradients... but in this case this works
+
+        # Forget half
         model_pred_forget_new = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, added_cond_kwargs=added_cond_kwargs_forget, return_dict=False)[0]
         self._unet.disable_adapters()
         model_pred_forget_old = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_overwt, added_cond_kwargs=added_cond_kwargs_overwt, return_dict=False)[0]
         self._unet.enable_adapters()
+        loss_forget = F.mse_loss(model_pred_forget_new.float(), model_pred_forget_old.float(), reduction="mean")  # This is a Tensor of shape [], aka is a float
+        self._accelerator.backward(loss_weighting.forget_weight * loss_forget)
+        del model_pred_forget_new, model_pred_forget_old
 
+        # Retain half
         model_pred_retain_new = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]
         self._unet.disable_adapters()
         model_pred_retain_old = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]
         self._unet.enable_adapters()
-
-        # Compute loss
-        # Gather the losses across all processes for logging (if we use distributed training)
-        loss_forget = F.mse_loss(model_pred_forget_new.float(), model_pred_forget_old.float(), reduction="mean")  # This is a Tensor of shape [], aka is a float
         loss_retain = F.mse_loss(model_pred_retain_new.float(), model_pred_retain_old.float(), reduction="mean")
-
-        # Backpropagate
-        loss = self.gradient_weighting_method.forget_weight * loss_forget + self.gradient_weighting_method.retain_weight * loss_retain  # This is actually weighting losses, not gradients... but in this case this works
-        self._accelerator.backward(loss)
+        self._accelerator.backward(loss_weighting.retain_weight * loss_retain)
+        del model_pred_retain_new, model_pred_retain_old
 
         # Peak memory measurement
         torch.cuda.synchronize()
