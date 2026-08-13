@@ -410,6 +410,7 @@ class UnlearnerLora(Unlearner):
             subfolder=("vae" if self.pretrained_vae_model_name_or_path is None else None),
         )
         self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet")
+        assert self._unet is not None
 
         self._is_xl = getattr(self._unet.config, "addition_embed_type", None) == "text_time"
         if self._is_xl:
