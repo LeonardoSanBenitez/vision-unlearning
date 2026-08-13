@@ -10,6 +10,7 @@ Please cite the following paper if you use this code:
       primaryClass={cs.CV},
       url={https://arxiv.org/abs/2602.07058},
 }
+
 '''
 import os
 import json
@@ -306,11 +307,11 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         assert self._vae is not None
 
         # Convert images to latent space
-        latents_forget = self._vae.encode(batch_forget["pixel_values"].to(dtype=self._weight_dtype)).latent_dist.sample()
-        latents_forget = latents_forget * self._vae.config.scaling_factor
+        latents_forget = self._vae.encode(batch_forget["pixel_values"].to(dtype=self._vae_dtype())).latent_dist.sample()
+        latents_forget = (latents_forget * self._vae.config.scaling_factor).to(dtype=self._weight_dtype)
 
-        latents_retain = self._vae.encode(batch_retain["pixel_values"].to(dtype=self._weight_dtype)).latent_dist.sample()
-        latents_retain = latents_retain * self._vae.config.scaling_factor
+        latents_retain = self._vae.encode(batch_retain["pixel_values"].to(dtype=self._vae_dtype())).latent_dist.sample()
+        latents_retain = (latents_retain * self._vae.config.scaling_factor).to(dtype=self._weight_dtype)
 
         # Sample noise that we'll add to the latents
         noise_forget = torch.randn_like(latents_forget)

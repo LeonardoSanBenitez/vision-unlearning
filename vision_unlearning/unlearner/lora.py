@@ -148,6 +148,7 @@ class UnlearnerLora(Unlearner):
     model_name_or_path: str = Field(description="Path to the pre-trained model or model identifier from huggingface.co/models")
     revision: Optional[str] = Field(None, description="Revision of pretrained model identifier from huggingface.co/models.")
     variant: Optional[str] = Field(None, description="Variant of the model files of the pretrained model identifier from huggingface.co/models, e.g., fp16.")
+    pretrained_vae_model_name_or_path: Optional[str] = Field(None, description="Path or identifier of an autoencoder to use instead of the base model's own. Supply one that is safe in half precision (e.g. madebyollin/sdxl-vae-fp16-fix) when training in half precision; leave as None to load the base model's autoencoder and keep it in float32.")  # noqa
     # tokenizer_name: Optional[str] = Field(default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"})
 
     # Dataset related
@@ -361,6 +362,21 @@ class UnlearnerLora(Unlearner):
             safe_serialization=True,
         )
 
+    def _vae_dtype(self) -> torch.dtype:
+        '''
+        The autoencoder is the one frozen component that is unsafe in half precision: its activations
+        overflow the float16 range and it returns not-a-number latents without raising, so the failure
+        arrives as a loss that has quietly stopped meaning anything.
+
+        It therefore stays in float32 unless the caller supplied an autoencoder built for half
+        precision, in which case that autoencoder is used at the training dtype as intended. Under
+        mixed_precision="no" the training dtype is float32 already, so this returns what the code
+        used before it existed.
+        '''
+        if self.pretrained_vae_model_name_or_path is not None:
+            return self._weight_dtype
+        return torch.float32
+
     def train(self):
         self._pre_checks()
         t0 = time.time()
@@ -396,7 +412,10 @@ class UnlearnerLora(Unlearner):
         self._noise_scheduler = DDPMScheduler.from_pretrained(self.model_name_or_path, subfolder="scheduler")
         self._tokenizer = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer")
         self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder")
-        self._vae = AutoencoderKL.from_pretrained(self.model_name_or_path, subfolder="vae")
+        self._vae = AutoencoderKL.from_pretrained(
+            self.pretrained_vae_model_name_or_path or self.model_name_or_path,
+            subfolder=("vae" if self.pretrained_vae_model_name_or_path is None else None),
+        )
         self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet")
         assert self._noise_scheduler is not None
         assert self._tokenizer is not None
@@ -410,7 +429,7 @@ class UnlearnerLora(Unlearner):
         self._text_encoder.requires_grad_(False)
 
         self._unet.to(self._accelerator.device, dtype=self._weight_dtype)
-        self._vae.to(self._accelerator.device, dtype=self._weight_dtype)
+        self._vae.to(self._accelerator.device, dtype=self._vae_dtype())
         self._text_encoder.to(self._accelerator.device, dtype=self._weight_dtype)
 
         t1 = time.time()
@@ -903,11 +922,11 @@ class UnlearnerLoraDirect(UnlearnerLora):
 
     def _train_one_batch(self, batch_forget, batch_retain):
         # Convert images to latent space
-        latents_forget = self._vae.encode(batch_forget["pixel_values"].to(dtype=self._weight_dtype)).latent_dist.sample()
-        latents_forget = latents_forget * self._vae.config.scaling_factor
+        latents_forget = self._vae.encode(batch_forget["pixel_values"].to(dtype=self._vae_dtype())).latent_dist.sample()
+        latents_forget = (latents_forget * self._vae.config.scaling_factor).to(dtype=self._weight_dtype)
 
-        latents_retain = self._vae.encode(batch_retain["pixel_values"].to(dtype=self._weight_dtype)).latent_dist.sample()
-        latents_retain = latents_retain * self._vae.config.scaling_factor
+        latents_retain = self._vae.encode(batch_retain["pixel_values"].to(dtype=self._vae_dtype())).latent_dist.sample()
+        latents_retain = (latents_retain * self._vae.config.scaling_factor).to(dtype=self._weight_dtype)
 
         # Sample noise that we'll add to the latents
         noise_forget = torch.randn_like(latents_forget)
