@@ -73,9 +73,10 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from vision_unlearning.unlearner import lora as lora_module  # noqa: E402
 from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation  # noqa: E402
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple  # noqa: E402
+
+from step_check_support import StopAfterTraining, restore_post_training, stub_post_training, write_image_folder  # noqa: E402
 
 MODEL_ID = "CompVis/stable-diffusion-v1-4"
 
@@ -88,53 +89,6 @@ OVERWRITING_CONCEPT = "An image of a child"
 ADAPTER_FILE_NAME = "pytorch_lora_weights.safetensors"
 
 
-def _write_image_folder(directory: Path, captions: List[str], rng: np.random.Generator) -> None:
-    '''
-    Writes the layout `datasets.load_dataset("imagefolder", ...)` expects: the images plus a
-    metadata.jsonl giving each one its caption.
-    '''
-    directory.mkdir(parents=True, exist_ok=True)
-    records = []
-    for index, caption in enumerate(captions):
-        pixels = rng.integers(0, 256, size=(RESOLUTION, RESOLUTION, 3), dtype=np.uint8)
-        file_name = f"{index:04d}.png"
-        Image.fromarray(pixels).save(directory / file_name)
-        records.append({"file_name": file_name, "text": caption})
-
-    with open(directory / "metadata.jsonl", "w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record) + "\n")
-
-
-class _StopAfterTraining(Exception):
-    '''Raised at the first post-training call, to end the run once the adapter exists.'''
-
-
-def _stub_post_training() -> Any:
-    '''
-    Replaces `unlearn_lora` with a function that raises `_StopAfterTraining`, and returns the
-    original so it can be restored.
-
-    `unlearn_lora` is the first thing `train()` touches after `_save_lora_layers()`, so raising
-    there is a single, well-defined cut point: everything before it is training and has already
-    happened; everything after it is evaluation. Substituting harmless return values instead does
-    not work -- the evaluator validates its arguments -- and would in any case leave the run
-    building three full pipelines and downloading a CLIP checkpoint on a machine that cannot
-    comfortably hold them.
-    '''
-    original_unlearn_lora = lora_module.unlearn_lora
-
-    def _stop(*args: Any, **kwargs: Any) -> Tuple[None, None, None]:
-        raise _StopAfterTraining()
-
-    lora_module.unlearn_lora = _stop  # type: ignore[assignment]
-    return original_unlearn_lora
-
-
-def _restore_post_training(original_unlearn_lora: Any) -> None:
-    lora_module.unlearn_lora = original_unlearn_lora
-
-
 def train_one_step(work_dir: Path) -> Path:
     '''
     Runs a single optimizer step and returns the path of the adapter it wrote.
@@ -142,8 +96,8 @@ def train_one_step(work_dir: Path) -> Path:
     rng = np.random.default_rng(SEED)
     forget_dir = work_dir / "train_forget"
     retain_dir = work_dir / "train_retain"
-    _write_image_folder(forget_dir, [FORGET_CAPTION, FORGET_CAPTION], rng)
-    _write_image_folder(retain_dir, RETAIN_CAPTIONS, rng)
+    write_image_folder(forget_dir, [FORGET_CAPTION, FORGET_CAPTION], rng, RESOLUTION)
+    write_image_folder(retain_dir, RETAIN_CAPTIONS, rng, RESOLUTION)
 
     output_dir = work_dir / "adapter"
 
@@ -182,15 +136,15 @@ def train_one_step(work_dir: Path) -> Path:
         "compute_memory": False,
     }
 
-    original_unlearn_lora = _stub_post_training()
+    original_unlearn_lora = stub_post_training()
     try:
         unlearner = UnlearnerLoraDistillation(**hyperparameters)
         try:
             unlearner.train()
-        except _StopAfterTraining:
+        except StopAfterTraining:
             pass
     finally:
-        _restore_post_training(original_unlearn_lora)
+        restore_post_training(original_unlearn_lora)
 
     adapter_path = output_dir / ADAPTER_FILE_NAME
     if not adapter_path.is_file():

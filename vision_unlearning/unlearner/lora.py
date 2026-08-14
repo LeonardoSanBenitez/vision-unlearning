@@ -402,21 +402,43 @@ class UnlearnerLora(Unlearner):
         carries the second tokenizer and text encoder that produce them. Stable Diffusion 1.x
         declares neither, and this method then performs exactly the five loads it always did.
         '''
+        # The family is decided from the denoiser's configuration alone, before any weights are
+        # read, because the decision changes how they must be read. Measured on a 16 GB machine:
+        # loading the Stable Diffusion XL denoiser the way Stable Diffusion 1.x is loaded -- full
+        # precision into system memory, then cast -- drove free system memory from 5.34 GB to
+        # 0.54 GB and the run was aborted. Its full-precision weights are about 10.3 GB and the read
+        # fills memory before the cast can shrink it, which is the same reason `unlearn_lora` takes
+        # a `variant`. So on that branch the dtype and the weight variant are requested at load
+        # time; on the Stable Diffusion path no argument is added and the loads are what they were.
+        unet_config = UNet2DConditionModel.load_config(self.model_name_or_path, subfolder="unet")
+        self._is_xl = dict(unet_config).get("addition_embed_type") == "text_time"
+        weight_kwargs: Dict[str, Any] = {}
+        if self._is_xl:
+            weight_kwargs["torch_dtype"] = self._weight_dtype
+            if self.variant is not None:
+                weight_kwargs["variant"] = self.variant
+
         self._noise_scheduler = DDPMScheduler.from_pretrained(self.model_name_or_path, subfolder="scheduler")
         self._tokenizer = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer")
-        self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder")
+        self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder", **weight_kwargs)
+        # The autoencoder is deliberately excluded from weight_kwargs: its dtype is _vae_dtype()'s
+        # decision, not the training dtype's, and it is small enough that loading it in full
+        # precision costs nothing worth the risk of contradicting that guard.
         self._vae = AutoencoderKL.from_pretrained(
             self.pretrained_vae_model_name_or_path or self.model_name_or_path,
             subfolder=("vae" if self.pretrained_vae_model_name_or_path is None else None),
         )
-        self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet")
+        self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet", **weight_kwargs)
         assert self._unet is not None
 
-        self._is_xl = getattr(self._unet.config, "addition_embed_type", None) == "text_time"
         if self._is_xl:
             logger.info(f"{self.model_name_or_path} is a Stable Diffusion XL checkpoint: loading its second tokenizer and text encoder")
+            assert getattr(self._unet.config, "addition_embed_type", None) == "text_time", (
+                "the denoiser's configuration said this was a Stable Diffusion XL checkpoint before loading, "
+                "and the loaded denoiser disagrees"
+            )
             self._tokenizer_2 = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer_2")
-            self._text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(self.model_name_or_path, subfolder="text_encoder_2")
+            self._text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(self.model_name_or_path, subfolder="text_encoder_2", **weight_kwargs)
 
     def _encode_conditioning(self, batch: Dict[str, Any], role: Literal["forget", "retain", "override"]) -> Tuple[torch.Tensor, Dict[str, Any]]:
         '''
