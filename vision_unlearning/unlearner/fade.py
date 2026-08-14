@@ -428,7 +428,12 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         # Forget half
         model_pred_forget_new = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, added_cond_kwargs=added_cond_kwargs_forget, return_dict=False)[0]
         self._unet.disable_adapters()
-        model_pred_forget_old = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_overwt, added_cond_kwargs=added_cond_kwargs_overwt, return_dict=False)[0]
+        # The adapters are disabled here, so this call has no path to any trainable parameter --
+        # `torch.no_grad()` drops the activation graph it would otherwise build for a backward that
+        # never uses it. Exact, not an approximation: the value of model_pred_forget_old is unaffected
+        # by whether it carries a graph.
+        with torch.no_grad():
+            model_pred_forget_old = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_overwt, added_cond_kwargs=added_cond_kwargs_overwt, return_dict=False)[0]
         self._unet.enable_adapters()
         loss_forget = F.mse_loss(model_pred_forget_new.float(), model_pred_forget_old.float(), reduction="mean")  # This is a Tensor of shape [], aka is a float
         self._accelerator.backward(loss_weighting.forget_weight * loss_forget)
@@ -437,7 +442,9 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         # Retain half
         model_pred_retain_new = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]
         self._unet.disable_adapters()
-        model_pred_retain_old = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]
+        # Same reasoning as the forget half above: adapters disabled, no trainable parameter reachable.
+        with torch.no_grad():
+            model_pred_retain_old = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]
         self._unet.enable_adapters()
         loss_retain = F.mse_loss(model_pred_retain_new.float(), model_pred_retain_old.float(), reduction="mean")
         self._accelerator.backward(loss_weighting.retain_weight * loss_retain)
