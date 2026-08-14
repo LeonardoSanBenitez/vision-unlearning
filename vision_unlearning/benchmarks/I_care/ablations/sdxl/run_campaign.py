@@ -6,21 +6,31 @@ miscalibrated after the fact, and the user's own judgement call, made from the r
 visible-but-unscored degradation in Class B's images, is to proceed with Class B; a rerun is cheap if
 this turns out wrong).
 
-Two `--stage` values, always their own process, one call per epoch/off-baseline (C11, extended by S2's
-one-pipeline-per-process measurement):
+Two `--stage` values, always their own process, and `--stage generate` does EXACTLY ONE epoch/off-
+baseline per invocation, never a batch inside one process (C11, extended by S2's one-pipeline-per-
+process measurement -- a second Stable Diffusion XL pipeline built in a process that already holds one
+drives free system memory to ~1.3 GB even after `del` and `empty_cache()`). `--epochs` accepts a
+single integer or `"off"`; `"remaining"`/`"all"` are a convenience that report what is still missing
+and generate only the NEXT one -- the caller re-invokes this script, once per process, for each
+epoch that remains:
 
     python run_campaign.py --stage train --seed 42
     python run_campaign.py --stage generate --seed 42 --epochs off
-    python run_campaign.py --stage generate --seed 42 --epochs 1,3,5
-    python run_campaign.py --stage generate --seed 42 --epochs remaining
-    python run_campaign.py --stage generate --seed 43 --epochs all
+    python run_campaign.py --stage generate --seed 42 --epochs 1
+    python run_campaign.py --stage generate --seed 42 --epochs 3
+    python run_campaign.py --stage generate --seed 42 --epochs 5
+    python run_campaign.py --stage generate --seed 42 --epochs remaining   # repeat until remaining_after_this is 0
+    python run_campaign.py --stage generate --seed 43 --epochs all        # repeat until remaining_after_this is 0
+
+A comma-separated `--epochs` list is refused outright (not silently truncated to its first entry) --
+see `_resolve_epochs`.
 
 `--stage train` trains 200 epochs, saving adapters at the 13-entry checkpoint list read from
 `every_epoch/assets/epoch_grid_campaign_people_seed42.json` (`[1,2,3,5,10,15,20,30,50,75,100,150,200]`,
 never retyped). `--stage generate` renders ALL TEN of `selection_people.json`'s entities (the target
-plus its nine receivers) in ONE `generate_dataset` call per epoch/off-baseline -- this is the call
-shape `make_epoch_grid.py` uses (read from its source before this script was written, per the plan's
-own instruction: "settle the call shape... from the code"), not `run_demo_trajectory.py`'s
+plus its nine receivers) in ONE `generate_dataset` call for that one epoch/off-baseline -- this is the
+call shape `make_epoch_grid.py` uses (read from its source before this script was written, per the
+plan's own instruction: "settle the call shape... from the code"), not `run_demo_trajectory.py`'s
 one-prompt-per-call shape. Getting this wrong would put every entity at a different random-number-
 generator position than the every-epoch grids used, silently breaking the whole cross-model
 comparison. Generation order is fixed by `selection_people.json` alone, sorted by each entity's own
@@ -219,7 +229,12 @@ def _stage_train(seed: int) -> None:
 
 
 def _resolve_epochs(seed: int, epochs_arg: str) -> List[Any]:
-    '''Turns --epochs into a list mixing the string "off" and/or ints, per the requested selector.'''
+    '''Turns --epochs into an ORDERED list of what remains to generate, per the requested selector.
+
+    `_stage_generate` only ever acts on the FIRST element -- see its own docstring for why -- so this
+    function's job is to compute the full remaining set (for the "how many are left" figure it
+    prints), never to hand back something the caller is expected to loop over inside one process.
+    '''
     checkpoints = _checkpoint_list()
     manifest_path = _OUT / _MANIFEST_TEMPLATE.format(seed=seed)
     already_generated: set = set()
@@ -235,14 +250,29 @@ def _resolve_epochs(seed: int, epochs_arg: str) -> List[Any]:
         result: List[Any] = [] if None in already_generated else ["off"]
         result += [e for e in checkpoints if e not in already_generated]
         return result
-    requested = [int(x) for x in epochs_arg.split(",")]
-    for e in requested:
-        assert e in checkpoints, f"epoch {e} is not in the checkpoint list {checkpoints}"
-    return requested
+    # A single epoch is the only other accepted form -- a comma list is refused rather than silently
+    # generating only its first entry, which is what taking to_run[0] on a multi-item list would do.
+    assert "," not in epochs_arg, (
+        f"--epochs {epochs_arg!r}: a comma-separated list is refused, not silently truncated to its "
+        "first entry. Invoke this script once per epoch, each its own process (S2's one-pipeline-"
+        "per-process constraint) -- see this module's docstring."
+    )
+    epoch = int(epochs_arg)
+    assert epoch in checkpoints, f"epoch {epoch} is not in the checkpoint list {checkpoints}"
+    return [] if epoch in already_generated else [epoch]
 
 
 def _stage_generate(seed: int, epochs_arg: str) -> None:
-    '''One generate_dataset call per requested epoch/off, over all ten entities in fixed order.'''
+    '''Exactly ONE generate_dataset call, over all ten entities in fixed order, then exits.
+
+    Deliberately never loops over more than one epoch/off-baseline inside this process, even when
+    `--epochs` resolves to several ("remaining", "all", or a list): S2 measured that a second Stable
+    Diffusion XL pipeline built in a process that already holds one drives free system memory to
+    ~1.3 GB even after `del` and `empty_cache()`. So "remaining"/"all" only pick the NEXT missing
+    epoch and generate that one, printing how many are still outstanding -- the caller (a human or an
+    orchestrating script) invokes this as a fresh process again for each one, exactly like S5's early
+    generation already does for epochs 1/3/5 by hand.
+    '''
     check_headroom()
 
     from vision_unlearning.utils.data_generation import generate_dataset
@@ -261,48 +291,50 @@ def _stage_generate(seed: int, epochs_arg: str) -> None:
         }, indent=2))
         return
 
-    for item in to_run:
-        is_off = item == "off"
-        label = "off" if is_off else f"epoch{item}"
-        lora_name = None if is_off else str(model_dir / f"epoch-{item}")
-        filenames = [f"{label}_{e['name']}_seed{seed}.png" for e in order]
+    item = to_run[0]
+    remaining_after_this = len(to_run) - 1
+    is_off = item == "off"
+    label = "off" if is_off else f"epoch{item}"
+    lora_name = None if is_off else str(model_dir / f"epoch-{item}")
+    filenames = [f"{label}_{e['name']}_seed{seed}.png" for e in order]
 
-        monitor = ResourceMonitor(_OUT / f"campaign_generate_seed{seed}_{label}_monitor.log", interval_s=15.0)
-        monitor.start()
-        t0 = time.time()
-        try:
-            generate_dataset(
-                model_base_name=_MODEL_ID,
-                lora_name=lora_name,
-                prompts=prompts,
-                output_path=str(gen_dir),
-                filenames=filenames,
-                seeds=[seed],
-                batch_size=1,
-                # C9: SPARE (distil) leaves the unlearned pipeline as trained.
-                lora_requires_inversion=False,
-                # D10: explicit 512x512, otherwise Stable Diffusion XL defaults to 1024.
-                height=_RESOLUTION,
-                width=_RESOLUTION,
-                variant=_VARIANT,
-            )
-        finally:
-            monitor.stop()
-        seconds = round(time.time() - t0, 1)
+    monitor = ResourceMonitor(_OUT / f"campaign_generate_seed{seed}_{label}_monitor.log", interval_s=15.0)
+    monitor.start()
+    t0 = time.time()
+    try:
+        generate_dataset(
+            model_base_name=_MODEL_ID,
+            lora_name=lora_name,
+            prompts=prompts,
+            output_path=str(gen_dir),
+            filenames=filenames,
+            seeds=[seed],
+            batch_size=1,
+            # C9: SPARE (distil) leaves the unlearned pipeline as trained.
+            lora_requires_inversion=False,
+            # D10: explicit 512x512, otherwise Stable Diffusion XL defaults to 1024.
+            height=_RESOLUTION,
+            width=_RESOLUTION,
+            variant=_VARIANT,
+        )
+    finally:
+        monitor.stop()
+    seconds = round(time.time() - t0, 1)
 
-        rows = [
-            {"epoch": None if is_off else item, "entity": e["name"],
-             "path": str((gen_dir / fname)), "seed": seed}
-            for e, fname in zip(order, filenames)
-        ]
-        _append_manifest(seed, rows)
+    rows = [
+        {"epoch": None if is_off else item, "entity": e["name"],
+         "path": str((gen_dir / fname)), "seed": seed}
+        for e, fname in zip(order, filenames)
+    ]
+    _append_manifest(seed, rows)
 
-        print(json.dumps({
-            "stage": "generate", "seed": seed, "label": label, "rows_written": len(rows),
-            "seconds": seconds,
-            "peak_vram_used_gb": round(monitor.peak_vram_used_gb, 3),
-            "min_ram_free_gb": round(monitor.min_ram_free_gb, 3) if monitor.min_ram_free_gb != float("inf") else None,
-        }, indent=2))
+    print(json.dumps({
+        "stage": "generate", "seed": seed, "label": label, "rows_written": len(rows),
+        "seconds": seconds,
+        "peak_vram_used_gb": round(monitor.peak_vram_used_gb, 3),
+        "min_ram_free_gb": round(monitor.min_ram_free_gb, 3) if monitor.min_ram_free_gb != float("inf") else None,
+        "remaining_after_this": remaining_after_this,
+    }, indent=2))
 
 
 def main() -> None:
