@@ -195,6 +195,9 @@ def generate_dataset(
         os.makedirs(output_path, exist_ok=True)
 
     # --- load model (done once, shared across all seeds) ---
+    # Typed loosely on purpose: the three branches below return three different pipeline
+    # classes, and the diffusers stubs do not agree on which of them carries `.to`.
+    pipeline: Any
     if lora_name:
         assert model_base_name is not None, "model_base_name must be provided if lora_name is used"
         _, _, pipeline = unlearn_lora(

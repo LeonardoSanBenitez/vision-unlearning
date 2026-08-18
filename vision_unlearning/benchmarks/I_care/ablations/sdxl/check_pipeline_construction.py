@@ -96,8 +96,10 @@ def _install_recorder(log: Dict[str, Any]) -> None:
         def from_pretrained(model_id: str, **kwargs: Any) -> _RecordingPipeline:
             return _RecordingPipeline(model_id, kwargs, log)
 
-    generation_module.AutoPipelineForText2Image = _Factory  # type: ignore[assignment]
-    lora_module.AutoPipelineForText2Image = _Factory  # type: ignore[assignment]
+    # setattr rather than plain assignment: assigning a class to a module attribute that a type
+    # checker knows as a type is an error it cannot be told to ignore by code.
+    setattr(generation_module, "AutoPipelineForText2Image", _Factory)
+    setattr(lora_module, "AutoPipelineForText2Image", _Factory)
 
 
 def _run(prompt_batches: List[List[str]], lora_name: Optional[str], output_dir: Path,

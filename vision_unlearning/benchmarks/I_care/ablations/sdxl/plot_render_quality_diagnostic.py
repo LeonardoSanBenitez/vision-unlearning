@@ -88,8 +88,8 @@ def main() -> None:
               f"min {min(values)}, median {sorted(values)[len(values) // 2]}, max {max(values)}")
     print("clip score by condition, for the entities under discussion:")
     for name in _FOCUS:
-        row = " | ".join(f"{condition} {clip_scores[name][condition]:6.2f}" for condition in conditions)
-        print(f"  {name:22s} {row}")
+        scores = " | ".join(f"{condition} {clip_scores[name][condition]:6.2f}" for condition in conditions)
+        print(f"  {name:22s} {scores}")
     print(f"written: {path}")
 
 
