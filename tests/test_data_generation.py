@@ -576,6 +576,195 @@ class TestVariantPassthrough(unittest.TestCase):
         self.assertEqual(captured["variant"], "fp16")
 
 
+class TestConditioningPassthrough(unittest.TestCase):
+    """guidance_scale and the three Stable Diffusion XL size arguments reach the pipeline call.
+
+    Absent-by-default is the load-bearing case, exactly as for height/width: a Stable Diffusion 1.x
+    pipeline has no size conditioning at all, and every existing artifact was produced by a call
+    that passed none of these, so a default would silently change what those runs are compared with.
+    """
+
+    def _capture_pipeline_kwargs(self, **generate_kwargs: Any) -> Dict[str, Any]:
+        captured: List[Dict[str, Any]] = []
+
+        def _fake_pipeline(prompts_batch: List[str], **kw: Any) -> Any:
+            captured.append(kw)
+            result = MagicMock()
+            result.images = [_make_stub_image() for _ in prompts_batch]
+            return result
+
+        pipeline_stub = MagicMock(side_effect=_fake_pipeline)
+        pipeline_stub.to = MagicMock(return_value=pipeline_stub)
+        _apit = MagicMock()
+        _apit.from_pretrained = MagicMock(return_value=pipeline_stub)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "AutoPipelineForText2Image", _apit):
+                with patch.object(data_generation, "torch", _make_torch_stub()):
+                    data_generation.generate_dataset(
+                        model_base_name="stub-model",
+                        lora_name=None,
+                        prompts=["An image of Alice"],
+                        output_path=tmp,
+                        seeds=[42],
+                        **generate_kwargs,
+                    )
+        self.assertEqual(len(captured), 1)
+        return captured[0]
+
+    def test_absent_by_default(self) -> None:
+        captured = self._capture_pipeline_kwargs()
+        for argument in ("guidance_scale", "original_size", "target_size", "crops_coords_top_left"):
+            self.assertNotIn(argument, captured)
+
+    def test_passed_through_when_given(self) -> None:
+        captured = self._capture_pipeline_kwargs(
+            guidance_scale=7.5,
+            original_size=(1024, 1024),
+            target_size=(1024, 1024),
+            crops_coords_top_left=(0, 0),
+            height=768, width=768,
+        )
+        self.assertEqual(captured["guidance_scale"], 7.5)
+        self.assertEqual(captured["original_size"], (1024, 1024))
+        self.assertEqual(captured["target_size"], (1024, 1024))
+        self.assertEqual(captured["crops_coords_top_left"], (0, 0))
+        self.assertEqual((captured["height"], captured["width"]), (768, 768))
+
+    def test_each_argument_is_independent(self) -> None:
+        """Asking for one must not silently bring the others along."""
+        captured = self._capture_pipeline_kwargs(guidance_scale=5.0)
+        self.assertEqual(captured["guidance_scale"], 5.0)
+        self.assertNotIn("original_size", captured)
+        self.assertNotIn("target_size", captured)
+        self.assertNotIn("crops_coords_top_left", captured)
+
+    def test_reaches_the_legacy_unseeded_path_too(self) -> None:
+        captured: List[Dict[str, Any]] = []
+
+        def _fake_pipeline(prompts_batch: List[str], **kw: Any) -> Any:
+            captured.append(kw)
+            result = MagicMock()
+            result.images = [_make_stub_image() for _ in prompts_batch]
+            return result
+
+        pipeline_stub = MagicMock(side_effect=_fake_pipeline)
+        pipeline_stub.to = MagicMock(return_value=pipeline_stub)
+        _apit = MagicMock()
+        _apit.from_pretrained = MagicMock(return_value=pipeline_stub)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "AutoPipelineForText2Image", _apit):
+                data_generation.generate_dataset(
+                    model_base_name="stub-model",
+                    lora_name=None,
+                    prompts=["An image of Alice"],
+                    output_path=tmp,
+                    guidance_scale=7.5,
+                )
+        self.assertEqual(captured[0]["guidance_scale"], 7.5)
+
+
+class TestGenerationRuntime(unittest.TestCase):
+    """The runtime options reach the pipeline, and the default runtime changes nothing."""
+
+    def _run(self, runtime: Any, seeds: Optional[List[int]] = None) -> MagicMock:
+        pipeline_stub = _make_pipeline_stub()
+        _apit = MagicMock()
+        _apit.from_pretrained = MagicMock(return_value=pipeline_stub)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "AutoPipelineForText2Image", _apit):
+                with patch.object(data_generation, "torch", _make_torch_stub()):
+                    data_generation.generate_dataset(
+                        model_base_name="stub-model",
+                        lora_name=None,
+                        prompts=["An image of Alice"],
+                        output_path=tmp,
+                        seeds=seeds if seeds is not None else [42],
+                        runtime=runtime,
+                    )
+        return pipeline_stub, _apit  # type: ignore[return-value]
+
+    def test_default_runtime_touches_nothing(self) -> None:
+        """No runtime, and no runtime call: the historical behaviour, asserted rather than assumed."""
+        pipeline_stub, _apit = self._run(None)  # type: ignore[misc]
+        pipeline_stub.enable_attention_slicing.assert_not_called()
+        pipeline_stub.enable_vae_slicing.assert_not_called()
+        pipeline_stub.enable_vae_tiling.assert_not_called()
+        self.assertNotIn("device_map", _apit.from_pretrained.call_args.kwargs)
+        pipeline_stub.to.assert_called()
+
+    def test_memory_settings_are_applied(self) -> None:
+        runtime = data_generation.GenerationRuntime(
+            attention_slice_size=1, vae_slicing=True, vae_tiling=True,
+            vae_tile_sample_min_size=512,
+        )
+        pipeline_stub, _ = self._run(runtime)  # type: ignore[misc]
+        pipeline_stub.enable_attention_slicing.assert_called_once_with(1)
+        pipeline_stub.enable_vae_slicing.assert_called_once_with()
+        pipeline_stub.enable_vae_tiling.assert_called_once_with()
+        self.assertEqual(pipeline_stub.vae.tile_sample_min_size, 512)
+        # One eighth of the pixel tile: the autoencoder's own downsampling factor. Without this the
+        # checkpoint's threshold of 128 latent units never fires below 1024 pixels and tiling is a
+        # silent no-op -- which is what took a 768 run down.
+        self.assertEqual(pipeline_stub.vae.tile_latent_min_size, 64)
+
+    def test_device_map_is_passed_and_suppresses_the_move(self) -> None:
+        runtime = data_generation.GenerationRuntime(device_map="balanced")
+        pipeline_stub, _apit = self._run(runtime)  # type: ignore[misc]
+        self.assertEqual(_apit.from_pretrained.call_args.kwargs["device_map"], "balanced")
+        pipeline_stub.to.assert_not_called()
+
+    def test_deterministic_algorithms_can_be_turned_off(self) -> None:
+        """With a graphics card present, the default requests deterministic kernels and the
+        non-default does not -- the flag Stable Diffusion XL above 512 pixels cannot survive."""
+        for requested, expected_calls in ((True, 1), (False, 0)):
+            pipeline_stub = _make_pipeline_stub()
+            _apit = MagicMock()
+            _apit.from_pretrained = MagicMock(return_value=pipeline_stub)
+            mock_torch = _make_torch_stub()
+            mock_torch.cuda.is_available = MagicMock(return_value=True)
+
+            with tempfile.TemporaryDirectory() as tmp:
+                with patch.object(data_generation, "AutoPipelineForText2Image", _apit):
+                    with patch.object(data_generation, "torch", mock_torch):
+                        data_generation.generate_dataset(
+                            model_base_name="stub-model",
+                            lora_name=None,
+                            prompts=["An image of Alice"],
+                            output_path=tmp,
+                            seeds=[42],
+                            runtime=data_generation.GenerationRuntime(
+                                deterministic_algorithms=requested),
+                        )
+            enabling_calls = [c for c in mock_torch.use_deterministic_algorithms.call_args_list
+                              if c == call(True)]
+            self.assertEqual(len(enabling_calls), expected_calls,
+                             f"deterministic_algorithms={requested}")
+
+    def test_device_map_reaches_the_adapter_path(self) -> None:
+        """The on-image path builds its pipeline inside unlearn_lora, so placement must reach it."""
+        captured: Dict[str, Any] = {}
+
+        def _fake_unlearn_lora(*args: Any, **kw: Any) -> Any:
+            captured.update(kw)
+            return None, None, _make_pipeline_stub()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(data_generation, "unlearn_lora", MagicMock(side_effect=_fake_unlearn_lora)):
+                with patch.object(data_generation, "torch", _make_torch_stub()):
+                    data_generation.generate_dataset(
+                        model_base_name="stub-model",
+                        lora_name="stub-adapter",
+                        prompts=["An image of Alice"],
+                        output_path=tmp,
+                        seeds=[42],
+                        runtime=data_generation.GenerationRuntime(device_map="balanced"),
+                    )
+        self.assertEqual(captured["device_map"], "balanced")
+
+
 class TestGlobalRNGSeeding(unittest.TestCase):
     """Verify that torch/numpy/random are seeded at the start of each seed iteration."""
 

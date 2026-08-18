@@ -52,6 +52,7 @@ def unlearn_lora(
     return_original: bool = True,
     return_learned: bool = True,
     variant: Optional[str] = None,
+    device_map: Optional[str] = None,
 ) -> Tuple[Optional[StableDiffusionPipeline], Optional[StableDiffusionPipeline], StableDiffusionPipeline]:
     '''
     id can be both a local dir or a huggingface model id
@@ -63,6 +64,12 @@ def unlearn_lora(
     16 GB machine: its full-precision denoiser alone is 10.3 GB and the read fills system memory
     before the cast can shrink it.
 
+    device_map is passed to from_pretrained when given, e.g. "balanced", which places each component
+    on the graphics card as it is read instead of assembling the whole pipeline in system memory
+    first. When it is set the pipelines are NOT moved with .to(device) afterwards, because placement
+    is then the loader's responsibility. When None (the default) the loads and the move are exactly
+    what they have always been.
+
     Inspired by @inproceedings{zhang2023composing,
         title={Composing Parameter-Efficient Modules with Arithmetic Operations},
         author={Zhang, Jinghan and Chen, Shiqi and Liu, Junteng and He, Junxian},
@@ -72,17 +79,26 @@ def unlearn_lora(
     Source: https://github.com/hkust-nlp/PEM_composition/tree/main/exps/composition_for_unlearning
     '''
     variant_kwargs: Dict[str, Any] = {} if variant is None else {"variant": variant}
+    device_map_kwargs: Dict[str, Any] = {} if device_map is None else {"device_map": device_map}
+
+    def _load() -> Any:
+        '''One pipeline, loaded and placed. Written once so the three loads below cannot drift.'''
+        pipeline = AutoPipelineForText2Image.from_pretrained(
+            model_original_id, torch_dtype=torch.float16, safety_checker=None,
+            **variant_kwargs, **device_map_kwargs,
+        )
+        return pipeline if device_map is not None else pipeline.to(device)
 
     pipeline_original: Optional[StableDiffusionPipeline] = None
     if return_original:
-        pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None, **variant_kwargs).to(device)
+        pipeline_original = _load()
 
     pipeline_learned: Optional[StableDiffusionPipeline] = None
     if return_learned:
-        pipeline_learned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None, **variant_kwargs).to(device)
+        pipeline_learned = _load()
         pipeline_learned.load_lora_weights(model_lora_id, weight_name=weight_name)  # type: ignore
 
-    pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None, **variant_kwargs).to(device)
+    pipeline_unlearned = _load()
     pipeline_unlearned.load_lora_weights(model_lora_id, weight_name=weight_name)
 
     # TODO: put inversion in function
