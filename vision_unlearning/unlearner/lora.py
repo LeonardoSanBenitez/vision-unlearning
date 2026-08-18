@@ -181,6 +181,8 @@ class UnlearnerLora(Unlearner):
     validation_epochs: int = Field(1, description="Run fine-tuning validation every X epochs.")
 
     resolution: int = Field(512, description="Resolution for input images.")
+    micro_conditioning_original_size: Optional[Tuple[int, int]] = Field(None, description="Stable Diffusion XL only. When set, every training example declares this (height, width) as its original size instead of the true size of its own photograph. Leave as None to keep declaring the true size, which is what the checkpoint was pretrained with. Set it to the size declared at generation time when the two would otherwise disagree: the size micro-conditioning is an input to every forward pass, so fitting an adapter under one declaration and using it under another is extrapolation.")  # noqa
+    micro_conditioning_target_size: Optional[Tuple[int, int]] = Field(None, description="Stable Diffusion XL only. When set, every training example declares this (height, width) as its target size instead of (resolution, resolution). Leave as None for the pretraining convention. See micro_conditioning_original_size.")  # noqa
     center_crop: bool = Field(False, description="Whether to center crop the input images.")
     random_flip: bool = Field(False, description="Whether to randomly flip images horizontally.")
 
@@ -489,10 +491,18 @@ class UnlearnerLora(Unlearner):
         pooled_prompt_embeds = outputs_two[0].view(prompt_embeds.shape[0], -1)
 
         assert self._accelerator is not None
-        target_size = (self.resolution, self.resolution)
+        # The two declarations the caller may override. The crop offset is never overridden: it is a
+        # property of how this particular photograph was cropped, not a property of the regime the
+        # adapter is deployed in.
+        target_size = self.micro_conditioning_target_size or (self.resolution, self.resolution)
+        declared_original_sizes: List[Any] = (
+            [self.micro_conditioning_original_size] * len(batch["original_sizes"])
+            if self.micro_conditioning_original_size is not None
+            else batch["original_sizes"]
+        )
         time_ids = torch.cat([
             torch.tensor([list(original_size) + list(crop_top_left) + list(target_size)])
-            for original_size, crop_top_left in zip(batch["original_sizes"], batch["crop_top_lefts"])
+            for original_size, crop_top_left in zip(declared_original_sizes, batch["crop_top_lefts"])
         ]).to(self._accelerator.device, dtype=self._weight_dtype)
 
         return prompt_embeds, {"text_embeds": pooled_prompt_embeds, "time_ids": time_ids}
