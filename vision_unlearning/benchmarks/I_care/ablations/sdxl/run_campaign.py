@@ -2,10 +2,11 @@
 S5/S6 of PLAN-TASK-2026-08-12-SDXL: the full SPARE-unlearning campaign of `Mark_Philippoussis` on
 Stable Diffusion XL.
 
-TRAINING HYPERPARAMETERS ARE NOT SETTLED. The first campaign's selection (Class B, 2026-08-14) was
-made from images generated at 512 and is VOID with the rest of that campaign; plan stage S4 re-runs
-the choice on 768-pixel images. The constants below are still Class B's, so this script trains what
-the void campaign trained until S4 replaces them -- do not start stage S5 before it has.
+TRAINING HYPERPARAMETERS: settled by plan stage S4 on 2026-08-19 (learning rate 6e-4, rank 16, alpha
+4, forget weight 0.3 -- the inherited Stable Diffusion 1.4 values, unchanged). The first campaign's
+selection was made from images generated at 512 and is void with the rest of that campaign; the
+constants below are the ten-epoch, 768-pixel selection that replaced it. See the constants' own
+comment for the evidence and for the alternative that was rejected.
 
 Two `--stage` values, always their own process, and `--stage generate` does EXACTLY ONE epoch/off-
 baseline per invocation, never a batch inside one process (C11, extended by S2's one-pipeline-per-
@@ -53,107 +54,37 @@ import argparse
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from vision_unlearning.utils.data_generation import GenerationRuntime
-
+import campaign_configuration as cfg
+from campaign_configuration import (
+    GENERATION_KWARGS,
+    GENERATION_RESOLUTION,
+    GENERATION_RUNTIME,
+    build_generation_pipeline,
+    checkpoint_list,
+    generation_order,
+)
 from watchdog import ResourceMonitor, check_headroom
 
-_HERE = Path(__file__).resolve().parent
-_OUT = _HERE / "assets"
-_ICARE_DIR = _HERE.parents[1]
-_EVERY_EPOCH_ASSETS = _HERE.parent / "every_epoch" / "assets"
-_SELECTION = _EVERY_EPOCH_ASSETS / "selection_people.json"
-_CHECKPOINT_LIST_SOURCE = _EVERY_EPOCH_ASSETS / "epoch_grid_campaign_people_seed42.json"
-_SPLIT_BASE = _ICARE_DIR / "assets" / "datasets" / "lfw_splits_filtered"
-
-_MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
-_VAE_ID = "madebyollin/sdxl-vae-fp16-fix"
-_TASK = "people"
-_METHOD = "distil"
-# Training resolution: the same 768 the images are generated at (D3). At 512 the peak was 10.837 GB
-# of 11.98 without gradient checkpointing; at 768 with it the spike measured 9.435 GB, so
-# checkpointing is what makes this fit and it is not optional here.
-_TRAIN_RESOLUTION = 768
-_GRADIENT_CHECKPOINTING = True
-# D14: training declares the same size micro-conditioning generation declares. Fitting the adapter
-# under the photographs' own 250x250 and using it under 1024 cost half the measured effect
-# (adapter_transfer.json), and moving to 768 removed the rest.
-_TRAIN_MICRO_CONDITIONING_ORIGINAL_SIZE = (1024, 1024)
-_TRAIN_MICRO_CONDITIONING_TARGET_SIZE = (1024, 1024)
-_N_EPOCHS = 200
-_VARIANT = "fp16"
-
-# Class B of the void campaign, kept as a placeholder until plan stage S4 chooses the hyperparameters
-# again on 768-pixel images (see the module docstring). Batch size, accumulation and epoch semantics
-# are held at D8's own measured/unchanged values (see run_schedule_probe.py's identical override).
-_LEARNING_RATE = 1e-4
-_LORA_R = 4
-_LORA_ALPHA = 4
-_FORGET_WEIGHT = 0.5
-
+_OUT = cfg.OUT
 _MODEL_DIR = _OUT / "campaign_model"
 _MANIFEST_TEMPLATE = "campaign_seed{seed}.json"
+_N_EPOCHS = 200
 
-# --- The frozen generation configuration (plan section 2.1) ------------------------------------- #
-# Validated in assets/VALIDATION_REPORT_01.md and fixed for the rest of the task: 20 of 20
-# off-baselines depict the right person at both campaign seeds. Every image the campaign produces --
-# off-baselines, on-images, controls -- is generated with exactly these values, one entity per call.
-_GENERATION_RESOLUTION = 768
-_GENERATION_KWARGS: Dict[str, Any] = {
-    "guidance_scale": 7.5,
-    "original_size": (1024, 1024),
-    "target_size": (1024, 1024),
-    "crops_coords_top_left": (0, 0),
-}
-# Card settings required at 768 on this machine, measured in spike_768.py: without tiling forced to
-# 512-pixel tiles the autoencoder never tiles below 1024 pixels, and with deterministic algorithms on
-# a convolution dies with `HIP error: unspecified launch failure`.
-_GENERATION_RUNTIME = GenerationRuntime(
-    attention_slice_size=1,
-    vae_slicing=True,
-    vae_tiling=True,
-    vae_tile_sample_min_size=512,
-    deterministic_algorithms=False,
-    device_map="balanced",
-)
-
-
-def _checkpoint_list() -> List[int]:
-    '''Reads the 13-entry checkpoint list from the every-epoch campaign's own JSON. Never retyped.'''
-    payload = json.loads(_CHECKPOINT_LIST_SOURCE.read_text(encoding="utf-8"))
-    epochs = payload["epochs"]
-    assert isinstance(epochs, list) and all(isinstance(e, int) for e in epochs), \
-        f"unexpected 'epochs' shape in {_CHECKPOINT_LIST_SOURCE}: {epochs!r}"
-    return epochs
-
-
-def _generation_order() -> List[Dict[str, Any]]:
-    '''The ten entities (target + nine receivers), in the fixed generation order `make_epoch_grid.py`
-    uses: sorted by each entity's own clip_diff / self_clip_diff, ascending (most negative first).
-    This is NOT the display/column order (a later, per-seed presentation choice at S8) -- it is what
-    fixes each entity's position in the random-number sequence, and it must match the every-epoch
-    grids' own ordering for the images to be comparable at all.
-    '''
-    from vision_unlearning.datasets.testbed import get_target_overwrite
-
-    selection = json.loads(_SELECTION.read_text(encoding="utf-8"))
-    raw: List[Tuple[str, float]] = [(selection["target"]["name"], selection["target"]["self_clip_diff"])]
-    raw += [(r["name"], r["clip_diff"]) for r in selection["receivers"]]
-    raw.sort(key=lambda item: item[1])
-    assert len(raw) == 10, f"expected 10 entities (target + 9 receivers), got {len(raw)}"
-
-    order = []
-    for name, sort_value in raw:
-        target_pre, target_over = get_target_overwrite(_TASK, _METHOD, name)  # type: ignore[arg-type]
-        order.append({
-            "name": name,
-            "prompt": f"An image of {target_pre}",
-            "overwrite_concept": target_over,
-            "sort_value": sort_value,
-            "is_target": name == selection["target"]["name"],
-        })
-    return order
+# The hyperparameters plan stage S4 selected on 2026-08-19: the inherited Stable Diffusion 1.4 values,
+# unchanged, which is what makes the base model the only variable against the existing Stable Diffusion
+# 1.4 curves. Evidence, on 768-pixel images at the frozen generation configuration: the target's
+# clip_diff runs +2.37 / +4.22 / -6.58 / -6.00 over epochs 1/3/5/10 against a 2.258 noise floor, and the
+# epoch-5 and epoch-10 images show the target replaced by the overwrite concept (a child) rather than
+# collapsing. The alternative tried and rejected -- learning rate 1e-4, rank 4, forget weight 0.5 --
+# left the target recognisably himself at every checkpoint (assets/schedule_probe_lr1e-04_r4_a4_fw0.5.json).
+# Everything else about the training and generation configuration lives in `campaign_configuration.py`,
+# which `run_schedule_probe.py` reads too, so the selection was made under what this script runs.
+_LEARNING_RATE = 6e-4
+_LORA_R = 16
+_LORA_ALPHA = 4
+_FORGET_WEIGHT = 0.3
 
 
 def _append_manifest(seed: int, rows: List[Dict[str, Any]]) -> None:
@@ -166,71 +97,37 @@ def _append_manifest(seed: int, rows: List[Dict[str, Any]]) -> None:
 
 
 def _stage_train(seed: int) -> None:
-    '''Trains 200 epochs under D8 Class B, saving adapters at the 13-entry checkpoint list.'''
+    '''Trains 200 epochs at the S4-selected hyperparameters, saving adapters at the 13-entry checkpoint list.'''
     check_headroom()
 
     from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
-    from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
-
     from step_check_support import StopAfterTraining, restore_post_training, stub_post_training
 
-    checkpoints = _checkpoint_list()
-    order = _generation_order()
+    checkpoints = checkpoint_list()
+    order = generation_order()
     target_name = next(e["name"] for e in order if e["is_target"])
     target_overwrite = next(e["overwrite_concept"] for e in order if e["is_target"])
-    split_base = _SPLIT_BASE / target_name
+    split_base = cfg.SPLIT_BASE / target_name
     assert (split_base / "train_forget").is_dir() and (split_base / "train_retain").is_dir(), \
-        f"forget/retain splits missing for {_TASK}/{target_name} under {split_base}"
+        f"forget/retain splits missing for {cfg.TASK}/{target_name} under {split_base}"
 
     model_dir = _MODEL_DIR / f"seed{seed}"
     if model_dir.exists():
         import shutil
         shutil.rmtree(model_dir)
 
-    hyperparameters: Dict[str, Any] = {
-        "output_dir": str(model_dir),
-        "hub_model_id": None,
-        # Post-training evaluation is stubbed below, same reason as every check in this task: building
-        # the pipelines `unlearn_lora` needs for it, on top of the training-time weights still
-        # resident, is the three-simultaneous-pipeline condition C7/S2 measured dangerous.
-        "final_eval_prompts_forget": [],
-        "final_eval_prompts_retain": [],
-        "model_name_or_path": _MODEL_ID,
-        "pretrained_vae_model_name_or_path": _VAE_ID,
-        "variant": _VARIANT,
-        "dataset_forget_name": str(split_base / "train_forget"),
-        "dataset_retain_name": str(split_base / "train_retain"),
-        "validation_prompt": None,
-        "dataloader_num_workers": 0,
-        "resolution": _TRAIN_RESOLUTION,
-        "gradient_checkpointing": _GRADIENT_CHECKPOINTING,
-        "micro_conditioning_original_size": _TRAIN_MICRO_CONDITIONING_ORIGINAL_SIZE,
-        "micro_conditioning_target_size": _TRAIN_MICRO_CONDITIONING_TARGET_SIZE,
-        "device": "cuda",
-        "mixed_precision": "fp16",
-        "learning_rate": _LEARNING_RATE,
-        "max_grad_norm": 5.0,
-        "num_train_epochs": _N_EPOCHS,
-        "validation_epochs": _N_EPOCHS + 1,
-        "checkpointing_steps": 100000,
-        "lr_scheduler_type": "constant",
-        "lr_warmup_steps": 0,
-        "save_strategy": "epoch",
-        "save_total_limit": 2,
-        "random_flip": True,
-        "lora_r": _LORA_R,
-        "target_modules": ["to_k", "to_q", "to_v", "to_out.0"],
-        "lora_alpha": _LORA_ALPHA,
-        "lora_dropout": 0.2,
-        "seed": seed,
-        "per_device_train_batch_size": 1,
-        "gradient_accumulation_steps": 4,
-        "overwritting_concept": target_overwrite,
-        "gradient_weighting_method": GradientWeightingMethodSimple(forget_weight=_FORGET_WEIGHT, retain_weight=1.0),
-        "save_lora_at_epochs": checkpoints,
-        "compute_runtimes": False,
-        "compute_memory": True,
-    }
+    hyperparameters = cfg.training_hyperparameters(
+        output_dir=model_dir,
+        split_base=split_base,
+        overwrite_concept=target_overwrite,
+        seed=seed,
+        n_epochs=_N_EPOCHS,
+        save_lora_at_epochs=checkpoints,
+        learning_rate=_LEARNING_RATE,
+        lora_r=_LORA_R,
+        lora_alpha=_LORA_ALPHA,
+        forget_weight=_FORGET_WEIGHT,
+    )
 
     monitor = ResourceMonitor(_OUT / f"campaign_train_seed{seed}_monitor.log", interval_s=30.0)
     original_unlearn_lora = stub_post_training()
@@ -254,7 +151,6 @@ def _stage_train(seed: int) -> None:
     result = {
         "stage": "train",
         "seed": seed,
-        "hyperparameter_class": "B",
         "hyperparameters": {
             "learning_rate": _LEARNING_RATE, "lora_r": _LORA_R, "lora_alpha": _LORA_ALPHA,
             "forget_weight": _FORGET_WEIGHT,
@@ -277,7 +173,7 @@ def _resolve_epochs(seed: int, epochs_arg: str) -> List[Any]:
     function's job is to compute the full remaining set (for the "how many are left" figure it
     prints), never to hand back something the caller is expected to loop over inside one process.
     '''
-    checkpoints = _checkpoint_list()
+    checkpoints = checkpoint_list()
     manifest_path = _OUT / _MANIFEST_TEMPLATE.format(seed=seed)
     already_generated: set = set()
     if manifest_path.is_file():
@@ -302,40 +198,6 @@ def _resolve_epochs(seed: int, epochs_arg: str) -> List[Any]:
     epoch = int(epochs_arg)
     assert epoch in checkpoints, f"epoch {epoch} is not in the checkpoint list {checkpoints}"
     return [] if epoch in already_generated else [epoch]
-
-
-def _build_generation_pipeline(lora_name: Optional[str]) -> Any:
-    '''Builds the one pipeline the ten per-entity calls share, adapted or not.
-
-    `generate_dataset` builds its own pipeline whenever it is given `model_base_name` or `lora_name`,
-    which for ten calls would mean ten builds inside one process -- the condition S2 measured driving
-    free system memory to ~1.3 GB, and about eleven hours of pure loading over the campaign. So the
-    build is hoisted here and handed to every call as `model_pipeline`. The two branches are the same
-    two the library itself takes (`utils/data_generation.py`), with the same arguments; the runtime
-    settings are NOT applied here, because `generate_dataset` applies them to whatever pipeline it is
-    given.
-
-    @param lora_name: the adapter directory for an on-image epoch, or None for the off-baseline.
-    @return: the pipeline, already placed by the loader's own device map.
-    '''
-    import torch
-    from diffusers import AutoPipelineForText2Image
-
-    from vision_unlearning.unlearner.lora import unlearn_lora
-
-    if lora_name is not None:
-        _, _, pipeline = unlearn_lora(
-            _MODEL_ID, lora_name, device="cuda",
-            weight_name="pytorch_lora_weights.safetensors",
-            # C9: SPARE (distil) leaves the unlearned pipeline as trained.
-            requires_inversion=False, return_original=False, return_learned=False,
-            variant=_VARIANT, device_map=_GENERATION_RUNTIME.device_map,
-        )
-        return pipeline
-    return AutoPipelineForText2Image.from_pretrained(
-        _MODEL_ID, torch_dtype=torch.float16, safety_checker=None,
-        variant=_VARIANT, device_map=_GENERATION_RUNTIME.device_map,
-    )
 
 
 def _stage_generate(seed: int, epochs_arg: str) -> None:
@@ -378,7 +240,7 @@ def _stage_generate(seed: int, epochs_arg: str) -> None:
 
     from vision_unlearning.utils.data_generation import generate_dataset
 
-    order = _generation_order()
+    order = generation_order()
     gen_dir = _OUT / f"campaign_seed{seed}"
     gen_dir.mkdir(parents=True, exist_ok=True)
     model_dir = _MODEL_DIR / f"seed{seed}"
@@ -417,7 +279,7 @@ def _stage_generate(seed: int, epochs_arg: str) -> None:
                 continue
             t_image = time.time()
             if pipeline is None:
-                pipeline = _build_generation_pipeline(lora_name)
+                pipeline = build_generation_pipeline(lora_name)
             generate_dataset(
                 model_base_name=None,
                 lora_name=None,
@@ -427,10 +289,10 @@ def _stage_generate(seed: int, epochs_arg: str) -> None:
                 filenames=[filename],
                 seeds=[seed],
                 batch_size=1,
-                height=_GENERATION_RESOLUTION,
-                width=_GENERATION_RESOLUTION,
-                runtime=_GENERATION_RUNTIME,
-                **_GENERATION_KWARGS,
+                height=GENERATION_RESOLUTION,
+                width=GENERATION_RESOLUTION,
+                runtime=GENERATION_RUNTIME,
+                **GENERATION_KWARGS,
             )
             assert path.is_file(), f"generate_dataset did not write {path}"
             per_entity.append({"entity": entity["name"], "seconds": round(time.time() - t_image, 1),

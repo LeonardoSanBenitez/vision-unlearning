@@ -114,7 +114,7 @@ def train_one_step(work_dir: Path, monitor_log: Path) -> Dict[str, Any]:
         # Half precision with the half-precision-safe autoencoder: plan D4/D4b. Full precision is
         # measured impossible here -- the denoiser weights alone are about 13.9 GB against 11.984.
         "mixed_precision": "fp16",
-        # The campaign's own hyperparameters (plan D8, Class A), so this measures what will run.
+        # The campaign's own hyperparameters (learning rate 6e-4, rank 16), so this measures what will run.
         "learning_rate": 6e-4,
         "max_grad_norm": 5.0,
         "num_train_epochs": 1,
