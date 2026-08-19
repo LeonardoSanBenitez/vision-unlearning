@@ -34,7 +34,7 @@ STYLE_ENTITIES: List[str] = ["Abstractionism", "Artist_Sketch", "Blossom_Season"
 "Defoliation", "Dreamwave", "Early_Autumn", "Expressionism", "Fauvism", "Foliage_Patchwork", "French", "Glowing_Sunset",
 "Gorgeous_Love", "Greenfield", "Impasto", "Impressionism", "Ink_Art", "Joy", "Liquid_Dreams",
 "Magic_Cube", "Meta_Physics", "Meteor_Shower", "Monet", "Mosaic", "Neon_Lines", "On_Fire", "Palette_Knife",
-"Pastel", "Pencil_Drawing", "Picasso", "Pointillism", "Pop_Art", "Rainwash", "Realistic_Watercolor" "Red_Blue_Ink", "Rust", "Seed_Images",
+"Pastel", "Pencil_Drawing", "Picasso", "Pointillism", "Pop_Art", "Rainwash", "Realistic_Watercolor", "Red_Blue_Ink", "Rust", "Seed_Images",
 "Sketch", "Sponge_Dabbed", "Structuralism", "Superstring", "Surrealism", "Techno", "Ukiyoe",
 "Van_Gogh", "Vibrant_Flow", "Warm_Love", "Warm_Smear", "Watercolor", "Winter"]   # 51, == their theme_available
 # OBJECT_ENTITIES: List[str] = ["Architectures", "Bears", "Birds", "Butterfly", "Cats", "Dogs", "Fishes", "Flame", "Flowers", "Frogs", "Horses", "Human", "Jellyfish", "Rabbits", "Sandwiches", "Sea", "Statues", "Towers", "Trees", "Waterfalls"]  # 20, == their class_available
