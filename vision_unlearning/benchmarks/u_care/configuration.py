@@ -29,14 +29,26 @@ type_me = Literal[
 # trained with label index == position in theme_available / class_available, so argmax
 # index i means STYLE_ENTITIES[i] (or OBJECT_ENTITIES[i]); a reordered list mislabels
 # every prediction while still looking plausible.
+
+
+# STYLE_ENTITIES: List[str] = ["Abstractionism", "Artist_Sketch", "Blossom_Season", "Blue_Blooming", "Bricks", "Byzantine", "Cartoon",
+# "Cold_Warm", "Color_Fantasy", "Comic_Etch", "Crayon", "Crypto_Punks", "Cubism", "Dadaism", "Dapple",
+# "Defoliation", "Dreamwave", "Early_Autumn", "Expressionism", "Fauvism", "Foliage_Patchwork", "French", "Glowing_Sunset",
+# "Gorgeous_Love", "Greenfield", "Impasto", "Impressionism", "Ink_Art", "Joy", "Liquid_Dreams",
+# "Magic_Cube", "Meta_Physics", "Meteor_Shower", "Monet", "Mosaic", "Neon_Lines", "On_Fire", "Palette_Knife",
+# "Pastel", "Pencil_Drawing", "Picasso", "Pointillism", "Pop_Art", "Rainwash", "Realistic_Watercolor", "Red_Blue_Ink", "Rust", "Seed_Images",
+# "Sketch", "Sponge_Dabbed", "Structuralism", "Superstring", "Surrealism", "Techno", "Ukiyoe",
+# "Van_Gogh", "Vibrant_Flow", "Warm_Love", "Warm_Smear", "Watercolor", "Winter"]   # 51, == their theme_available
+
 STYLE_ENTITIES: List[str] = ["Abstractionism", "Artist_Sketch", "Blossom_Season", "Blue_Blooming", "Bricks", "Byzantine", "Cartoon",
 "Cold_Warm", "Color_Fantasy", "Comic_Etch", "Crayon", "Crypto_Punks", "Cubism", "Dadaism", "Dapple",
 "Defoliation", "Dreamwave", "Early_Autumn", "Expressionism", "Fauvism", "Foliage_Patchwork", "French", "Glowing_Sunset",
 "Gorgeous_Love", "Greenfield", "Impasto", "Impressionism", "Ink_Art", "Joy", "Liquid_Dreams",
 "Magic_Cube", "Meta_Physics", "Meteor_Shower", "Monet", "Mosaic", "Neon_Lines", "On_Fire", "Palette_Knife",
 "Pastel", "Pencil_Drawing", "Picasso", "Pointillism", "Pop_Art", "Rainwash", "Realistic_Watercolor", "Red_Blue_Ink", "Rust", "Seed_Images",
-"Sketch", "Sponge_Dabbed", "Structuralism", "Superstring", "Surrealism", "Techno", "Ukiyoe",
-"Van_Gogh", "Vibrant_Flow", "Warm_Love", "Warm_Smear", "Watercolor", "Winter"]   # 51, == their theme_available
+"Sketch", "Sponge_Dabbed", "Structuralism"]   # 51, == their theme_available
+
+
 # OBJECT_ENTITIES: List[str] = ["Architectures", "Bears", "Birds", "Butterfly", "Cats", "Dogs", "Fishes", "Flame", "Flowers", "Frogs", "Horses", "Human", "Jellyfish", "Rabbits", "Sandwiches", "Sea", "Statues", "Towers", "Trees", "Waterfalls"]  # 20, == their class_available
 OBJECT_ENTITIES : List[str] = ["Architectures"]
 
@@ -45,9 +57,9 @@ ENTITIES: List[str] = STYLE_ENTITIES + OBJECT_ENTITIES               # 71
 # print(len(STYLE_ENTITIES))
 
 # Fail loudly at import if any list drifts.
-assert len(STYLE_ENTITIES) == 61 # change to 51
+assert len(STYLE_ENTITIES) == 51 # change to 51
 assert len(OBJECT_ENTITIES) == 1 # change to 20
-assert len(ENTITIES) == 62
+assert len(ENTITIES) == 52
 assert set(STYLE_ENTITIES).isdisjoint(OBJECT_ENTITIES)
 
 # --- "can be unlearned" logic (the one entity that cannot) ---
@@ -64,7 +76,7 @@ def is_unlearnable(entity: str) -> bool:
 
 
 UNLEARNABLE_ENTITIES: List[str] = [e for e in ENTITIES if is_unlearnable(e)]  # 70
-assert len(UNLEARNABLE_ENTITIES) == 61
+assert len(UNLEARNABLE_ENTITIES) == 51
 
 
 def entity_domain(entity: str) -> type_domain:

@@ -1,0 +1,368 @@
+[
+  {
+    "name": "Abstractionism",
+    "index": 0,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Artist_Sketch",
+    "index": 1,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Blossom_Season",
+    "index": 2,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Blue_Blooming",
+    "index": 3,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Bricks",
+    "index": 4,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Byzantine",
+    "index": 5,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Cartoon",
+    "index": 6,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Cold_Warm",
+    "index": 7,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Color_Fantasy",
+    "index": 8,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Comic_Etch",
+    "index": 9,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Crayon",
+    "index": 10,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Crypto_Punks",
+    "index": 11,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Cubism",
+    "index": 12,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Dadaism",
+    "index": 13,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Dapple",
+    "index": 14,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Defoliation",
+    "index": 15,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Dreamwave",
+    "index": 16,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Early_Autumn",
+    "index": 17,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Expressionism",
+    "index": 18,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Fauvism",
+    "index": 19,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Foliage_Patchwork",
+    "index": 20,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "French",
+    "index": 21,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Glowing_Sunset",
+    "index": 22,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Gorgeous_Love",
+    "index": 23,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Greenfield",
+    "index": 24,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Impasto",
+    "index": 25,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Impressionism",
+    "index": 26,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Ink_Art",
+    "index": 27,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Joy",
+    "index": 28,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Liquid_Dreams",
+    "index": 29,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Magic_Cube",
+    "index": 30,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Meta_Physics",
+    "index": 31,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Meteor_Shower",
+    "index": 32,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Monet",
+    "index": 33,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Mosaic",
+    "index": 34,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Neon_Lines",
+    "index": 35,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "On_Fire",
+    "index": 36,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Palette_Knife",
+    "index": 37,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Pastel",
+    "index": 38,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Pencil_Drawing",
+    "index": 39,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Picasso",
+    "index": 40,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Pointillism",
+    "index": 41,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Pop_Art",
+    "index": 42,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Rainwash",
+    "index": 43,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Realistic_WatercolorRed_Blue_Ink",
+    "index": 44,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Rust",
+    "index": 45,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Seed_Images",
+    "index": 46,
+    "domain": "style",
+    "unlearnable": false
+  },
+  {
+    "name": "Sketch",
+    "index": 47,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Sponge_Dabbed",
+    "index": 48,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Structuralism",
+    "index": 49,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Superstring",
+    "index": 50,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Surrealism",
+    "index": 51,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Techno",
+    "index": 52,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Ukiyoe",
+    "index": 53,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Van_Gogh",
+    "index": 54,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Vibrant_Flow",
+    "index": 55,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Warm_Love",
+    "index": 56,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Warm_Smear",
+    "index": 57,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Watercolor",
+    "index": 58,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Winter",
+    "index": 59,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Architectures",
+    "index": 60,
+    "domain": "object",
+    "unlearnable": true
+  }
+]
