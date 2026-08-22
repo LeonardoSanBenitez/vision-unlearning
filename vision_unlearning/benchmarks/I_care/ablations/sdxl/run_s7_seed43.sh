@@ -39,7 +39,11 @@ if [ "$STATUS" -ne 0 ]; then
 fi
 
 cd "$HERE" || exit 3
-LABELS="$(PYTHONPATH="$REPO_ROOT" "$PY" run_campaign.py --stage labels --seed "$SEED")"
+# tr -d strips any carriage return the interpreter's stdout translation may add. A label
+# carrying an invisible carriage return produces a stage that fails identically eight times
+# over and reports nothing useful, which is what happened to the seed-43 generation half on
+# 2026-08-22. The labels stage itself now writes plain newlines; this is the second belt.
+LABELS="$(PYTHONPATH="$REPO_ROOT" "$PY" run_campaign.py --stage labels --seed "$SEED" | tr -d "\r")"
 if [ -z "$LABELS" ]; then
     echo "S7_FAILED stage=labels status=empty"
     exit 6

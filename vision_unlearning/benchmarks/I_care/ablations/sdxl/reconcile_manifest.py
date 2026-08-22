@@ -28,6 +28,36 @@ from typing import Any, Dict, List
 _HERE = Path(__file__).resolve().parent
 
 
+def reconcile(manifest_path: Path, expected_epochs: int, expected_entities: int) -> Dict[str, Any]:
+    '''The three counts and whether they agree, as data. `main` only prints what this returns.
+
+    @param manifest_path: a campaign-shaped manifest of {epoch, entity, path, seed} rows.
+    @param expected_epochs: distinct epoch values expected, counting the off-baseline as one.
+    @param expected_entities: entities expected at every epoch.
+    @return: the counts, the disagreements, and an `agrees` flag.
+    '''
+    rows: List[Dict[str, Any]] = json.loads(manifest_path.read_text(encoding="utf-8"))
+    epochs = sorted({row["epoch"] for row in rows}, key=lambda e: (e is not None, e))
+    entities = sorted({row["entity"] for row in rows})
+    per_epoch = Counter(row["epoch"] for row in rows)
+    directories = sorted({str(Path(row["path"]).parent) for row in rows})
+    missing = [row["path"] for row in rows if not Path(row["path"]).is_file()]
+    on_disk = sum(len(list(Path(directory).glob("*.png"))) for directory in directories)
+    expected_rows = expected_epochs * expected_entities
+    wrong_sized_epochs = {epoch: count for epoch, count in per_epoch.items()
+                          if count != expected_entities}
+    return {
+        "manifest": str(manifest_path), "directories": directories,
+        "rows": len(rows), "expected_rows": expected_rows,
+        "expected_epochs": expected_epochs, "expected_entities": expected_entities,
+        "epochs": epochs, "entities": entities,
+        "wrong_sized_epochs": wrong_sized_epochs, "missing": missing, "on_disk": on_disk,
+        "agrees": (len(rows) == expected_rows and len(epochs) == expected_epochs
+                   and len(entities) == expected_entities and not wrong_sized_epochs
+                   and not missing and on_disk == expected_rows),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manifest against disk, with the arithmetic written out.")
     parser.add_argument("--manifest", required=True)
@@ -37,25 +67,16 @@ def main() -> int:
     args = parser.parse_args()
 
     manifest_path = _HERE / args.manifest
-    rows: List[Dict[str, Any]] = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    epochs = sorted({row["epoch"] for row in rows}, key=lambda e: (e is not None, e))
-    entities = sorted({row["entity"] for row in rows})
-    per_epoch = Counter(row["epoch"] for row in rows)
-    directories = sorted({str(Path(row["path"]).parent) for row in rows})
-    missing = [row["path"] for row in rows if not Path(row["path"]).is_file()]
-
-    on_disk = 0
-    for directory in directories:
-        on_disk += len(list(Path(directory).glob("*.png")))
-
-    expected_rows = args.expected_epochs * args.expected_entities
-    wrong_sized_epochs = {epoch: count for epoch, count in per_epoch.items()
-                          if count != args.expected_entities}
+    result = reconcile(manifest_path, args.expected_epochs, args.expected_entities)
+    epochs, entities = result["epochs"], result["entities"]
+    directories, missing = result["directories"], result["missing"]
+    on_disk, expected_rows = result["on_disk"], result["expected_rows"]
+    wrong_sized_epochs = result["wrong_sized_epochs"]
+    n_rows = result["rows"]
 
     print(f"manifest: {manifest_path}")
     print(f"image directories: {directories}")
-    print(f"manifest rows: {len(rows)}; expected {args.expected_epochs} epochs x "
+    print(f"manifest rows: {n_rows}; expected {args.expected_epochs} epochs x "
           f"{args.expected_entities} entities = {expected_rows}")
     print(f"distinct epoch values: {len(epochs)} {epochs}")
     print(f"distinct entities: {len(entities)}")
@@ -64,12 +85,9 @@ def main() -> int:
           f"(checked every row, not a sample){' ' + str(missing[:5]) if missing else ''}")
     print(f"png files in those directories: {on_disk}")
 
-    agrees = (len(rows) == expected_rows and len(epochs) == args.expected_epochs
-              and len(entities) == args.expected_entities and not wrong_sized_epochs
-              and not missing and on_disk == expected_rows)
-    print(f"RECONCILE {'OK' if agrees else 'MISMATCH'} rows={len(rows)} expected={expected_rows} "
-          f"on_disk={on_disk} missing={len(missing)}")
-    return 0 if agrees else 1
+    print(f"RECONCILE {'OK' if result['agrees'] else 'MISMATCH'} rows={n_rows} "
+          f"expected={expected_rows} on_disk={on_disk} missing={len(missing)}")
+    return 0 if result["agrees"] else 1
 
 
 if __name__ == "__main__":

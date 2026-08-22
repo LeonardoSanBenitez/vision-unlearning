@@ -97,7 +97,33 @@ def _append_manifest(seed: int, rows: List[Dict[str, Any]]) -> None:
 
 
 def _stage_train(seed: int) -> None:
-    '''Trains 200 epochs at the S4-selected hyperparameters, saving adapters at the 13-entry checkpoint list.'''
+    '''Trains 200 epochs at the S4-selected hyperparameters, saving adapters at the 13-entry checkpoint list.
+
+    A seed whose training has ALREADY finished is not retrained: this returns after printing the
+    completion marker. "Finished" is two conditions together, and both are needed — the result record
+    exists, which is only written after the last checkpoint, and every checkpoint file is on disk. A
+    run interrupted halfway leaves the checkpoints without the record, so it retrains, which is what
+    should happen.
+
+    This is not a convenience. The driver re-runs every stage from the top after any failure, and
+    without this guard a generation bug costs an hour of retraining that produces different adapters
+    from the ones the earlier stages were validated against. To retrain deliberately, delete
+    `assets/campaign_train_seed{seed}.json`.
+    '''
+    record_path = _OUT / f"campaign_train_seed{seed}.json"
+    checkpoints_expected = checkpoint_list()
+    existing = [n for n in checkpoints_expected
+                if (_MODEL_DIR / f"seed{seed}" / f"epoch-{n}" / "pytorch_lora_weights.safetensors").is_file()]
+    if record_path.is_file() and len(existing) == len(checkpoints_expected):
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        print(json.dumps({"stage": "train", "seed": seed, "note": "already trained -- not retraining",
+                          "checkpoints_on_disk": len(existing),
+                          "train_seconds": record.get("train_seconds")}, indent=2))
+        print(f"CAMPAIGN_TRAIN_DONE seed={seed} checkpoints={len(existing)} "
+              f"seconds={record.get('train_seconds')} "
+              f"peak_vram_used_gb={record.get('peak_vram_used_gb')}")
+        return
+
     check_headroom()
 
     from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
@@ -337,6 +363,15 @@ def _stage_labels() -> None:
     selector names every stage `remaining` and each one overwrites the last (which is exactly what
     happened to the ten logs of the seed-42 second half on 2026-08-19).
     '''
+    # Line endings matter here in a way they do not for a human-read log: this output is consumed
+    # by a shell driver through command substitution, and on Windows the default text-mode stdout
+    # translates every newline into a carriage return plus a newline. Bash strips the trailing
+    # newline and keeps the carriage return, so the driver ends up asking for an epoch whose name
+    # carries an invisible control character, every stage dies with a ValueError, and the failure
+    # presents as eight identical attempts with no explanation. Writing the newline explicitly
+    # removes the translation. Measured on 2026-08-22, at the cost of the seed-43 generation half.
+    import sys
+    sys.stdout.reconfigure(newline=chr(10))  # type: ignore[union-attr]
     print("off")
     for epoch in checkpoint_list():
         print(epoch)
