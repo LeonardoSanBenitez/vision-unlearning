@@ -9,6 +9,12 @@ import pytest
 import vision_unlearning.benchmarks.u_care.configuration as cfg
 import vision_unlearning.benchmarks.u_care.generated_dataset as generated_dataset_mod
 import vision_unlearning.benchmarks.u_care.metadata as metadata_mod
+from vision_unlearning.benchmarks.u_care.pipeline_06_compute_interference_per_pair import (
+    receiver_image_filenames,
+)
+from vision_unlearning.benchmarks.u_care.pipeline_07_compute_interference_per_entity import (
+    aggregate_entity_metrics,
+)
 
 
 class TestConfigurationInvariants:
@@ -43,6 +49,25 @@ class TestGeneratedDatasetValidator:
 
         with pytest.raises(ValueError, match="both be set"):
             generated_dataset_mod.GeneratedDataset(base_folder="assets", method="uce")
+
+
+class TestStage2EvaluationLogic:
+    def test_receiver_slices_have_expected_grid_sizes(self) -> None:
+        assert len(receiver_image_filenames("Van_Gogh", [188], "off")) == 20
+        assert len(receiver_image_filenames("Cats", [188], "off")) == 51
+        assert receiver_image_filenames("Van_Gogh", [188], "off")[0].startswith(
+            "off_188_A Architectures image in Van Gogh style..png"
+        )
+
+    def test_entity_aggregates_use_receiver_domains(self) -> None:
+        pair_metrics = {
+            receiver: {"accuracy": 1.0 if receiver != "Van_Gogh" else 0.25}
+            for receiver in cfg.ENTITIES
+        }
+        result = aggregate_entity_metrics("Van_Gogh", pair_metrics)
+        assert result["Unlearning accuracy"] == 0.75
+        assert result["In domain retain accuracy"] == 1.0
+        assert result["Cross domain retain accuracy"] == 1.0
 
 
 class TestGeneratedDatasetLifecycle:
