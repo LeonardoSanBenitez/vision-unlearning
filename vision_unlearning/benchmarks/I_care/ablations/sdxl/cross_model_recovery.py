@@ -132,17 +132,35 @@ def main() -> None:
             f"{row['sdxl_final']:.2f} | {row['sdxl_recovery']:+.0%} |")
     table_path = output_path.with_suffix(".md")
     table_path.write_text("\n".join(table) + "\n", encoding="utf-8")
-    (output_path.with_suffix(".json")).write_text(
-        json.dumps({"seed": args.seed, "sd14_floor": sd14_floor, "sdxl_floor": sdxl_floor,
-                    "rows": rows}, indent=2), encoding="utf-8")
 
+    summary: Dict[str, Any] = {}
     for model, floor in [("sd14", sd14_floor), ("sdxl", sdxl_floor)]:
         moved = [row for row in rows if row[f"{model}_moved"]]
         recovered = [row for row in moved if row[f"{model}_recovery"] >= 0.5]
         mean_recovery = sum(row[f"{model}_recovery"] for row in moved) / len(moved) if moved else 0.0
+        # A recovery fraction computed from a peak that barely cleared the floor is mostly noise: the
+        # denominator is small, so the ratio swings on a fraction of a CLIP point. The second figure
+        # restricts to RECEIVERS -- the target is excluded, it is supposed to stay destroyed -- whose
+        # peak reached twice the floor, which is where the ratio starts to mean something.
+        clearly = [row for row in rows
+                   if not row["is_target"] and row[f"{model}_peak"] > 2.0 * floor]
+        clearly_mean = (sum(row[f"{model}_recovery"] for row in clearly) / len(clearly)
+                        if clearly else float("nan"))
+        summary[model] = {
+            "floor": floor, "moved": len(moved), "recovered_at_least_half": len(recovered),
+            "mean_recovery_over_moved": mean_recovery,
+            "receivers_clearly_damaged": [row["entity"] for row in clearly],
+            "mean_recovery_over_clearly_damaged_receivers": clearly_mean,
+        }
         print(f"{model}: {len(moved)} of {len(rows)} entities left the {floor:.2f} floor at some "
               f"checkpoint; {len(recovered)} of {len(moved)} recovered at least half; "
               f"mean recovery over those that moved {mean_recovery:+.0%}")
+        print(f"{model}: receivers whose peak exceeded twice the floor ({2.0 * floor:.2f}): "
+              f"{len(clearly)} -> mean recovery {clearly_mean:+.0%} "
+              f"{[row['entity'] for row in clearly]}")
+    (output_path.with_suffix(".json")).write_text(
+        json.dumps({"seed": args.seed, "sd14_floor": sd14_floor, "sdxl_floor": sdxl_floor,
+                    "rows": rows, "summary": summary}, indent=2), encoding="utf-8")
     print(f"written: {output_path}")
     print(f"written: {table_path}")
     print("CROSS_MODEL_RECOVERY_DONE")
