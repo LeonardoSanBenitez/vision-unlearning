@@ -201,11 +201,15 @@ def main() -> None:
             f"{len(result['epochs'])}", f"{len(result['entities'])}",
             f"{result['on_disk']}", f"{len(result['missing'])}",
         ])
-    control_path = _OUT / "random_ten_control_seed42.json"
-    if control_path.is_file():
-        result = reconcile_manifest.reconcile(control_path, 2, _EXPECTED_ENTITIES)
+    for seed in seeds:
+        # The control is measured exactly like the campaign now -- every checkpoint, both seeds -- so
+        # it carries the same expected shape rather than the two labels it started with.
+        control_path = _OUT / f"random_ten_control_seed{seed}.json"
+        if not control_path.is_file():
+            continue
+        result = reconcile_manifest.reconcile(control_path, expected_epochs, _EXPECTED_ENTITIES)
         manifest_rows.append([
-            "random-ten control, seed 42", f"{result['rows']} of {result['expected_rows']}",
+            f"random-ten control, seed {seed}", f"{result['rows']} of {result['expected_rows']}",
             f"{len(result['epochs'])}", f"{len(result['entities'])}",
             f"{result['on_disk']}", f"{len(result['missing'])}",
         ])
