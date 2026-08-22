@@ -7,11 +7,9 @@
 #
 # Each stage goes through run_stage.sh, which is where the launch discipline lives: wait for free
 # system memory, run, retry until the completion marker appears, keep every attempt's log. The two
-# generation stages need the full 6.0 GB headroom (building the Stable Diffusion XL pipeline costs
-# about 3.1 GB transiently, measured from campaign_generate_seed42_epoch3_monitor.log: 8.01 GB free
-# at the start of the load, 4.88 GB at its trough, and the watchdog aborts below 1.5 GB). The scoring
-# stage loads CLIP alone, so it asks for 2.0 GB and is not made to queue behind a gate it does not
-# need.
+# generation stages take run_stage.sh's default 4.5 GB gate, which is the measured cost of a
+# generation stage plus margin (see that file). The scoring stage loads CLIP alone, so it asks for
+# 2.0 GB and is not made to queue behind a gate it does not need.
 #
 # WAIT_TICKS is raised well above run_stage.sh's default because this machine's free memory belongs
 # to whatever else is open on it: 240 ticks of 30 s is two hours of patience per attempt, so the run

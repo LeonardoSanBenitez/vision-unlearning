@@ -32,6 +32,8 @@ import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import campaign_configuration as cfg
+
 _HERE = Path(__file__).resolve().parent
 _OUT = _HERE / "assets"
 _REFERENCE_FLOOR = _HERE.parent / "every_epoch" / "assets" / "noise_floor_people.json"
@@ -73,7 +75,7 @@ def figure_noise_floor(campaign: Dict[str, Any], floor: Dict[str, Any]) -> Path:
         axes[row][0].set_ylabel(f"{_display(name)}\nabsolute difference {floor['per_entity'][name]:.2f}",
                                 fontsize=7)
     fig.suptitle("base model only, no unlearning applied; prompt fixed per row; seed varies across columns\n"
-                 f"model=stable-diffusion-xl-base-1.0 resolution=512 steps=50 "
+                 f"model={cfg.MODEL_ID} resolution={cfg.GENERATION_RESOLUTION} steps=50 "
                  f"noise_floor_median={floor['summary']['median']:.2f} "
                  f"noise_floor_maximum={floor['summary']['maximum']:.2f}", fontsize=8)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
@@ -134,7 +136,7 @@ def figure_off_baseline_contact_sheet(campaign: Dict[str, Any], floor: Dict[str,
         axes[row][0].set_ylabel(f"seed {seed}", fontsize=8)
     fig.suptitle("every off-baseline image in the campaign: base model, no adapter, prompt "
                  "'An image of <entity>'\n"
-                 f"model=stable-diffusion-xl-base-1.0 resolution=512 steps=50 "
+                 f"model={cfg.MODEL_ID} resolution={cfg.GENERATION_RESOLUTION} steps=50 "
                  f"n={len(seeds)} seeds x {len(entities)} entities = {len(seeds) * len(entities)} images", fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     path = _OUT / "validation_off_baseline_contact_sheet.png"
@@ -172,7 +174,8 @@ def figure_curves(campaign: Dict[str, Any], floor: Dict[str, Any]) -> Path:
         panel.set_title(f"seed {seed}: clip_diff per entity, n=10 entities x {len(epochs)} checkpoints")
     axes[0].set_ylabel("clip_diff = clip score with adapter - clip score without adapter")
     axes[-1].legend(fontsize=7, loc="lower left", ncol=2)
-    fig.suptitle("stable diffusion xl, spare, task=people, resolution=512, hyperparameter class B; "
+    fig.suptitle(f"model={cfg.MODEL_ID}, spare, task={cfg.TASK}, "
+                 f"resolution={cfg.GENERATION_RESOLUTION}, {_hyperparameters_shown()}; "
                  "shaded bands are the measured noise floor\n"
                  f"stable_diffusion_xl_floor_median={floor['summary']['median']:.2f} "
                  f"maximum={floor['summary']['maximum']:.2f}; "
@@ -183,6 +186,20 @@ def figure_curves(campaign: Dict[str, Any], floor: Dict[str, Any]) -> Path:
     fig.savefig(path, dpi=120)
     plt.close(fig)
     return path
+
+
+def _hyperparameters_shown() -> str:
+    """The hyperparameters the campaign was actually TRAINED under, read from the training record.
+
+    Not from a constant in this file and not from the runner's module constants: the training record
+    is what the run wrote down about itself, so a figure title cannot drift away from the adapters it
+    describes. This title used to name a hyperparameter grouping that had since been dropped, and to
+    name the wrong one of the two settings -- a hand-written title outlived two decisions.
+    """
+    record = json.loads((_OUT / "campaign_train_seed42.json").read_text(encoding="utf-8"))
+    values = record["hyperparameters"]
+    return (f"learning_rate={values['learning_rate']:g} lora_r={values['lora_r']} "
+            f"lora_alpha={values['lora_alpha']} forget_weight={values['forget_weight']}")
 
 
 def progression_consistency(campaign: Dict[str, Any], seed: int) -> Dict[str, Any]:
@@ -245,7 +262,8 @@ def main() -> None:
         campaign, [(target, seed) for seed in seeds],
         _OUT / "validation_target_progression.png",
         "target across every checkpoint, one row per seed; "
-        "model=stable-diffusion-xl-base-1.0 method=spare task=people resolution=512"))
+        f"model={cfg.MODEL_ID} method=spare task={cfg.TASK} "
+        f"resolution={cfg.GENERATION_RESOLUTION}"))
 
     # The three receivers are chosen from the measurements, never by eye: the most negative, the most
     # positive, and the one that moves least across the whole trajectory.

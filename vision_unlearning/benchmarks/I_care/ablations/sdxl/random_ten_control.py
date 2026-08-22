@@ -221,6 +221,20 @@ def _outside_floor(values: Dict[str, float], floor: float) -> List[str]:
             if abs(value) > floor]
 
 
+def _below_floor(values: Dict[str, float], floor: float) -> List[str]:
+    '''The entities whose `clip_diff` is more NEGATIVE than the floor, most negative first.
+
+    This is the count that means damage, and it is not the same as the two-sided one above. A
+    `clip_diff` above +floor says the adapted image agrees with the entity's prompt BETTER than the
+    original did, which is not collateral damage however far outside the floor it sits -- and reading
+    the contact sheet is what makes that obvious: at epoch 200 the two control entities with the
+    largest positive values are plainly still themselves, while the one at -9.82 has been replaced by
+    a child. Both counts are reported; only this one is evidence of interference.
+    '''
+    return [name for name, value in sorted(values.items(), key=lambda item: item[1])
+            if value < -floor]
+
+
 def _stage_score() -> None:
     '''Scores the 20 control images and prints the two counts that ARE the finding.
 
@@ -253,6 +267,8 @@ def _stage_score() -> None:
 
     control_outside = _outside_floor(control_diff, floor)
     receivers_outside = _outside_floor(receiver_diff, floor)
+    control_damaged = _below_floor(control_diff, floor)
+    receivers_damaged = _below_floor(receiver_diff, floor)
     result = {
         "task": clip_scoring.TASK,
         "method": clip_scoring.METHOD,
@@ -262,13 +278,18 @@ def _stage_score() -> None:
         "draw_seed": _DRAW_SEED,
         "noise_floor_standard_deviation": floor,
         "entities": entities,
-        "per_entity": per_entity,
+        # The same envelope the campaign scores use (`per_seed -> {epochs, per_entity}`), so that one
+        # reader -- the grid figure below all of this -- works on either artifact without sniffing
+        # which shape it was handed.
+        "per_seed": {str(_SEED): {"epochs": trained_epochs, "per_entity": per_entity}},
         "comparison_at_final_epoch": {
             "control_clip_diff": control_diff,
             "receiver_clip_diff": receiver_diff,
             "target_clip_diff": target_diff,
             "control_outside_floor": control_outside,
             "receivers_outside_floor": receivers_outside,
+            "control_below_negative_floor": control_damaged,
+            "receivers_below_negative_floor": receivers_damaged,
             "n_control": len(entities),
             "n_receivers": len(receiver_diff),
         },
@@ -283,13 +304,18 @@ def _stage_score() -> None:
           f"{len(entities)} {control_outside}")
     print(f"selected receivers outside the floor at epoch {_EPOCH}: {len(receivers_outside)} of "
           f"{len(receiver_diff)} {receivers_outside}")
+    print(f"control entities BELOW the negative floor (the count that means damage): "
+          f"{len(control_damaged)} of {len(entities)} {control_damaged}")
+    print(f"selected receivers BELOW the negative floor: {len(receivers_damaged)} of "
+          f"{len(receiver_diff)} {receivers_damaged}")
     for name in sorted(control_diff, key=lambda entity: control_diff[entity]):
         print(f"  control  {name:<28} clip_diff {control_diff[name]:+7.2f}")
     for name in sorted(receiver_diff, key=lambda entity: receiver_diff[entity]):
         print(f"  receiver {name:<28} clip_diff {receiver_diff[name]:+7.2f}")
     print(f"written: {_SCORES_PATH}")
     print(f"RANDOM_TEN_SCORE_DONE control_outside={len(control_outside)} of {len(entities)} "
-          f"receivers_outside={len(receivers_outside)} of {len(receiver_diff)}")
+          f"receivers_outside={len(receivers_outside)} of {len(receiver_diff)} "
+          f"control_damaged={len(control_damaged)} receivers_damaged={len(receivers_damaged)}")
 
 
 def main() -> None:
