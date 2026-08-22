@@ -251,6 +251,12 @@ def _stage_generate(seed: int, epochs_arg: str) -> None:
             "stage": "generate", "seed": seed, "requested": epochs_arg, "rows_generated": 0,
             "note": "nothing to do -- already in the manifest",
         }, indent=2))
+        # The completion marker is printed here too, so that asking for an epoch the manifest already
+        # holds is a SUCCESS rather than a stage that run_stage.sh retries eight times and then fails.
+        # A resumable stage has to be idempotent to be resumable at all: a driver that walks the
+        # checkpoint list after an abort re-asks for every epoch, and the ones already generated must
+        # answer "done, nothing to do" instead of looking like a failure.
+        print(f"CAMPAIGN_GENERATE_DONE seed={seed} label=none images=0 remaining_after_this=0")
         return
 
     item = to_run[0]
@@ -321,9 +327,24 @@ def _stage_generate(seed: int, epochs_arg: str) -> None:
           f"remaining_after_this={remaining_after_this}")
 
 
+def _stage_labels() -> None:
+    '''Prints the generation labels of one seed, in order, one line each: `off` then each checkpoint.
+
+    This exists so that a shell driver can walk the campaign one epoch per process WITHOUT a
+    hand-written epoch list -- the list comes from `checkpoint_list()`, which reads the every-epoch
+    campaign JSON. It is also what gives each stage its own log file: `run_campaign_stage.sh` names
+    the log after the epoch selector it is given, so driving the campaign with the `remaining`
+    selector names every stage `remaining` and each one overwrites the last (which is exactly what
+    happened to the ten logs of the seed-42 second half on 2026-08-19).
+    '''
+    print("off")
+    for epoch in checkpoint_list():
+        print(epoch)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="S5/S6 campaign: train and generate the Stable Diffusion XL ablation.")
-    parser.add_argument("--stage", choices=["train", "generate"], required=True)
+    parser.add_argument("--stage", choices=["train", "generate", "labels"], required=True)
     parser.add_argument("--seed", type=int, required=True, choices=[42, 43])
     parser.add_argument("--epochs", type=str, default=None,
                         help="'off', 'remaining', 'all', or a comma-separated list of checkpoint epochs; "
@@ -332,6 +353,8 @@ def main() -> None:
 
     if args.stage == "train":
         _stage_train(args.seed)
+    elif args.stage == "labels":
+        _stage_labels()
     else:
         assert args.epochs is not None, "--stage generate requires --epochs"
         _stage_generate(args.seed, args.epochs)
