@@ -15,11 +15,16 @@ from vision_unlearning.benchmarks.u_care import configuration as cfg
 from vision_unlearning.benchmarks.u_care.generated_dataset import GeneratedDataset
 
 
-def answer_set_prompts() -> List[str]:
-    """Return the complete 51 x 20 prompt grid in stable order."""
+def answer_set_prompts(style: Optional[str] = None) -> List[str]:
+    """Return the complete grid, or the 20 prompts for one style."""
+    if style is not None and style not in cfg.STYLE_ENTITIES:
+        raise ValueError(
+            f"Unknown style {style!r}. Choose one of the configured styles."
+        )
+    styles = [style] if style is not None else cfg.STYLE_ENTITIES
     return [
         cfg.answer_set_prompt(theme, object_class)
-        for theme in cfg.STYLE_ENTITIES
+        for theme in styles
         for object_class in cfg.OBJECT_ENTITIES
     ]
 
@@ -56,10 +61,13 @@ def generate_answer_set(
     seeds: List[int],
     device: str = "cuda",
     prompts: Optional[List[str]] = None,
+    style: Optional[str] = None,
     overwrite: bool = False,
 ) -> str:
     """Generate baseline images using one CPU-seeded latent per prompt and seed."""
-    prompt_list = prompts if prompts is not None else answer_set_prompts()
+    if prompts is not None and style is not None:
+        raise ValueError("Pass either prompts or style, not both.")
+    prompt_list = prompts if prompts is not None else answer_set_prompts(style)
     output_dir = Path(output_folder)
     output_dir.mkdir(parents=True, exist_ok=True)
     dataset = GeneratedDataset(base_folder=str(output_dir.parent.parent))
@@ -104,6 +112,12 @@ def main() -> None:
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--output-folder", default="assets/datasets/generated_baseline_sd_style50")
     parser.add_argument("--seed", type=int, nargs="+", default=[188])
+    parser.add_argument(
+        "--style",
+        default=None,
+        choices=cfg.STYLE_ENTITIES,
+        help="Generate only this style (20 object prompts per seed).",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -112,6 +126,7 @@ def main() -> None:
         output_folder=args.output_folder,
         seeds=args.seed,
         device=args.device,
+        style=args.style,
         overwrite=args.overwrite,
     )
 
