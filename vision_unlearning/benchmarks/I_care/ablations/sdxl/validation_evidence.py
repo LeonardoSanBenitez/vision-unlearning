@@ -193,11 +193,11 @@ def main() -> None:
     for seed in seeds:
         path = _OUT / f"campaign_seed{seed}.json"
         if not path.is_file():
-            manifest_rows.append([f"campaign seed {seed}", "not generated", "-", "-", "-", "-"])
+            manifest_rows.append([f"selected ten, seed {seed}", "not generated", "-", "-", "-", "-"])
             continue
         result = reconcile_manifest.reconcile(path, expected_epochs, _EXPECTED_ENTITIES)
         manifest_rows.append([
-            f"campaign seed {seed}", f"{result['rows']} of {result['expected_rows']}",
+            f"selected ten, seed {seed}", f"{result['rows']} of {result['expected_rows']}",
             f"{len(result['epochs'])}", f"{len(result['entities'])}",
             f"{result['on_disk']}", f"{len(result['missing'])}",
         ])
@@ -215,7 +215,7 @@ def main() -> None:
         ])
     lines += _table(["manifest", "rows against expected", "distinct epochs", "distinct entities",
                      "image files on disk", "rows whose file is missing"], manifest_rows)
-    lines += ["", f"Expected rows for a campaign seed: {expected_epochs} distinct epoch values "
+    lines += ["", f"Expected rows for one seed of one group: {expected_epochs} distinct epoch values "
                   f"(one off-baseline plus {len(cfg.checkpoint_list())} checkpoints) x "
                   f"{_EXPECTED_ENTITIES} entities = {expected_epochs * _EXPECTED_ENTITIES}. "
                   "Every row's file was checked individually, not sampled.", ""]
