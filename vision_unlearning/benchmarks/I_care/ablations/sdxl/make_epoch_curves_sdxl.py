@@ -61,6 +61,7 @@ def main() -> None:
     # Epoch 0 is the off-baseline: the difference of an image with itself, zero by definition. It is
     # drawn so every line starts from the same point, and it is why the axis starts at 0 rather than 1.
     axis_epochs = [0] + list(epochs)
+    positions = list(range(len(axis_epochs)))
     ordered = ([target] if target else []) + sorted(
         (name for name in per_entity if name != target),
         key=lambda name: per_entity[name]["trajectory"][-1]["clip_diff"],
@@ -79,17 +80,20 @@ def main() -> None:
             style = dict(_TARGET_STYLE) if entity == target else {
                 "color": colours(index % 10), "linewidth": 1.4,
             }
-            axis.plot(axis_epochs, values, marker="o", markersize=3,
+            axis.plot(positions, values, marker="o", markersize=3,
                       label=entity.replace("_", " "), **style)
         outside = sum(1 for entity in ordered
                       if abs(per_entity[entity]["trajectory"][-1][field]) > floor)
         axis.set_title(f"{field}, {subtitle}\n"
                        f"entities outside the noise floor at epoch {epochs[-1]}: "
                        f"{outside} of {len(ordered)}", fontsize=10)
-        axis.set_xlabel("training epoch")
+        axis.set_xlabel("checkpoint (evenly spaced; the label is the training epoch)")
         axis.set_ylabel(f"{field}")
-        axis.set_xscale("symlog", linthresh=1)
-        axis.set_xticks(axis_epochs)
+        # The checkpoints are placed at even intervals rather than at their epoch numbers. Either
+        # continuous scale misleads here: a linear axis crushes epochs 1 to 20 into the left margin,
+        # and a logarithmic one crushes 100, 150 and 200 into the right. What the reader needs to
+        # compare is one saved checkpoint against the next, and they are equally spaced in that sense.
+        axis.set_xticks(positions)
         axis.set_xticklabels([str(epoch) for epoch in axis_epochs], fontsize=7)
         axis.grid(alpha=0.25)
     axes[0][1].legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
