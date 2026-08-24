@@ -50,9 +50,11 @@ class _DiffusionPipelineComponents(Protocol):
     scheduler: Any
     vae_scale_factor: int
 
-    def encode_prompt(self, *arguments: Any, **keywords: Any) -> Any: ...
+    def encode_prompt(self, *arguments: Any, **keywords: Any) -> Any:
+        raise NotImplementedError
 
-    def set_progress_bar_config(self, *arguments: Any, **keywords: Any) -> None: ...
+    def set_progress_bar_config(self, *arguments: Any, **keywords: Any) -> None:
+        raise NotImplementedError
 
 
 class ESD(Unlearner):
