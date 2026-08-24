@@ -3,7 +3,7 @@ import os
 import time
 import random
 import contextlib
-from typing import Optional, List, Tuple, Dict, Any, Iterator, cast
+from typing import Optional, List, Tuple, Dict, Any, Iterator, Protocol, cast
 from PIL import Image
 
 import torch
@@ -31,6 +31,28 @@ TARGET_MODULE_TYPES = frozenset({
     'LoRACompatibleLinear',
     'LoRACompatibleConv',
 })
+
+
+class _DiffusionPipelineComponents(Protocol):
+    """The parts of a Stable Diffusion pipeline this unlearner touches.
+
+    Diffusers resolves a pipeline's components dynamically, so annotating with a concrete pipeline
+    class makes the type checker reject every `pipeline.unet` -- the annotation buys no safety and
+    costs an error per access. The sibling weight-editing unlearner sidesteps that by leaving the
+    type inferred, i.e. unchecked; declaring the seven members actually used is the same amount of
+    code and checks them, including the argument of `_fit`, which is documented as drivable with a
+    small stand-in rather than a real checkpoint.
+    """
+
+    unet: Any
+    vae: Any
+    text_encoder: Any
+    scheduler: Any
+    vae_scale_factor: int
+
+    def encode_prompt(self, *arguments: Any, **keywords: Any) -> Any: ...
+
+    def set_progress_bar_config(self, *arguments: Any, **keywords: Any) -> None: ...
 
 
 class ESD(Unlearner):
@@ -295,7 +317,7 @@ class ESD(Unlearner):
 
         return eval_results
 
-    def _load_pipeline(self) -> StableDiffusionPipeline:
+    def _load_pipeline(self) -> _DiffusionPipelineComponents:
         '''Load the base pipeline and freeze everything that is never trained.'''
         pipeline = StableDiffusionPipeline.from_pretrained(
             self.pretrained_model_name_or_path,
@@ -306,9 +328,9 @@ class ESD(Unlearner):
         pipeline.vae.requires_grad_(False)
         pipeline.text_encoder.requires_grad_(False)
         pipeline.unet.requires_grad_(False)
-        return cast(StableDiffusionPipeline, pipeline)
+        return cast(_DiffusionPipelineComponents, pipeline)
 
-    def _fit(self, pipeline: StableDiffusionPipeline) -> Dict[str, torch.Tensor]:
+    def _fit(self, pipeline: _DiffusionPipelineComponents) -> Dict[str, torch.Tensor]:
         '''Run the optimization and return the trained tensors, keyed by their denoiser parameter name.
 
         Separated from `train()` so that one step can be driven directly, with a small stand-in
@@ -391,7 +413,7 @@ class ESD(Unlearner):
                 module = unet.get_submodule(module_path) if module_path else unet
                 setattr(module, attribute, original)
 
-    def _encode_conditioning(self, pipeline: StableDiffusionPipeline) -> Dict[str, torch.Tensor]:
+    def _encode_conditioning(self, pipeline: _DiffusionPipelineComponents) -> Dict[str, torch.Tensor]:
         '''Encode the three prompts this method conditions on, once, before the loop.'''
         with torch.no_grad():
             erase_embeds, null_embeds = pipeline.encode_prompt(
@@ -423,7 +445,7 @@ class ESD(Unlearner):
 
     def _sample_intermediate_latent(
         self,
-        pipeline: StableDiffusionPipeline,
+        pipeline: _DiffusionPipelineComponents,
         conditioning: Dict[str, torch.Tensor],
         depth: int,
         noise_seed: int,
@@ -562,8 +584,10 @@ class ESD(Unlearner):
         )
 
         evaluator = EvaluatorTextToImage(
-            pipeline_original=pipeline_original,
-            pipeline_unlearned=pipeline_unlearned,
+            # Both are Stable Diffusion pipelines; only the loader's declared return type is the
+            # permissive base, for the reason given at _load_pipeline.
+            pipeline_original=cast(StableDiffusionPipeline, pipeline_original),
+            pipeline_unlearned=cast(StableDiffusionPipeline, pipeline_unlearned),
             pipeline_learned=None,
             prompts_forget=self.final_eval_prompts_forget,
             prompts_retain=self.final_eval_prompts_retain,
