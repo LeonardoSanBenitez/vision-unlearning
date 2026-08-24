@@ -160,3 +160,59 @@ def test_no_call_site_still_passes_the_dead_batch_size_key() -> None:
                 offenders.append(f"{path.relative_to(package_root)}:{number}")
 
     assert offenders == [], "call sites still passing a key the model now rejects: " + ", ".join(offenders)
+
+
+def test_the_retain_loader_is_traversed_rather_than_resampled() -> None:
+    """One held iterator visits every item before repeating; a fresh iterator per step does not.
+
+    The defect: the step loop called `next(iter(self._train_retain_dataloader))`, which builds a new
+    iterator every step and therefore always returns the first batch of a freshly shuffled pass --
+    sampling the retain set with replacement instead of traversing it. For the people task that left
+    roughly 13 % of the retain images expected never to be seen in a whole run.
+
+    The mutation that must fail this test is recreating the iterator on each step, which is the
+    `fresh` branch below and is asserted to be worse in the same run -- so the test carries its own
+    control rather than trusting a remembered number.
+    """
+    dataset = list(range(20))
+    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
+
+    held_iterator = iter(loader)
+    held_seen = []
+    for _ in range(len(dataset)):
+        try:
+            held_seen.append(int(next(held_iterator)[0]))
+        except StopIteration:  # pragma: no cover - reached only if the loader is shorter
+            held_iterator = iter(loader)
+            held_seen.append(int(next(held_iterator)[0]))
+
+    fresh_seen = [int(next(iter(loader))[0]) for _ in range(len(dataset))]
+
+    assert len(set(held_seen)) == len(dataset), (
+        f"one held iterator saw {len(set(held_seen))} of {len(dataset)} distinct items; it must "
+        "traverse the set exactly once before repeating"
+    )
+    assert len(set(fresh_seen)) < len(dataset), (
+        "the control did not reproduce the defect, so this test proves nothing about the fix"
+    )
+
+
+def test_the_held_retain_iterator_restarts_when_exhausted() -> None:
+    """Traversal continues across epoch boundaries instead of stopping.
+
+    This is the half of the fix that a single pass cannot show: the loop asks for more batches than
+    the retain loader holds, and must keep supplying them by starting a new pass.
+    """
+    dataset = list(range(4))
+    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+
+    iterator = iter(loader)
+    drawn = []
+    for _ in range(len(dataset) * 2 + 1):
+        try:
+            drawn.append(int(next(iterator)[0]))
+        except StopIteration:
+            iterator = iter(loader)
+            drawn.append(int(next(iterator)[0]))
+
+    assert drawn == [0, 1, 2, 3, 0, 1, 2, 3, 0], f"traversal did not wrap cleanly: {drawn}"

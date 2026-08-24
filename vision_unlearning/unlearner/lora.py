@@ -265,6 +265,10 @@ class UnlearnerLora(Unlearner):
 
     _train_forget_dataloader: Optional[torch.utils.data.DataLoader] = None
     _train_retain_dataloader: Optional[torch.utils.data.DataLoader] = None
+    # One iterator over the retain loader, held across steps and restarted when it is exhausted.
+    # The forget loader drives the epoch; the retain loader is cycled beneath it, which is the
+    # standard arrangement for two-loader forget/retain training.
+    _train_retain_iterator: Any = None
 
     _optimizer: Any = None
     _lr_scheduler: Any = None
@@ -745,7 +749,19 @@ class UnlearnerLora(Unlearner):
             train_loss_forget = 0.0  # TODO: plot graph of losses after training
             train_loss_retain = 0.0
             for step, batch_forget in enumerate(self._train_forget_dataloader):  # type: ignore
-                batch_retain = next(iter(self._train_retain_dataloader))
+                # `next(iter(loader))` would build a NEW iterator on every step and therefore
+                # always hand back the first batch of a freshly shuffled pass -- sampling the retain
+                # set with replacement rather than traversing it. Measured on a 20-item stand-in:
+                # 13 distinct items over five such calls, against 20 when one iterator is advanced.
+                # For the people task (5 forget images, 200 epochs, 495 retain images) that left
+                # about 13 % of the retain set, roughly 65 images, expected never to be seen at all.
+                if self._train_retain_iterator is None:
+                    self._train_retain_iterator = iter(self._train_retain_dataloader)
+                try:
+                    batch_retain = next(self._train_retain_iterator)
+                except StopIteration:
+                    self._train_retain_iterator = iter(self._train_retain_dataloader)
+                    batch_retain = next(self._train_retain_iterator)
                 min_length = min(len(batch_forget["pixel_values"]), len(batch_retain["pixel_values"]))
                 batch_forget["pixel_values"] = batch_forget["pixel_values"][:min_length]
                 batch_retain["pixel_values"] = batch_retain["pixel_values"][:min_length]
