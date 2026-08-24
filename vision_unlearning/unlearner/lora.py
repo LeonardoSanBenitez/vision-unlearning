@@ -600,9 +600,14 @@ class UnlearnerLora(Unlearner):
 
         self._hook_after_lora_init()
 
-        self._lora_layers = filter(lambda p: p.requires_grad, self._unet.parameters())
-        logger.info(f"Number of lora layers: {len(list(filter(lambda p: p.requires_grad, self._unet.parameters())))}")  # I think this _has_ to be recalculated, even if it looks ugly, not sure
-        # [x for x in self._lora_layers]
+        # A list, not a filter. The optimizer below iterates whatever it is given in order to build
+        # its parameter group, which exhausts a generator -- and the same object is handed to
+        # clip_grad_norm_ on every step, which then sees no parameters and clips nothing. Measured
+        # before this was a list: gradient 1000.0 stayed 1000.0 through a clip at max_grad_norm 5.0,
+        # reported total norm 0.0, against norm 4472.14 and gradient 0.224 for the identical call
+        # given a list.
+        self._lora_layers = [p for p in self._unet.parameters() if p.requires_grad]
+        logger.info(f"Number of lora layers: {len(self._lora_layers)}")
 
         if self.gradient_checkpointing:
             self._unet.enable_gradient_checkpointing()
