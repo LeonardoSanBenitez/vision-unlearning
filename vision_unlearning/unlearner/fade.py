@@ -396,20 +396,12 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         encoder_hidden_states_retain, added_cond_kwargs_retain = self._encode_conditioning(batch_retain, "retain")
         encoder_hidden_states_overwt, added_cond_kwargs_overwt = self._encode_conditioning(batch_forget, "override")
 
-        # Get the target for loss depending on the prediction type
-        if self.prediction_type is not None:
-            # set prediction_type of scheduler if defined
-            self._noise_scheduler.register_to_config(prediction_type=self.prediction_type)
-
-        # TODO: in self distillation, I think the target isn't needed at all
-        if self._noise_scheduler.config.prediction_type == "epsilon":
-            target_forget = noise_forget
-            target_retain = noise_retain
-        elif self._noise_scheduler.config.prediction_type == "v_prediction":
-            target_forget = self._noise_scheduler.get_velocity(latents_forget, noise_forget, timesteps_forget)
-            target_retain = self._noise_scheduler.get_velocity(latents_retain, noise_retain, timesteps_retain)
-        else:
-            raise ValueError(f"Unknown prediction type {self._noise_scheduler.config.prediction_type}")
+        # There is deliberately no noise or velocity target here. Self-distillation compares two
+        # predictions of the model against each other -- adapter-enabled against adapter-disabled --
+        # so it never needs to know what the diffusion target would have been. The targets used to be
+        # computed on every step and read by nothing, along with the `prediction_type` scheduler
+        # registration whose only consumer was that computation. `prediction_type` remains a field of
+        # UnlearnerLora and is still honoured by the plain LoRA trainer, which does use a target.
 
         # Predict the noise residual, and backpropagate each half before the other half is computed.
         #
