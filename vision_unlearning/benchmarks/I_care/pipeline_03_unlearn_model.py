@@ -321,6 +321,10 @@ for index in range(index_start, index_start + max_identities):
 
     if method == 'distil':
         hyperparameters['overwritting_concept'] = target_overwrite
+        # The forget side is conditioned on the same phrase the images are generated and evaluated
+        # with, rather than on the bare underscored name stored in the dataset's captions, so that
+        # the intervention is fitted at the point in text-embedding space that is later queried.
+        hyperparameters['forget_concept'] = target_preprocessed
         hyperparameters['gradient_weighting_method'] = GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0)
         unlearner = UnlearnerLoraDistillation(**hyperparameters)
     elif method == 'munba':

@@ -54,6 +54,8 @@ class UnlearnerLoraDistillation(UnlearnerLora):
     '''
     overwritting_concept: Optional[str] = Field(default=None, description="The concept to which the forgotten concept will be mapped to. Can be specified either in `overwritting_concept` (single fixed concept) or `overwrite_column`+`json_metafile` (arbitrary set of concepts); The latter have priority.")  # noqa
     overwrite_column: str = "overwrite"
+    forget_concept: Optional[str] = Field(default=None, description="The concept being forgotten, in the exact form it is prompted with at generation time -- 'Mark Philippoussis', 'a dogo argentino'. When set, the forget side of the distillation pair is conditioned on `caption_template` applied to it, symmetrically with the overwrite side, instead of on the raw caption stored in the dataset. Leave None only when the captions on disk are already in the prompted form.")  # noqa
+    caption_template: str = Field(default="An image of {}", description="The single template used to build BOTH sides of the distillation pair, so that the two differ only in the concept named. It must match the template the images are generated and evaluated with.")
     json_metafile: Optional[str] = Field(default=None, description="Path to a JSON file that contains a mapping from each training example to the concept that will overwrite the forgotten one. The overwrite concept can be specified either in `overwritting_concept` (single fixed concept) or `overwrite_column`+`json_metafile` (arbitrary set of concepts); The latter have priority. The datasets can be specified either in `dataset_forget_name`+`dataset_retain_name` (single-folder datasets) or `json_metafile` (arbitrary paths); The latter have priority.")  # noqa
     is_lora_negated: bool = Field(default=False, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")  # noqa
 
@@ -104,6 +106,22 @@ class UnlearnerLoraDistillation(UnlearnerLora):
             raise ValueError(f"FADE does not support more advanced gradient weighting methods. Please set `gradient_weighting_method` to `GradientWeightingMethodSimple`.")
         if self.compute_gradient_conflict:
             raise ValueError("FADE does not support calculating gradient conflict. Please set `compute_gradient_conflict` to False.")
+
+    def _forget_caption(self) -> Optional[str]:
+        """The phrase the forget side is conditioned on, or None to use the dataset's own captions.
+
+        Named so it can be observed without a tokenizer, a checkpoint or a dataloader: it is a pure
+        function of the configuration, and it is the thing that used to disagree with both the
+        distillation target and the evaluation prompt.
+        """
+        if self.forget_concept is None:
+            return None
+        return self.caption_template.format(self.forget_concept)
+
+    def _overwrite_caption(self) -> str:
+        """The phrase the distillation target is conditioned on, from the same template."""
+        assert self.overwritting_concept is not None, "no fixed overwriting concept configured"
+        return self.caption_template.format(self.overwritting_concept)
 
     def _prepare_dataloaders(self) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
         '''
@@ -249,16 +267,31 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         def preprocess_forget(examples):
             images = [image.convert("RGB") for image in examples[self.image_column]]
             examples["pixel_values"] = [train_transforms(image) for image in images]
-            examples["input_ids"] = tokenize_captions(examples, self._tokenizer, self.caption_column)
-            if self._is_xl:
-                examples["input_ids_2"] = tokenize_for_second_encoder(examples, self.caption_column)
+            # Both sides of the distillation pair are built from ONE template, so they can differ
+            # only in the concept named. They used to differ in three ways at once: the forget side
+            # was conditioned on the raw caption stored on disk, a bare underscored name such as
+            # `Mark_Philippoussis`; its target on the templated `An image of a child`; and the
+            # evaluation that judged the result prompted `An image of Mark Philippoussis`. So the
+            # forget loss also had to absorb the difference between a bare name and a templated
+            # phrase, and the intervention was fitted at a point in text-embedding space that was
+            # not the point later queried.
+            forget_caption = self._forget_caption()
+            if forget_caption is not None:
+                examples["input_ids"] = forget_tokens(examples, self._tokenizer, self.caption_column, forget_caption)
+                if self._is_xl:
+                    examples["input_ids_2"] = forget_tokens(examples, self._tokenizer_2, self.caption_column, forget_caption)
+            else:
+                examples["input_ids"] = tokenize_captions(examples, self._tokenizer, self.caption_column)
+                if self._is_xl:
+                    examples["input_ids_2"] = tokenize_for_second_encoder(examples, self.caption_column)
             add_micro_conditioning(examples, images)
             if (self.json_metafile is None or self.overwrite_column is None):
                 # Case 1: use fixed overwriting concept for all examples
                 assert self.overwritting_concept is not None, "When not using json_metafile+overwrite_column, overwritting_concept cannot be None"
-                examples["forget_ids"] = forget_tokens(examples, self._tokenizer, self.caption_column, f'An image of {self.overwritting_concept}')  # TODO: hardcoded tenmplate
+                overwrite_caption = self._overwrite_caption()
+                examples["forget_ids"] = forget_tokens(examples, self._tokenizer, self.caption_column, overwrite_caption)
                 if self._is_xl:
-                    examples["forget_ids_2"] = forget_tokens(examples, self._tokenizer_2, self.caption_column, f'An image of {self.overwritting_concept}')
+                    examples["forget_ids_2"] = forget_tokens(examples, self._tokenizer_2, self.caption_column, overwrite_caption)
             else:
                 # Case 2: loading datasets using a json metafile
                 examples["forget_ids"] = tokenize_captions(examples, self._tokenizer, self.overwrite_column)

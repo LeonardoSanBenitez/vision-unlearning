@@ -5,6 +5,7 @@ about the wiring between the parameter collection, the optimizer and the gradien
 defect there is invisible to any test that only looks at the adapter afterwards, because an
 unclipped step still produces a perfectly plausible adapter.
 """
+import pathlib
 from typing import Any
 
 import pytest
@@ -216,3 +217,88 @@ def test_the_held_retain_iterator_restarts_when_exhausted() -> None:
             drawn.append(int(next(iterator)[0]))
 
     assert drawn == [0, 1, 2, 3, 0, 1, 2, 3, 0], f"traversal did not wrap cleanly: {drawn}"
+
+
+def test_both_sides_of_the_distillation_pair_share_one_template() -> None:
+    """The two conditioning strings differ only in the concept they name.
+
+    The defect: the forget side was conditioned on the raw caption stored on disk -- a bare
+    underscored name such as `Mark_Philippoussis` -- while its distillation target was conditioned
+    on the templated `An image of a child`, and the evaluation that judged the result prompted
+    `An image of Mark Philippoussis`. Three conventions for one comparison, so the forget loss also
+    had to absorb the difference between a bare name and a templated phrase, and the intervention
+    was fitted at a point in text-embedding space that is not the point later queried.
+
+    Asserted on the strings rather than on tokens, because the token identifiers are a tokeniser
+    detail while the strings are the contract with the generation side.
+    """
+    from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+    from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
+
+    # Built from a real instance, not from the template constant: a test that only formats the
+    # constant would pass even if the trainer ignored the field entirely.
+    unlearner = UnlearnerLoraDistillation(
+        model_name_or_path="CompVis/stable-diffusion-v1-4",
+        dataset_forget_name="unused",
+        dataset_retain_name="unused",
+        output_dir="unused",
+        forget_concept="Mark Philippoussis",
+        overwritting_concept="a child",
+        gradient_weighting_method=GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0),
+    )
+    forget_caption = unlearner._forget_caption()
+    overwrite_caption = unlearner._overwrite_caption()
+    template = unlearner.caption_template
+
+    assert forget_caption == "An image of Mark Philippoussis"
+    assert overwrite_caption == "An image of a child"
+
+    prefix = template.format("")
+    assert forget_caption.startswith(prefix) and overwrite_caption.startswith(prefix), (
+        "the two sides no longer share a prefix, so they differ by more than the concept named"
+    )
+    assert forget_caption.replace("Mark Philippoussis", "a child") == overwrite_caption, (
+        "the two captions differ in something other than the concept"
+    )
+
+    # The mutation this guards against: feeding the bare metadata name to one side.
+    bare_metadata_name = "Mark_Philippoussis"
+    assert bare_metadata_name != forget_caption
+    assert "_" not in forget_caption, (
+        "the forget caption still carries an underscored metadata name rather than the prompted form"
+    )
+
+
+def test_the_forget_side_falls_back_to_the_caption_column_only_when_told_to() -> None:
+    """`forget_concept` left unset keeps the old caption-column behaviour, and it is not the default.
+
+    Case 2 of the trainer -- a JSON metafile supplying a different overwrite concept per example --
+    genuinely wants the captions on disk, so the fallback has to exist. What must not happen is a
+    caller silently getting the old asymmetric behaviour by omission, which is why the benchmark's
+    own dispatch sets it explicitly.
+    """
+    from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+
+    from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
+
+    assert UnlearnerLoraDistillation.model_fields["forget_concept"].default is None
+    unset = UnlearnerLoraDistillation(
+        model_name_or_path="CompVis/stable-diffusion-v1-4",
+        dataset_forget_name="unused",
+        dataset_retain_name="unused",
+        output_dir="unused",
+        overwritting_concept="a child",
+        gradient_weighting_method=GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0),
+    )
+    assert unset._forget_caption() is None, (
+        "with no forget concept configured the trainer must fall back to the dataset's captions"
+    )
+
+    pipeline_source = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "vision_unlearning" / "benchmarks" / "I_care" / "pipeline_03_unlearn_model.py"
+    ).read_text(encoding="utf-8")
+    assert "hyperparameters['forget_concept']" in pipeline_source, (
+        "the benchmark dispatch no longer passes forget_concept, so distillation runs would silently "
+        "return to conditioning the forget side on bare metadata names"
+    )
