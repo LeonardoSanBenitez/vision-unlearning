@@ -338,19 +338,16 @@ def run_normal(
             if free_memory > 20e9:
                 hyperparameters.update({
                     "per_device_train_batch_size": 4,
-                    "train_batch_size": 4,
                     "gradient_accumulation_steps": 1,
                 })
             elif free_memory > 14e9:
                 hyperparameters.update({
                     "per_device_train_batch_size": 2,
-                    "train_batch_size": 2,
                     "gradient_accumulation_steps": 2,
                 })
             else:
                 hyperparameters.update({
                     "per_device_train_batch_size": 2,
-                    "train_batch_size": 2,
                     "gradient_accumulation_steps": 2,
                 })
 

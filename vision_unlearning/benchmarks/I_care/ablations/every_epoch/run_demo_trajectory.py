@@ -150,7 +150,7 @@ def main() -> int:
         "save_strategy": "epoch", "save_total_limit": 2, "random_flip": True,
         "lora_r": 16, "target_modules": ["to_k", "to_q", "to_v", "to_out.0"], "lora_alpha": 4,
         "lora_dropout": 0.2, "seed": 42,
-        "per_device_train_batch_size": 1, "train_batch_size": 1, "gradient_accumulation_steps": 4,
+        "per_device_train_batch_size": 1, "gradient_accumulation_steps": 4,
         "overwritting_concept": target_over,
         "gradient_weighting_method": GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0),
         "save_lora_at_epochs": checkpoints,

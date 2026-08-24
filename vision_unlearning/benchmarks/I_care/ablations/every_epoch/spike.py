@@ -201,7 +201,6 @@ def main() -> int:
         "lora_dropout": 0.2,
         "seed": 42,
         "per_device_train_batch_size": args.batch_size,
-        "train_batch_size": args.batch_size,
         "gradient_accumulation_steps": args.grad_accum,
         "overwritting_concept": target_over,
         "gradient_weighting_method": GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0),
