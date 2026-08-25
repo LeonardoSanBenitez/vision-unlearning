@@ -1,5 +1,6 @@
 
 import os
+import json
 import math
 import shutil
 import time
@@ -41,6 +42,7 @@ from vision_unlearning.evaluator import EvaluatorTextToImage, plot_gradient_conf
 from vision_unlearning.utils.model_management import save_model_card
 from vision_unlearning.utils.training import unwrap_model, preprocess_train, collate_fn
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple
+from vision_unlearning.utils import device as device_utils
 
 
 def unlearn_lora(
@@ -276,6 +278,18 @@ class UnlearnerLora(Unlearner):
 
     _peak_mem: int = 0
 
+    # Stage boundaries, kept on the instance because the stages are separate methods and the runtime
+    # metrics reported by `evaluate` measure the intervals between them.
+    _timestamp_start: float = 0.0
+    _timestamp_models_loaded: float = 0.0
+    _timestamp_training_started: float = 0.0
+    _timestamp_training_finished: float = 0.0
+    # The last epoch index the training loop entered, which the final validation labels its images with.
+    _last_epoch: int = 0
+    # One row per optimizer step: the losses the tracker receives, kept so they can also be written
+    # to disk beside the adapter (`_save_loss_history`).
+    _loss_history: List[Dict[str, Any]] = []
+
     @field_validator('save_lora_at_epochs', mode='before')
     @classmethod
     def _validate_save_lora_at_epochs(cls, value: Any) -> Optional[List[int]]:
@@ -361,6 +375,46 @@ class UnlearnerLora(Unlearner):
             unet_lora_layers=unet_lora_state_dict,
             safe_serialization=True,
         )
+
+    def _end_training(self) -> None:
+        '''
+        Close the accelerator down, on a platform where its own teardown cannot run.
+
+        `Accelerator.end_training` does two things: it finishes every tracker, and it destroys the
+        distributed process group. The second reaches `torch.distributed.is_initialized()`
+        unconditionally, and on a torch build without distributed support that attribute does not
+        exist -- so the call raises `AttributeError` at the very end of `train()`, after the adapter
+        has been saved and the evaluation has been computed, discarding the evaluation records that
+        `train()` exists to return. Measured on this machine: a 200-epoch session that had already
+        written every checkpoint ended in that exception and returned nothing.
+
+        There is no process group to destroy when distributed support is absent, so the tracker half
+        is performed and the teardown half is skipped, rather than the whole method being skipped.
+        '''
+        assert self._accelerator is not None
+        if torch.distributed.is_available():
+            self._accelerator.end_training()
+            return
+        for tracker in self._accelerator.trackers:
+            tracker.finish()
+        logger.warning(
+            "torch.distributed is unavailable in this build, so the accelerator's process-group "
+            "teardown is skipped; trackers were finished."
+        )
+
+    def _save_loss_history(self) -> None:
+        '''
+        Write the per-step training losses into output_dir as loss_history.json.
+
+        The losses already reach the accelerator's tracker, which makes them readable only from a
+        tracker run. A run's loss curve is the first thing anyone asks for when a session looks
+        wrong, so it is also written as a plain artifact: one row per optimizer step, in step order,
+        each carrying the step, the epoch, both losses and the learning rate in force.
+        '''
+        path = os.path.join(self.output_dir, 'loss_history.json')
+        with open(path, 'w', encoding='utf-8') as handle:
+            json.dump(self._loss_history, handle, indent=2)
+        logger.info(f"Wrote {len(self._loss_history)} optimizer steps of loss history to {path}")
 
     def _assert_save_epochs_within_training(self) -> None:
         '''
@@ -512,9 +566,15 @@ class UnlearnerLora(Unlearner):
 
         return prompt_embeds, {"text_embeds": pooled_prompt_embeds, "time_ids": time_ids}
 
-    def train(self):
+    def train(self) -> List[EvalResult]:
+        '''Load the models, fit the adapter, save it, and evaluate what was produced.
+
+        The four stages are separate methods so that a caller -- or a test -- can observe one of
+        them. What this method promises is unchanged: it returns the evaluation records, and
+        `evaluate` is part of it rather than something the caller has to remember to run.
+        '''
         self._pre_checks()
-        t0 = time.time()
+        self._timestamp_start = time.time()
         os.makedirs(self.output_dir, exist_ok=True)
 
         set_seed(self.seed)
@@ -567,8 +627,50 @@ class UnlearnerLora(Unlearner):
             self._text_encoder_2.requires_grad_(False)
             self._text_encoder_2.to(self._accelerator.device, dtype=self._weight_dtype)
 
-        t1 = time.time()
+        self._timestamp_models_loaded = time.time()
         self._train_forget_dataloader, self._train_retain_dataloader = self._prepare_dataloaders()
+        assert self._train_forget_dataloader is not None
+        assert self._train_retain_dataloader is not None
+
+        self._fit()
+
+        self._accelerator.wait_for_everyone()
+        if self._accelerator.is_main_process:
+            self._save_loss_history()
+            self._save_lora_layers()
+
+        del self._unet
+        del self._noise_scheduler
+        del self._tokenizer
+        del self._text_encoder
+        del self._vae
+        if self._is_xl:
+            del self._tokenizer_2
+            del self._text_encoder_2
+        device_utils.empty_cache()
+
+        eval_results = self.evaluate()
+
+        self._end_training()
+
+        logger.info('Training completed successfully =D')
+
+        # TODO: merging the lora the with model isn't supported
+        # Merge is tricky with diffusers, see https://github.com/huggingface/diffusers/issues/2900
+        # def merge(self, model):
+
+        return eval_results
+
+    def _fit(self) -> None:
+        '''Attach the adapter, build the optimizer and run the training loop.
+
+        Everything here operates on the models `_load_models` has already put on the device, and
+        leaves the trained adapter in `_unet`; saving it is the caller's job. This is the seam a
+        one-step training test needs: it is the whole of what training computes, and none of the
+        loading or evaluation around it.
+        '''
+        assert self._accelerator is not None
+        assert self._unet is not None
         assert self._train_forget_dataloader is not None
         assert self._train_retain_dataloader is not None
 
@@ -692,7 +794,7 @@ class UnlearnerLora(Unlearner):
             self._accelerator.init_trackers("text2image-fine-tune", config={k: v for k, v in self.model_dump().items() if isinstance(v, (str, float, int, type(None)))})
 
         # Train!
-        t2 = time.time()
+        self._timestamp_training_started = time.time()
         total_batch_size = self.per_device_train_batch_size * self._accelerator.num_processes * self.gradient_accumulation_steps
 
         logger.info("***** Running training *****")
@@ -740,7 +842,7 @@ class UnlearnerLora(Unlearner):
             disable=not self._accelerator.is_local_main_process,  # Only show the progress bar once on each machine.
         )
 
-        torch.cuda.reset_peak_memory_stats()
+        device_utils.reset_peak_memory_stats()
         self._peak_mem = 0
 
         for epoch in range(first_epoch, self.num_train_epochs):
@@ -801,6 +903,13 @@ class UnlearnerLora(Unlearner):
                     global_step += 1
                     self._accelerator.log({"train_loss_forget": train_loss_forget}, step=global_step)
                     self._accelerator.log({"train_loss_retain": train_loss_retain}, step=global_step)
+                    self._loss_history.append({
+                        "step": global_step,
+                        "epoch": epoch,
+                        "loss_forget": train_loss_forget,
+                        "loss_retain": train_loss_retain,
+                        "learning_rate": self._lr_scheduler.get_last_lr()[0],
+                    })
                     train_loss_forget = 0.0
                     train_loss_retain = 0.0
 
@@ -867,26 +976,25 @@ class UnlearnerLora(Unlearner):
                     self._images.update(log_validation(pipeline, self._accelerator, epoch, self.num_validation_images, self.validation_prompt, self.seed))
 
                     del pipeline
-                    torch.cuda.empty_cache()
+                    device_utils.empty_cache()
+
+                self._last_epoch = epoch
 
                 if epochs_to_save(self.save_lora_at_epochs, epoch + 1):
                     # epoch is 0-based; save_lora_at_epochs is 1-based. On resume, epochs before
                     # first_epoch are never entered by this loop, so they are not re-saved.
                     self._save_lora_layers_to(os.path.join(self.output_dir, f"epoch-{epoch + 1}"))
 
-        self._accelerator.wait_for_everyone()
-        if self._accelerator.is_main_process:
-            self._save_lora_layers()
+    def evaluate(self) -> List[EvalResult]:
+        '''Score the saved adapter against the base model, and write the model card.
 
-        del self._unet
-        del self._noise_scheduler
-        del self._tokenizer
-        del self._text_encoder
-        del self._vae
-        if self._is_xl:
-            del self._tokenizer_2
-            del self._text_encoder_2
-        torch.cuda.empty_cache()
+        Called by `train`, and callable on its own. `UCE` exposes the same method, so the two
+        families of unlearner agree on where evaluation lives.
+        '''
+        assert self._accelerator is not None
+
+        # A non-main process has nothing to evaluate and no card to write.
+        eval_results: List[EvalResult] = []
 
         ###############################
         # Post training evaluation
@@ -899,7 +1007,7 @@ class UnlearnerLora(Unlearner):
 
         # Final inference
         if self._accelerator.is_main_process:
-            t3 = time.time()
+            self._timestamp_training_finished = time.time()
             if self.validation_prompt is not None:
                 pipeline = DiffusionPipeline.from_pretrained(
                     self.model_name_or_path,
@@ -908,9 +1016,9 @@ class UnlearnerLora(Unlearner):
                     torch_dtype=self._weight_dtype,
                 )
                 pipeline.load_lora_weights(self._output_dir_lora)  # load attention processors
-                self._images.update(log_validation(pipeline, self._accelerator, epoch, self.num_validation_images, self.validation_prompt, self.seed, is_final_validation=True))  # run inference
+                self._images.update(log_validation(pipeline, self._accelerator, self._last_epoch, self.num_validation_images, self.validation_prompt, self.seed, is_final_validation=True))  # run inference
                 del pipeline
-                torch.cuda.empty_cache()
+                device_utils.empty_cache()
 
             assert self._output_dir_lora is not None
             pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.model_name_or_path, self._output_dir_lora, device=self._accelerator.device, weight_name=self._lora_weight_name, requires_inversion=self.is_lora_negated)
@@ -943,25 +1051,25 @@ class UnlearnerLora(Unlearner):
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime init seconds (~↓)',
-                    metric_value=t1 - t0,
+                    metric_value=self._timestamp_models_loaded - self._timestamp_start,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime data loading seconds (~↓)',
-                    metric_value=t2 - t1,
+                    metric_value=self._timestamp_training_started - self._timestamp_models_loaded,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime training seconds (↓)',
-                    metric_value=t3 - t2,
+                    metric_value=self._timestamp_training_finished - self._timestamp_training_started,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime eval seconds (~↓)',
-                    metric_value=t4 - t3,
+                    metric_value=t4 - self._timestamp_training_finished,
                     **metric_common_attributes,  # type: ignore
                 ))
 
@@ -1002,15 +1110,6 @@ class UnlearnerLora(Unlearner):
                     commit_message="End of training",
                     ignore_patterns=["step_*", "epoch_*"],
                 )
-
-        self._accelerator.end_training()
-
-        logger.info('Training completed successfully =D')
-
-        # TODO: merging the lora the with model isn't supported
-        # Merge is tricky with diffusers, see https://github.com/huggingface/diffusers/issues/2900
-        # def merge(self, model):
-
         return eval_results
 
     @abstractmethod

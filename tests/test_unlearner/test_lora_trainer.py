@@ -302,3 +302,82 @@ def test_the_forget_side_falls_back_to_the_caption_column_only_when_told_to() ->
         "the benchmark dispatch no longer passes forget_concept, so distillation runs would silently "
         "return to conditioning the forget side on bare metadata names"
     )
+
+
+def test_the_accelerator_teardown_survives_a_build_without_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`train()` used to discard its own return value at the very last line, on this platform.
+
+    `Accelerator.end_training` finishes the trackers and then destroys the process group, and that
+    second step reaches `torch.distributed.is_initialized()` unconditionally. On a build without
+    distributed support the attribute does not exist, so the call raises after the adapter has been
+    saved and the evaluation computed -- and the caller receives an exception instead of the
+    evaluation records. A 200-epoch session ended that way.
+
+    The mutation that must fail this test is calling `self._accelerator.end_training()` directly.
+    """
+    class _Tracker:
+        def __init__(self) -> None:
+            self.finished = False
+
+        def finish(self) -> None:
+            self.finished = True
+
+    class _Accelerator:
+        def __init__(self, trackers: Any) -> None:
+            self.trackers = trackers
+
+        def end_training(self) -> None:
+            raise AttributeError("module 'torch.distributed' has no attribute 'is_initialized'")
+
+    tracker = _Tracker()
+    unlearner = _minimal_lora_unlearner()
+    unlearner._accelerator = _Accelerator([tracker])
+    monkeypatch.setattr(torch.distributed, "is_available", lambda: False)
+
+    unlearner._end_training()
+
+    assert tracker.finished is True
+
+
+def test_the_accelerator_teardown_still_runs_where_it_can(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard must not become an excuse to never tear the accelerator down at all."""
+    class _AcceleratorRecording:
+        def __init__(self) -> None:
+            self.trackers: list = []
+            self.ended = False
+
+        def end_training(self) -> None:
+            self.ended = True
+
+    accelerator = _AcceleratorRecording()
+    unlearner = _minimal_lora_unlearner()
+    unlearner._accelerator = accelerator
+    monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
+
+    unlearner._end_training()
+
+    assert accelerator.ended is True
+
+
+def test_the_loss_history_is_written_beside_the_adapter(tmp_path: pathlib.Path) -> None:
+    """Per-step losses reached the tracker and nothing else, so a finished run had no loss curve.
+
+    This covers the writing half only -- the rows are supplied here rather than trained. That the
+    step loop actually fills them is not asserted from a stand-in: a real one-step capture of this
+    trainer writes a `loss_history.json` holding exactly one row, with the step, the epoch, both
+    losses and the learning rate, and that artifact is the evidence for the other half.
+    """
+    import json
+
+    unlearner = _minimal_lora_unlearner(output_dir=str(tmp_path))
+    unlearner._loss_history = [
+        {"step": 1, "epoch": 0, "loss_forget": 0.5, "loss_retain": 0.25, "learning_rate": 6e-4},
+        {"step": 2, "epoch": 0, "loss_forget": 0.4, "loss_retain": 0.20, "learning_rate": 6e-4},
+    ]
+
+    unlearner._save_loss_history()
+
+    written = json.loads((tmp_path / "loss_history.json").read_text(encoding="utf-8"))
+    assert [row["step"] for row in written] == [1, 2]
+    assert written[0]["loss_forget"] == 0.5
+    assert written[1]["learning_rate"] == 6e-4
