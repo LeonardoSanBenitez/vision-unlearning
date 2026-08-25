@@ -15,7 +15,7 @@ sys.path.append('..')
 sys.path.append('../../vision-unlearning')
 
 from vision_unlearning.utils.logger import get_logger, setup_loggers
-from vision_unlearning.unlearner import UnlearnerLoraDistillationSparsePerModule, UnlearnerLoraDistillation, UnlearnerLoraDistillationSparsePerWeight
+from vision_unlearning.unlearner import UnlearnerSpareSparsePerModule, UnlearnerSpare, UnlearnerSpareSparsePerWeight
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
 from constants import class_available, theme_available
@@ -128,7 +128,7 @@ def generate_metadata(images_path: str, forget_concept: str, overwrite_concept: 
 
 
 def run_unlearnings(
-    unlearner_class: UnlearnerLoraDistillationSparsePerModule|UnlearnerLoraDistillation|UnlearnerLoraDistillationSparsePerWeight,
+    unlearner_class: UnlearnerSpareSparsePerModule|UnlearnerSpare|UnlearnerSpareSparsePerWeight,
     hyperparameters: dict[str, float|bool|str],
     model_base_path: str,
     uc_dataset_path: str,

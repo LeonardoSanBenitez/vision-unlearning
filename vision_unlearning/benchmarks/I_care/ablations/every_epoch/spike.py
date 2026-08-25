@@ -107,7 +107,7 @@ def main() -> int:
     import torch
     from PIL import Image
 
-    from vision_unlearning.unlearner import UnlearnerLoraDistillation
+    from vision_unlearning.unlearner import UnlearnerSpare
     from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
     from vision_unlearning.utils.data_generation import generate_dataset
     from vision_unlearning.datasets.testbed import get_target_overwrite
@@ -207,7 +207,7 @@ def main() -> int:
         "save_lora_at_epochs": list(range(1, n_epochs + 1)),
     }
 
-    unlearner = UnlearnerLoraDistillation(**hyperparameters)
+    unlearner = UnlearnerSpare(**hyperparameters)
     effective_dropout = unlearner._get_lora_config().lora_dropout  # F7: observe, do not change
     result["effective_lora_dropout"] = effective_dropout
     logger.info("F7 effective LoRA dropout (LoraConfig) = %s (passed lora_dropout=0.2 is ignored)", effective_dropout)

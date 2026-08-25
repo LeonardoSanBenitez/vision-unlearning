@@ -142,7 +142,7 @@ def _stage_train(hyperparameters: Dict[str, Any]) -> None:
     '''Trains 10 epochs at the given hyperparameters, saving adapters at epochs 1, 3, 5 and 10.'''
     check_headroom()
 
-    from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+    from vision_unlearning.unlearner.spare import UnlearnerSpare
 
     from step_check_support import StopAfterTraining, restore_post_training, stub_post_training
 
@@ -171,7 +171,7 @@ def _stage_train(hyperparameters: Dict[str, Any]) -> None:
     original_unlearn_lora = stub_post_training()
     t0 = time.time()
     try:
-        unlearner = UnlearnerLoraDistillation(**arguments)
+        unlearner = UnlearnerSpare(**arguments)
         monitor.start()
         try:
             unlearner.train()

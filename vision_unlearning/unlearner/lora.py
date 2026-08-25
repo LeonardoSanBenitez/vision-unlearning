@@ -119,7 +119,7 @@ def unlearn_lora(
         logger.info(f"Inverted {total} params for pipeline_unlearned")
     else:
         # pipeline_unlearned remains as it was trained, pipeline_learned is inverted
-        # FADE, for example, falls in this case
+        # SPARE, for example, falls in this case
         if return_learned:
             total: int = 0  # type: ignore
             sum_before_invert: float = sum([float(param.sum()) for name, param in pipeline_learned.unet.named_parameters() if "lora_A" in name])  # type: ignore
@@ -439,7 +439,7 @@ class UnlearnerLora(Unlearner):
         would write at the same point.
 
         Known limitation: this saves the base LoRA adapter. A subclass that overrides the final
-        _save_lora_layers with different artifact semantics (e.g. UnlearnerLoraDistillationSparsePerWeight,
+        _save_lora_layers with different artifact semantics (e.g. UnlearnerSpareSparsePerWeight,
         which writes separate super/sub adapters) would need to override _save_lora_layers_to as well to
         emit matching intermediate checkpoints; those subclasses simply do not set save_lora_at_epochs.
         '''

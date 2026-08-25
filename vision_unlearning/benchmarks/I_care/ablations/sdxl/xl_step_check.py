@@ -36,7 +36,7 @@ from typing import Any, Dict, Tuple
 import numpy as np
 import torch
 
-from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+from vision_unlearning.unlearner.spare import UnlearnerSpare
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
 from step_check_support import StopAfterTraining, restore_post_training, stub_post_training, write_image_folder
@@ -54,7 +54,7 @@ OVERWRITING_CONCEPT = "An image of a child"
 ASSETS = Path(__file__).resolve().parent / "assets"
 
 
-def _record_conditioning_shapes(unlearner: UnlearnerLoraDistillation, sink: Dict[str, Any]) -> None:
+def _record_conditioning_shapes(unlearner: UnlearnerSpare, sink: Dict[str, Any]) -> None:
     '''
     Wraps `_encode_conditioning` so that the first call of each role records what it produced.
 
@@ -143,7 +143,7 @@ def train_one_step(work_dir: Path, monitor_log: Path) -> Dict[str, Any]:
     torch.cuda.reset_peak_memory_stats()
     t0 = time.time()
     try:
-        unlearner = UnlearnerLoraDistillation(**hyperparameters)
+        unlearner = UnlearnerSpare(**hyperparameters)
         _record_conditioning_shapes(unlearner, conditioning)
         monitor.start()
         try:

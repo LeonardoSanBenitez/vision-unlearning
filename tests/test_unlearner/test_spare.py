@@ -2,7 +2,7 @@ import pytest
 import warnings
 import torch
 from diffusers import UNet2DConditionModel
-from vision_unlearning.unlearner.fade import make_lora_elastic, ElasticLoRALinear, SharedR
+from vision_unlearning.unlearner.spare import make_lora_elastic, ElasticLoRALinear, SharedR
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="peft.*")

@@ -163,7 +163,7 @@ class TestUCESmoke:
 # ---------------------------------------------------------------------------
 
 class TestDistilSmoke:
-    """Minimal end-to-end test for UnlearnerLoraDistillation (FADE distil).
+    """Minimal end-to-end test for UnlearnerSpare (SPARE distil).
 
     We run exactly 1 training step (max_train_steps=1) on a single tiny image
     to verify the forward pass, backward pass, optimizer step, and checkpoint
@@ -171,15 +171,15 @@ class TestDistilSmoke:
     """
 
     def test_distil_one_step(self, tiny_dataset_dir: str, tmp_path: Path) -> None:
-        """UnlearnerLoraDistillation.train() completes 1 step on a real GPU."""
+        """UnlearnerSpare.train() completes 1 step on a real GPU."""
         _skip_if_no_cuda()
 
-        from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+        from vision_unlearning.unlearner.spare import UnlearnerSpare
         from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
         output_dir = str(tmp_path / "distil_output")
 
-        unlearner = UnlearnerLoraDistillation(  # type: ignore[call-arg]
+        unlearner = UnlearnerSpare(  # type: ignore[call-arg]
             model_name_or_path=_SD_MODEL,
             # Use the same tiny dir for both forget and retain
             dataset_forget_name=tiny_dataset_dir,
@@ -219,12 +219,12 @@ class TestDistilSmoke:
         """After training, a LoRA checkpoint should exist in the output directory."""
         _skip_if_no_cuda()
 
-        from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+        from vision_unlearning.unlearner.spare import UnlearnerSpare
         from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
         output_dir = str(tmp_path / "distil_checkpoint")
 
-        unlearner = UnlearnerLoraDistillation(  # type: ignore[call-arg]
+        unlearner = UnlearnerSpare(  # type: ignore[call-arg]
             model_name_or_path=_SD_MODEL,
             dataset_forget_name=tiny_dataset_dir,
             dataset_retain_name=tiny_dataset_dir,

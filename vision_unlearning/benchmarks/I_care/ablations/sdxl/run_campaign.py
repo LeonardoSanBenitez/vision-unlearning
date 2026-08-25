@@ -126,7 +126,7 @@ def _stage_train(seed: int) -> None:
 
     check_headroom()
 
-    from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+    from vision_unlearning.unlearner.spare import UnlearnerSpare
     from step_check_support import StopAfterTraining, restore_post_training, stub_post_training
 
     checkpoints = checkpoint_list()
@@ -159,7 +159,7 @@ def _stage_train(seed: int) -> None:
     original_unlearn_lora = stub_post_training()
     t0 = time.time()
     try:
-        unlearner = UnlearnerLoraDistillation(**hyperparameters)
+        unlearner = UnlearnerSpare(**hyperparameters)
         monitor.start()
         try:
             unlearner.train()

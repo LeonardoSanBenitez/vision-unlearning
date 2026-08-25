@@ -358,13 +358,15 @@ def run_normal(
         else:
             batch_size_inference = 25
 
+        from vision_unlearning.unlearner import Unlearner
+        unlearner: Unlearner
         if method == "distil":
-            from unlearner_lora_distillation import UnlearnerLoraDistillation
+            from vision_unlearning.unlearner import UnlearnerSpare
             hyperparameters["overwritting_concept"] = target_overwrite
             hyperparameters["gradient_weighting_method"] = GradientWeightingMethodSimple(
                 forget_weight=0.3, retain_weight=1.0
             )
-            unlearner = UnlearnerLoraDistillation(**hyperparameters)
+            unlearner = UnlearnerSpare(**hyperparameters)
         elif method == "munba":
             from vision_unlearning.unlearner import UnlearnerLoraDirect
             hyperparameters["gradient_weighting_method"] = GradientWeightingMethodMunba()

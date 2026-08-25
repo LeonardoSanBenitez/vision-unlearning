@@ -10,7 +10,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         prog='test_evaluation_UC',
-        description='Generate accuracy evaluations for answer set of unlearned models with FADE for UnlearnCanvaEval')
+        description='Generate accuracy evaluations for answer set of unlearned models with SPARE for UnlearnCanvaEval')
     parser.add_argument('--ckpt_path', type=str, required=True, help="Path to the folder with ckpt of the UnlearnCanvas classifiers.")
     parser.add_argument('--save_base_path', type=str, required=True, help="Folder where the unlearned models are.")
     parser.add_argument('--uc_dataset_path', type=str, default="assets/data/UC_dataset", required=False, help="Root path to the dataset, where the json files with retain and forget info can be found.")

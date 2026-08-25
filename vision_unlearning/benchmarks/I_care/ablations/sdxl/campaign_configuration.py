@@ -142,7 +142,7 @@ def training_hyperparameters(
     forget_weight: float,
     checkpointing_steps: int = 100000,
 ) -> Dict[str, Any]:
-    '''Builds the full `UnlearnerLoraDistillation` argument set the probe and the campaign share.
+    '''Builds the full `UnlearnerSpare` argument set the probe and the campaign share.
 
     Everything that is settled is fixed here; the four values plan stage S4 is choosing are
     parameters. Post-training evaluation is left empty on purpose: it is stubbed out by the callers
@@ -161,7 +161,7 @@ def training_hyperparameters(
     @param lora_alpha: S4 hyperparameter.
     @param forget_weight: S4 hyperparameter, against a retain weight fixed at 1.0.
     @param checkpointing_steps: accelerate-state interval; the default is effectively "never".
-    @return: the keyword arguments for `UnlearnerLoraDistillation`.
+    @return: the keyword arguments for `UnlearnerSpare`.
     '''
     from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 

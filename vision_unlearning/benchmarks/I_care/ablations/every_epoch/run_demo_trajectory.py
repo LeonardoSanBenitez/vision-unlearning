@@ -86,7 +86,7 @@ def main() -> int:
     import matplotlib.pyplot as plt
     from PIL import Image
 
-    from vision_unlearning.unlearner import UnlearnerLoraDistillation
+    from vision_unlearning.unlearner import UnlearnerSpare
     from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
     from vision_unlearning.utils.data_generation import generate_dataset
     from vision_unlearning.metrics import MetricImageTextSimilarity
@@ -159,7 +159,7 @@ def main() -> int:
     monitor = ResourceMonitor(monitor_log)
     monitor.start()
     try:
-        unlearner = UnlearnerLoraDistillation(**hyperparameters)
+        unlearner = UnlearnerSpare(**hyperparameters)
         t0 = time.time()
         unlearner.train()
         train_s = time.time() - t0

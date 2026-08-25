@@ -49,7 +49,7 @@ def main() -> None:
 
     check_headroom()
 
-    from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+    from vision_unlearning.unlearner.spare import UnlearnerSpare
     from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
     from step_check_support import StopAfterTraining, restore_post_training, stub_post_training
@@ -112,7 +112,7 @@ def main() -> None:
     t0 = time.time()
     failure = None
     try:
-        unlearner = UnlearnerLoraDistillation(**hyperparameters)
+        unlearner = UnlearnerSpare(**hyperparameters)
         monitor.start()
         try:
             unlearner.train()

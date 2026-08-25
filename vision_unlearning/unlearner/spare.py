@@ -1,9 +1,9 @@
 '''
-Implementation of FADE (in its three variants: non-sparse, sparse-per-module, sparse-per-weight).
+Implementation of SPARE (in its three variants: non-sparse, sparse-per-module, sparse-per-weight).
 Please cite the following paper if you use this code:
-@misc{kelsch2026fadeselectiveforgettingsparse,
-      title={FADE: Selective Forgetting via Sparse LoRA and Self-Distillation},
-      author={Carolina R. Kelsch and Leonardo S. B. Pereira and Natnael Mola and Luis H. Arribas and Juan C. S. M. Avedillo},
+@misc{mola2026spareselfdistillationparameterefficientremoval,
+      title={SPARE: Self-distillation for PARameter-Efficient Removal},
+      author={Natnael Mola and Leonardo S. B. Pereira and Carolina R. Kelsch and Luis H. Arribas and Juan C. S. M. Avedillo},
       year={2026},
       eprint={2602.07058},
       archivePrefix={arXiv},
@@ -11,6 +11,8 @@ Please cite the following paper if you use this code:
       url={https://arxiv.org/abs/2602.07058},
 }
 
+The code name of this method in the benchmark's own vocabulary, on disk and in every result file, is
+`distil`. That string is data rather than a name and is deliberately not renamed with the method.
 '''
 import os
 import json
@@ -49,7 +51,7 @@ from vision_unlearning.utils import device as device_utils
 ########################################
 # Non-sparse version
 ########################################
-class UnlearnerLoraDistillation(UnlearnerLora):
+class UnlearnerSpare(UnlearnerLora):
     '''
     SparsePEFT is not active in this trainer
     '''
@@ -104,9 +106,9 @@ class UnlearnerLoraDistillation(UnlearnerLora):
     def _pre_checks(self) -> None:
         super()._pre_checks()
         if not isinstance(self.gradient_weighting_method, GradientWeightingMethodSimple):
-            raise ValueError(f"FADE does not support more advanced gradient weighting methods. Please set `gradient_weighting_method` to `GradientWeightingMethodSimple`.")
+            raise ValueError(f"SPARE does not support more advanced gradient weighting methods. Please set `gradient_weighting_method` to `GradientWeightingMethodSimple`.")
         if self.compute_gradient_conflict:
-            raise ValueError("FADE does not support calculating gradient conflict. Please set `compute_gradient_conflict` to False.")
+            raise ValueError("SPARE does not support calculating gradient conflict. Please set `compute_gradient_conflict` to False.")
 
     def _forget_caption(self) -> Optional[str]:
         """The phrase the forget side is conditioned on, or None to use the dataset's own captions.
@@ -494,7 +496,7 @@ class UnlearnerLoraDistillation(UnlearnerLora):
 ########################################
 # Sparse-per-module version
 ########################################
-class UnlearnerLoraDistillationSparsePerModule(UnlearnerLoraDistillation):
+class UnlearnerSpareSparsePerModule(UnlearnerSpare):
     sparsity_inclusiveness: float = Field(default=0.5, description="Percentage of top modules that will be finetuned; Increasing it selects more parameters; Between 0 and 1.")
     parameter_attribution_method: ParameterAttributionMethod
     attribution_overwrite_if_exists: bool = False
@@ -860,7 +862,7 @@ def calculate_sparsity_lora(lora_path: str, filename: str, device: str = 'cuda',
     return percentages
 
 
-class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
+class UnlearnerSpareSparsePerWeight(UnlearnerSpare):
     # Specific to this unlearner, general arguments
     nls: bool = Field(default=False, description="Whether to apply Neural LoRA Search (NLS) or not.")
     nls_target_modules: List[str] = Field(default=[], description="Which module will be added the elastic lora adapter.")
@@ -1053,6 +1055,6 @@ class UnlearnerLoraDistillationSparsePerWeight(UnlearnerLoraDistillation):
         # TODO: copy the content from {self._output_dir_sub}/* to the root of output_dir?
 
 
-class UnlearnerLoraDistillationSparse(UnlearnerLoraDistillationSparsePerWeight):
+class UnlearnerSpareSparse(UnlearnerSpareSparsePerWeight):
     # TODO: this is here just for naming compatibility with the existing notebooks, and should be REMOVED in future
     pass

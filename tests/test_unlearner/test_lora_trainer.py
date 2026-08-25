@@ -232,12 +232,12 @@ def test_both_sides_of_the_distillation_pair_share_one_template() -> None:
     Asserted on the strings rather than on tokens, because the token identifiers are a tokeniser
     detail while the strings are the contract with the generation side.
     """
-    from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+    from vision_unlearning.unlearner.spare import UnlearnerSpare
     from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
     # Built from a real instance, not from the template constant: a test that only formats the
     # constant would pass even if the trainer ignored the field entirely.
-    unlearner = UnlearnerLoraDistillation(
+    unlearner = UnlearnerSpare(
         model_name_or_path="CompVis/stable-diffusion-v1-4",
         dataset_forget_name="unused",
         dataset_retain_name="unused",
@@ -277,12 +277,12 @@ def test_the_forget_side_falls_back_to_the_caption_column_only_when_told_to() ->
     caller silently getting the old asymmetric behaviour by omission, which is why the benchmark's
     own dispatch sets it explicitly.
     """
-    from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+    from vision_unlearning.unlearner.spare import UnlearnerSpare
 
     from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
-    assert UnlearnerLoraDistillation.model_fields["forget_concept"].default is None
-    unset = UnlearnerLoraDistillation(
+    assert UnlearnerSpare.model_fields["forget_concept"].default is None
+    unset = UnlearnerSpare(
         model_name_or_path="CompVis/stable-diffusion-v1-4",
         dataset_forget_name="unused",
         dataset_retain_name="unused",

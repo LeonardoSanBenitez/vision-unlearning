@@ -1,5 +1,5 @@
 '''
-Characterization check: does one training step of UnlearnerLoraDistillation still produce the same
+Characterization check: does one training step of UnlearnerSpare still produce the same
 adapter, byte for byte, after the dual-model refactor?
 
 The refactor changes code that every existing Stable Diffusion 1.4 result depends on, and a
@@ -73,7 +73,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation  # noqa: E402
+from vision_unlearning.unlearner.spare import UnlearnerSpare  # noqa: E402
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple  # noqa: E402
 
 from step_check_support import StopAfterTraining, restore_post_training, stub_post_training, write_image_folder  # noqa: E402
@@ -138,7 +138,7 @@ def train_one_step(work_dir: Path) -> Path:
 
     original_unlearn_lora = stub_post_training()
     try:
-        unlearner = UnlearnerLoraDistillation(**hyperparameters)
+        unlearner = UnlearnerSpare(**hyperparameters)
         try:
             unlearner.train()
         except StopAfterTraining:
@@ -161,7 +161,7 @@ def sha256_of_file(path: Path) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="One-step adapter hash of UnlearnerLoraDistillation.")
+    parser = argparse.ArgumentParser(description="One-step adapter hash of UnlearnerSpare.")
     parser.add_argument("--expect", default=None, help="previously recorded SHA-256 to compare against")
     parser.add_argument("--allow-gpu", action="store_true",
                         help="diagnostic only: run on the GPU, where a hash comparison is NOT valid")

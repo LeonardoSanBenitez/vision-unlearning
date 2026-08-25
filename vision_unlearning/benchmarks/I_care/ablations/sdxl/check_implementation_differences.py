@@ -1,6 +1,6 @@
 """Executable evidence for three claims about the current SPARE trainer.
 
-The SDXL work rests on a comparison between ``UnlearnerLoraDistillation`` (this repository's SPARE
+The SDXL work rests on a comparison between ``UnlearnerSpare`` (this repository's SPARE
 implementation, on Stable Diffusion 1.4) and a proof-of-concept SDXL training script. Three of the
 differences that comparison found are claims about what our own code *does at run time*, not about
 what it says, and each one would be a reasonable thing to get wrong from reading alone. This script
