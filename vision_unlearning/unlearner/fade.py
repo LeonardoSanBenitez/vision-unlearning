@@ -43,6 +43,7 @@ from vision_unlearning.unlearner import UnlearnerLora, logger
 from vision_unlearning.utils.parameter_attribution import ParameterAttributionMethod
 from vision_unlearning.utils.training import unwrap_model
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
+from vision_unlearning.utils import device as device_utils
 
 
 ########################################
@@ -476,8 +477,8 @@ class UnlearnerLoraDistillation(UnlearnerLora):
         del model_pred_retain_new, model_pred_retain_old
 
         # Peak memory measurement
-        torch.cuda.synchronize()
-        batch_peak = torch.cuda.max_memory_allocated()
+        device_utils.synchronize()
+        batch_peak = device_utils.max_memory_allocated()
         self._peak_mem = max(self._peak_mem, batch_peak)
 
         if self._accelerator.sync_gradients:

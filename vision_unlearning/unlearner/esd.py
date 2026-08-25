@@ -18,6 +18,7 @@ from vision_unlearning.unlearner.base import Unlearner, logger
 from vision_unlearning.evaluator import EvaluatorTextToImage
 from vision_unlearning.metrics import MetricImageTextSimilarity
 from vision_unlearning.utils.model_management import save_model_card
+from vision_unlearning.utils import device as device_utils
 
 
 ESD_WEIGHTS_FILENAME = 'esd_sd_weights.safetensors'
@@ -187,16 +188,6 @@ class ESD(Unlearner):
             return torch.bfloat16
         return torch.float32
 
-    @staticmethod
-    def _empty_device_cache(device: str) -> None:
-        '''Free cached device memory, if there is a device and its context exists.
-
-        `torch.cuda.is_available()` is not sufficient on the ROCm build used here: it returns True
-        while the context is still uninitialized, and some `torch.cuda` calls raise in that state.
-        '''
-        if str(device).startswith('cuda') and torch.cuda.is_available() and torch.cuda.is_initialized():
-            torch.cuda.empty_cache()
-
     def _select_parameter_names(self, unet: torch.nn.Module) -> List[str]:
         '''Names of the denoiser parameters this train method trains, in module order.
 
@@ -268,7 +259,7 @@ class ESD(Unlearner):
 
         self._save_weights(trained_tensors)
         del pipeline
-        self._empty_device_cache(self.device)
+        device_utils.empty_cache()
 
         eval_results, eval_images = self.evaluate()
         t3 = time.time()

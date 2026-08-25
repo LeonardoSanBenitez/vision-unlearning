@@ -28,6 +28,7 @@ _HEAVY_TEST_FILES = [
     "test_unlearner/test_fade.py",
     "test_unlearner/test_lora_trainer.py",
     "test_unlearner/test_gpu_unlearning.py",
+    "test_device.py",
 ]
 
 if importlib.util.find_spec("torch") is None:
