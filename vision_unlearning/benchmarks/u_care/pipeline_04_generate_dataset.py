@@ -29,7 +29,7 @@ def answer_set_prompts(style: Optional[str] = None) -> List[str]:
     ]
 
 
-def _make_pipeline(model_path: str, device: str) -> StableDiffusionPipeline:
+def _make_pipeline(model_path: str, device: str, unet_state_dict_path: Optional[str] = None) -> StableDiffusionPipeline:
     scheduler = LMSDiscreteScheduler(
         beta_start=0.00085,
         beta_end=0.012,
@@ -42,6 +42,9 @@ def _make_pipeline(model_path: str, device: str) -> StableDiffusionPipeline:
         torch_dtype=torch.float16,
         safety_checker=None,
     )
+    if unet_state_dict_path is not None:
+        state_dict = torch.load(unet_state_dict_path, map_location=device, weights_only=False)
+        pipe.unet.load_state_dict(state_dict)
     pipe = pipe.to(device)
     pipe.set_progress_bar_config(disable=True)
     return pipe
@@ -63,8 +66,25 @@ def generate_answer_set(
     prompts: Optional[List[str]] = None,
     style: Optional[str] = None,
     overwrite: bool = False,
+    unet_state_dict_path: Optional[str] = None,
+    prefix: str = "off",
 ) -> str:
-    """Generate baseline images using one CPU-seeded latent per prompt and seed."""
+    """Generate answer-set images using one CPU-seeded latent per prompt and seed.
+    
+    Args:
+        model_path: Base model or model folder path.
+        output_folder: Output directory for images.
+        seeds: List of seeds to use.
+        device: Device to use ('cuda' or 'cpu').
+        prompts: Optional list of prompts; if not provided, use answer_set_prompts.
+        style: Optional style to filter prompts.
+        overwrite: Whether to overwrite existing images.
+        unet_state_dict_path: Optional path to an edited UNet state dict (for unlearned models).
+        prefix: Filename prefix ('off' for baseline, 'on' for unlearned).
+    
+    Returns:
+        Path to the output folder.
+    """
     if prompts is not None and style is not None:
         raise ValueError("Pass either prompts or style, not both.")
     prompt_list = prompts if prompts is not None else answer_set_prompts(style)
@@ -74,11 +94,11 @@ def generate_answer_set(
     if not overwrite and dataset.exists(seeds, prompt_list):
         return str(output_dir)
 
-    pipe = _make_pipeline(model_path, device)
+    pipe = _make_pipeline(model_path, device, unet_state_dict_path=unet_state_dict_path)
     started = time.perf_counter()
     for seed in tqdm(seeds, desc="Seeds"):
         for prompt in tqdm(prompt_list, desc=f"Seed {seed}", leave=False):
-            filename = f"off_{seed:02d}_{prompt}.png"
+            filename = f"{prefix}_{seed:02d}_{prompt}.png"
             image_path = output_dir / filename
             if image_path.exists() and not overwrite:
                 continue
@@ -120,6 +140,17 @@ def main() -> None:
     )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--unet-state-dict",
+        default=None,
+        help="Path to an edited UNet state dict (for unlearned models).",
+    )
+    parser.add_argument(
+        "--prefix",
+        choices=["off", "on"],
+        default="off",
+        help="Filename prefix: 'off' for baseline, 'on' for unlearned.",
+    )
     args = parser.parse_args()
     generate_answer_set(
         model_path=args.model_path,
@@ -128,6 +159,8 @@ def main() -> None:
         device=args.device,
         style=args.style,
         overwrite=args.overwrite,
+        unet_state_dict_path=args.unet_state_dict,
+        prefix=args.prefix,
     )
 
 

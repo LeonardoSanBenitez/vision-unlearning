@@ -15,6 +15,9 @@ from vision_unlearning.benchmarks.u_care.pipeline_06_compute_interference_per_pa
 from vision_unlearning.benchmarks.u_care.pipeline_07_compute_interference_per_entity import (
     aggregate_entity_metrics,
 )
+from vision_unlearning.benchmarks.u_care.pipeline_03_unlearn_model import (
+    build_uce_command,
+)
 
 
 class TestConfigurationInvariants:
@@ -68,6 +71,23 @@ class TestStage2EvaluationLogic:
         assert result["Unlearning accuracy"] == 0.75
         assert result["In domain retain accuracy"] == 1.0
         assert result["Cross domain retain accuracy"] == 1.0
+
+    def test_uce_command_uses_upstream_arguments(self) -> None:
+        command = build_uce_command(
+            upstream_script="train_erase.py",
+            checkpoint="model",
+            emitter="Van_Gogh",
+            output_folder="output",
+            erase_scale=0.05,
+            lamb=1.0,
+            guided_concept="An image in Photo style",
+            python_executable="python",
+        )
+        assert command == [
+            "python", "train_erase.py", "--ckpt", "model", "--theme", "Van_Gogh",
+            "--output_dir", "output", "--erase_scale", "0.05", "--lamb", "1.0",
+            "--guided_concepts", "An image in Photo style", "--add_prompts",
+        ]
 
 
 class TestGeneratedDatasetLifecycle:
