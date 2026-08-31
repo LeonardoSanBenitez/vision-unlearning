@@ -22,6 +22,18 @@ class Unlearner(BaseModel, ABC):
     # set to the same value everywhere, so nothing ever looked wrong.
     model_config = ConfigDict(extra="forbid")
 
+    # Whether the evaluation step displays its comparison figures interactively.
+    #
+    # Off by default because an unlearner is normally run unattended, and showing a figure calls
+    # `plt.show()`, which blocks until a window is closed whenever matplotlib has an interactive
+    # backend. A training run from a script or a scheduler then hangs forever with no error and no
+    # output -- and the hang is invisible under a headless backend, so it survives continuous
+    # integration and appears only on a desktop.
+    #
+    # Set it True from a notebook, where blocking is exactly what you want. The figures are returned
+    # from `evaluate()` either way, so leaving it off costs nothing but the window.
+    plot_show: bool = False
+
     @abstractmethod
     def train(self) -> List[EvalResult]:
         pass

@@ -462,7 +462,8 @@ class UCE(Unlearner):
             prompts_forget=self.final_eval_prompts_forget,
             prompts_retain=self.final_eval_prompts_retain,
             metric_clip=MetricImageTextSimilarity(metrics=['clip']),
-            compute_runtimes=self.compute_runtimes
+            compute_runtimes=self.compute_runtimes,
+            plot_show=self.plot_show,
         )
 
         eval_result, eval_images = evaluator.evaluate()
