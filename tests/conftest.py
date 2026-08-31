@@ -17,6 +17,7 @@ import pytest
 # classify it here or keep it torch-free. That failure is the intended rot-protection
 # behaviour, not a bug.
 _HEAVY_TEST_FILES = [
+    "test_epoch_checkpoint_hook.py",
     "test_data_generation.py",
     "test_gradient_weighting.py",
     "test_model_management.py",
@@ -24,8 +25,11 @@ _HEAVY_TEST_FILES = [
     "test_metrics/test_image.py",
     "test_metrics/test_image_and_image.py",
     "test_metrics/test_image_and_text.py",
-    "test_unlearner/test_fade.py",
+    "test_unlearner/test_spare.py",
+    "test_unlearner/test_unlearner_contract.py",
+    "test_unlearner/test_lora_trainer.py",
     "test_unlearner/test_gpu_unlearning.py",
+    "test_device.py",
 ]
 
 if importlib.util.find_spec("torch") is None:

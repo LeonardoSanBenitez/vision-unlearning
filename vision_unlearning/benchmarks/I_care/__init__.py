@@ -87,6 +87,7 @@ from vision_unlearning.benchmarks.I_care.utils import (
 
 from vision_unlearning.benchmarks.I_care.similarity import (
     Similarity,
+    UnetLatentSimilarity,
     jacc_metric_score,
 )
 
@@ -224,6 +225,7 @@ __all__ = [
     "rt_name_to_class",
     "rt_name_to_params",
     "Similarity",
+    "UnetLatentSimilarity",
     "MetadataFiltered",
     "ArtifactNotAvailableError",
     "jacc_metric_score",

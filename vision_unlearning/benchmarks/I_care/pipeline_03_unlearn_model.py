@@ -21,7 +21,7 @@ os.environ['WANDB_DISABLED'] = "true"
 assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non-empty"
 #!huggingface-cli login --token ${HF_TOKEN}
 
-from unlearner_lora_distillation import UnlearnerLoraDistillation  # FADE  # noqa: E402
+from vision_unlearning.unlearner import Unlearner, UnlearnerSpare  # noqa: E402
 from vision_unlearning.unlearner import UnlearnerLoraDirect  # Munba  # noqa: E402
 from vision_unlearning.unlearner import UCE, ConceptType  # noqa: E402
 
@@ -296,19 +296,16 @@ for index in range(index_start, index_start + max_identities):
         if free_memory > 20e9:
             hyperparameters.update({
                 "per_device_train_batch_size": 4,
-                "train_batch_size": 4,
                 "gradient_accumulation_steps": 1,
             })
         elif free_memory > 14e9:
             hyperparameters.update({
                 "per_device_train_batch_size": 2,
-                "train_batch_size": 2,
                 "gradient_accumulation_steps": 2,
             })
         else:
             hyperparameters.update({
                 "per_device_train_batch_size": 2,  # 1,
-                "train_batch_size": 2,  # 1,
                 "gradient_accumulation_steps": 2,  # 4,
             })
 
@@ -322,10 +319,15 @@ for index in range(index_start, index_start + max_identities):
         logger.error('Too little GPU, diverting power from life support...')
         batch_size_inference = 25
 
+    unlearner: Unlearner
     if method == 'distil':
         hyperparameters['overwritting_concept'] = target_overwrite
+        # The forget side is conditioned on the same phrase the images are generated and evaluated
+        # with, rather than on the bare underscored name stored in the dataset's captions, so that
+        # the intervention is fitted at the point in text-embedding space that is later queried.
+        hyperparameters['forget_concept'] = target_preprocessed
         hyperparameters['gradient_weighting_method'] = GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0)
-        unlearner = UnlearnerLoraDistillation(**hyperparameters)
+        unlearner = UnlearnerSpare(**hyperparameters)
     elif method == 'munba':
         hyperparameters['gradient_weighting_method'] = GradientWeightingMethodMunba()
         if task=='scenes':

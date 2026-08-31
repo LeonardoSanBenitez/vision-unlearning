@@ -101,7 +101,7 @@ def generate_images(args, theme):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog='generate_images',
-        description='Generate images from unlearned model with FADE.')
+        description='Generate images from unlearned model with SPARE.')
     # will run for all theme_available + class_available
     parser.add_argument('--ckpts_base_path', type=str, default="assets/models/", help="Path to the generated distill lora weights should be where the base path where all models are.")
     parser.add_argument('--pipeline_path', help='path to pipeline', type=str, default="assets/data/sd/")

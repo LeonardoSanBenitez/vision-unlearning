@@ -599,6 +599,7 @@ type_s = Literal[
     "jacc",
     "dino",
     "act",
+    "unet_latent",  # cosine similarity of the final denoised latents the VAE decoder consumes
     "weight_overlap",  # cosine similarity of trained LoRA weight changes (B@A); scenes/distil only
 ]
 
@@ -705,11 +706,14 @@ S_REGISTRY: Dict[type_s, MetricWithDirectionSpec] = {
     "jacc": MetricWithDirectionSpec(name="jacc", name_pretty="Jacc Similarity", direction="↑"),
     "dino": MetricWithDirectionSpec(name="dino", name_pretty="DINOv2 Cosine Similarity", direction="↑"),
     "act": MetricWithDirectionSpec(name="act", name_pretty="UNet Cross-Attention Similarity", direction="↑"),
+    # No name_pretty: cosine similarity of the final denoised latent (the tensor the VAE decoder
+    # consumes), a candidate metric — not GUI-selectable until all three task matrices exist.
+    "unet_latent": MetricWithDirectionSpec(name="unet_latent", direction="↑"),
     # No name_pretty: cosine similarity of trained LoRA weight changes (B@A), scenes/distil
     # only — a diagnostic, not GUI-selectable (not in GUI_TO_BACKEND['similarity_metric']).
     "weight_overlap": MetricWithDirectionSpec(name="weight_overlap", direction="↑"),
 }
-_S_DISPLAY_ORDER: List[type_s] = ["clip", "jacc", "dino", "act"]  # weight_overlap excluded: no display name
+_S_DISPLAY_ORDER: List[type_s] = ["clip", "jacc", "dino", "act"]  # unet_latent, weight_overlap excluded: no display name
 
 L_REGISTRY: Dict[type_l, LSpec] = {
     "clip_embedding": LSpec(name="clip_embedding", name_pretty="Clip Embedding"),

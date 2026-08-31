@@ -123,6 +123,42 @@ class TestUCESmoke:
             f"UCE did not produce an output directory at {output_dir}"
         )
 
+        # An unlearner that did nothing at all would satisfy everything above: it would return an
+        # empty list and leave a directory behind. What separates a real edit from a no-op is that
+        # the saved tensors are not the tensors the base model already had. That is asserted here,
+        # against the checkpoint itself, so the smoke test can fail for the right reason.
+        from safetensors.torch import load_file
+
+        saved_files = list(Path(output_dir).rglob("*.safetensors"))
+        assert saved_files, f"UCE wrote no weight file into {output_dir}"
+        saved = load_file(str(saved_files[0]))
+        assert saved, "UCE wrote a weight file holding no tensors"
+
+        from diffusers import DiffusionPipeline
+
+        base = DiffusionPipeline.from_pretrained(
+            _SD_MODEL, torch_dtype=torch.float16, safety_checker=None,
+        )
+        base_parameters = dict(base.unet.named_parameters())
+        compared = 0
+        moved = 0
+        for name, tensor in saved.items():
+            original = base_parameters.get(name)
+            if original is None:
+                continue
+            compared += 1
+            if not torch.equal(original.detach().cpu().float(), tensor.detach().cpu().float()):
+                moved += 1
+        del base
+
+        assert compared > 0, (
+            f"none of the {len(saved)} saved tensors matched a denoiser parameter by name; "
+            "the artifact and the checkpoint do not correspond"
+        )
+        assert moved > 0, (
+            f"all {compared} saved tensors are identical to the base model's: the edit was a no-op"
+        )
+
     def test_uce_gpu_vram_consumed(self) -> None:
         """After UCE completes, some VRAM should have been used."""
         _skip_if_no_cuda()
@@ -163,7 +199,7 @@ class TestUCESmoke:
 # ---------------------------------------------------------------------------
 
 class TestDistilSmoke:
-    """Minimal end-to-end test for UnlearnerLoraDistillation (FADE distil).
+    """Minimal end-to-end test for UnlearnerSpare (SPARE distil).
 
     We run exactly 1 training step (max_train_steps=1) on a single tiny image
     to verify the forward pass, backward pass, optimizer step, and checkpoint
@@ -171,15 +207,15 @@ class TestDistilSmoke:
     """
 
     def test_distil_one_step(self, tiny_dataset_dir: str, tmp_path: Path) -> None:
-        """UnlearnerLoraDistillation.train() completes 1 step on a real GPU."""
+        """UnlearnerSpare.train() completes 1 step on a real GPU."""
         _skip_if_no_cuda()
 
-        from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+        from vision_unlearning.unlearner.spare import UnlearnerSpare
         from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
         output_dir = str(tmp_path / "distil_output")
 
-        unlearner = UnlearnerLoraDistillation(  # type: ignore[call-arg]
+        unlearner = UnlearnerSpare(  # type: ignore[call-arg]
             model_name_or_path=_SD_MODEL,
             # Use the same tiny dir for both forget and retain
             dataset_forget_name=tiny_dataset_dir,
@@ -219,12 +255,12 @@ class TestDistilSmoke:
         """After training, a LoRA checkpoint should exist in the output directory."""
         _skip_if_no_cuda()
 
-        from vision_unlearning.unlearner.fade import UnlearnerLoraDistillation
+        from vision_unlearning.unlearner.spare import UnlearnerSpare
         from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
 
         output_dir = str(tmp_path / "distil_checkpoint")
 
-        unlearner = UnlearnerLoraDistillation(  # type: ignore[call-arg]
+        unlearner = UnlearnerSpare(  # type: ignore[call-arg]
             model_name_or_path=_SD_MODEL,
             dataset_forget_name=tiny_dataset_dir,
             dataset_retain_name=tiny_dataset_dir,
@@ -257,3 +293,69 @@ class TestDistilSmoke:
             f"No .safetensors checkpoint found in {output_dir}. "
             f"Contents: {list(Path(output_dir).rglob('*'))}"
         )
+
+
+# ---------------------------------------------------------------------------
+# ESD smoke test
+# ---------------------------------------------------------------------------
+
+class TestEsdSmoke:
+    """Minimal end-to-end test for ESD on real hardware.
+
+    ESD needs no dataset: it fits the denoiser against a target built from the frozen model's own
+    predictions, so one concept string and one optimizer step exercise the whole path.
+    """
+
+    def test_esd_one_step_moves_only_the_cross_attention_tensors(self, tmp_path: Path) -> None:
+        """One step, the real checkpoint, and the two things a no-op would fail.
+
+        The artifact must hold cross-attention tensors and nothing else -- that is what the
+        cross-attention variant selects -- and those tensors must differ from the base model's.
+        A method that trained nothing, or that saved the parameters it started from, fails here.
+        """
+        _skip_if_no_cuda()
+
+        from safetensors.torch import load_file
+
+        from vision_unlearning.unlearner.esd import ESD
+
+        output_dir = str(tmp_path / "esd_output")
+        unlearner = ESD(
+            pretrained_model_name_or_path=_SD_MODEL,
+            erase_concept="a cat",
+            train_method="esd-x",
+            num_train_epochs=1,
+            num_inference_steps=2,
+            resolution=_TINY_SIZE[0],
+            device="cuda:0",
+            output_dir=output_dir,
+            hub_model_id=None,
+            compute_runtimes=False,
+            final_eval_prompts_forget=[],
+            final_eval_prompts_retain=[],
+        )
+
+        pipeline = unlearner._load_pipeline()
+        base_parameters = {
+            name: parameter.detach().cpu().float().clone()
+            for name, parameter in pipeline.unet.named_parameters()
+        }
+        trained = unlearner._fit(pipeline)
+        unlearner._save_weights(trained)
+        del pipeline
+
+        saved_files = list(Path(output_dir).rglob("*.safetensors"))
+        assert saved_files, f"ESD wrote no weight file into {output_dir}"
+        saved = load_file(str(saved_files[0]))
+
+        assert saved, "ESD wrote a weight file holding no tensors"
+        assert all("attn2" in name for name in saved), (
+            "the cross-attention variant saved a tensor outside cross-attention: "
+            f"{[name for name in saved if 'attn2' not in name][:3]}"
+        )
+
+        moved = sum(
+            1 for name, tensor in saved.items()
+            if name in base_parameters and not torch.equal(base_parameters[name], tensor.detach().cpu().float())
+        )
+        assert moved > 0, f"all {len(saved)} saved tensors equal the base model's: the step was a no-op"

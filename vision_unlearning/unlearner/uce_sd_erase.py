@@ -221,8 +221,17 @@ class UCE(Unlearner):
             )
             pipe.save_pretrained(self.output_dir)  # type: ignore
 
+    @torch.no_grad()
     def train(self) -> List[EvalResult]:
-        """Main UCE training and concept erasure logic."""
+        """Main UCE training and concept erasure logic.
+
+        The whole method runs with gradients off. This is a closed-form weight edit followed by
+        image generation, so nothing in it needs a graph -- and the decorator is what makes the
+        setting *local*. It replaces a bare `torch.set_grad_enabled(False)` that switched gradients
+        off globally and never switched them back, so any training that ran later in the same
+        process failed with "element 0 of tensors does not require grad and does not have a
+        grad_fn". Both other unlearners failed exactly that way when this one had run first.
+        """
 
         # ==== Sanity checks ====
         t0 = time.time()
@@ -314,8 +323,6 @@ class UCE(Unlearner):
             torch_dtype=torch_dtype,
             safety_checker=None,
         ).to(self.device)
-
-        torch.set_grad_enabled(False)
 
         # Find relevant modules
         uce_modules: list[torch.nn.Module] = []
@@ -455,7 +462,8 @@ class UCE(Unlearner):
             prompts_forget=self.final_eval_prompts_forget,
             prompts_retain=self.final_eval_prompts_retain,
             metric_clip=MetricImageTextSimilarity(metrics=['clip']),
-            compute_runtimes=self.compute_runtimes
+            compute_runtimes=self.compute_runtimes,
+            plot_show=self.plot_show,
         )
 
         eval_result, eval_images = evaluator.evaluate()
