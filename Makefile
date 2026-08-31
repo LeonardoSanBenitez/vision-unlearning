@@ -84,7 +84,11 @@ test: run-interactive-docker
 	docker compose exec notebooks poetry run --quiet pycodestyle --max-line-length=300 --ignore=E701,W605,E251,E252,E265,E303,E302,E305,W293,W291,E225,E227,E721,E741,W391,E117,E501,W503,W504 --exclude=vision_unlearning/benchmarks/u_care,vision_unlearning/benchmarks/I_care/reports ./vision_unlearning
 
 	echo '\n\n-------\nPytest checks\n-------'
-	$(call exec_docker, poetry run --quiet pytest ./tests)
+	# `not gpu` is what makes this target runnable anywhere. The gpu tier needs a real card and real
+	# checkpoints; without the marker those tests are collected and skipped one by one on a machine
+	# that has a card visible, which hides them behind a skip count instead of excluding them by
+	# design. Run them deliberately with `make test-gpu`.
+	$(call exec_docker, poetry run --quiet pytest -m "not gpu" ./tests)
 	# Manual tests (requires things like connecting some hardware or doing something interactive)
 	# poetry run --quiet pytest ./tests/**/manual_*.py
 	# poetry run --quiet pytest --capture=no -k "test_example" ./tests/**/manual_example.py
@@ -121,6 +125,27 @@ test-lite:
 
 	echo '\n\n-------\nPytest checks (lite tier -- heavy files excluded via tests/conftest.py)\n-------'
 	PYTHONPATH=. $(VENV_LITE_PY) -m pytest -m "not gpu" tests/
+
+##############################
+# GPU tier: never run in continuous integration, and never run by `make test`.
+# These tests need a real card and real checkpoints, so they are run deliberately, on a machine that
+# has both. GPU_PY is the interpreter that can see the card -- there is no single right answer for
+# what that is, so it is an argument with no default that works everywhere:
+#
+#     make test-gpu GPU_PY=/path/to/python
+#
+# The preflight exists because the failure mode this tier has in practice is not a failing test, it
+# is a whole run that silently skips: every case here begins with a skip-if-no-device guard, so an
+# interpreter that cannot see the card produces a green run of zero assertions. The preflight turns
+# that into a non-zero exit before a single test is collected.
+GPU_PY ?= python
+
+test-gpu:
+	echo '\n\n------------------------\nPreflight: is there actually a card?\n------------------------'
+	$(GPU_PY) -c "import torch, sys; ok = torch.cuda.is_available(); print('device visible:', ok, '|', torch.cuda.get_device_name(0) if ok else 'none'); sys.exit(0 if ok else 1)"
+
+	echo '\n\n-------\nPytest checks (gpu tier only)\n-------'
+	PYTHONPATH=. $(GPU_PY) -m pytest -m gpu tests/ -v
 
 build-pip: run-interactive-docker
 	$(call exec_docker, poetry run --quiet python -m build)

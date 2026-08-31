@@ -57,11 +57,13 @@ jobs:
 
       # The merge gate. Deterministic tests only: a test marked `network` depends on a
       # third-party download at call time and can fail for reasons unrelated to the code
-      # under test.
+      # under test, and a test marked `gpu` needs a real card, which this runner does not
+      # have -- without the marker those are collected and skipped one by one, reporting a
+      # green run whose skip count nobody reads.
       - name: Run tests with coverage
         run: |
           echo "------------ Pytest + Coverage on Python ${{ matrix.python-version }} -------------"
-          poetry run pytest -m "not network" --cov=vision_unlearning \
+          poetry run pytest -m "not network and not gpu" --cov=vision_unlearning \
             --cov-report=xml:coverage-${{ matrix.python-version }}.xml \
             --cov-report=json:coverage-${{ matrix.python-version }}.json \
             --junitxml=reports/tests-results-${{ matrix.python-version }}.xml
