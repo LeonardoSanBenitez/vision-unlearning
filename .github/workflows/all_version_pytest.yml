@@ -20,7 +20,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        # 3.11 rather than 3.12. The library cannot be installed on 3.12 at all:
+        # image-similarity-measures (0.3.6, the latest release, unmaintained since 2023)
+        # pins scikit-image >=0.20.0,<0.21.0, and no scikit-image in that range ships a
+        # cp312 wheel -- 0.20.0 predates Python 3.12, so pip is forced to build it from
+        # source, where it fails compiling pythran headers that need a newer C++ standard
+        # than that release's build sets. This job spent eight consecutive runs proving
+        # that, which is a slow way to be told a dependency does not support 3.12.
+        # Restoring 3.12 means replacing image-similarity-measures; see pyproject.toml.
+        python-version: ["3.10", "3.11"]
 
     steps:
       - uses: actions/checkout@v4

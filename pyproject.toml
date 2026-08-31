@@ -1,6 +1,18 @@
 [project]
 name = "vision-unlearning"
-requires-python = ">=3.10,<3.13"
+# The 3.12 ceiling is a dependency limit, not a choice. image-similarity-measures 0.3.6 --
+# the latest release, and unmaintained since 2023 -- pins scikit-image >=0.20.0,<0.21.0,
+# and no release in that range ships a wheel for 3.12; 0.20.0 predates it. Installing on
+# 3.12 therefore falls back to building scikit-image from source, which fails. Declaring
+# the ceiling here means a 3.12 user gets a clear "requires Python <3.12" from pip instead
+# of a compiler error several minutes into the install.
+#
+# image-similarity-measures also pins numpy <2.0.0, so it is what holds this project on
+# numpy 1.x as well. Replacing it lifts both limits at once. It is used in exactly one
+# place, vision_unlearning/metrics/image_and_image.py, for rmse, psnr, ssim, fsim, issm,
+# sre, sam and uiq -- and any replacement has to reproduce those eight numerically,
+# because published results were computed with them.
+requires-python = ">=3.10,<3.12"
 
 [project.urls]
 repository    = "https://github.com/LeonardoSanBenitez/vision-unlearning"
@@ -33,7 +45,7 @@ include = [{ path = "vision_unlearning/py.typed", format = ["sdist", "wheel"] }]
 exclude = ["tests", "docs", "examples"]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
+python = ">=3.10,<3.12"
 torch = "~2.8.0"
 transformers = "~4.55.0"
 diffusers = "~0.30.0"
