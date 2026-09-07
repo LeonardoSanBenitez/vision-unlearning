@@ -15,6 +15,38 @@ from vision_unlearning.benchmarks.u_care import configuration as cfg
 from vision_unlearning.benchmarks.u_care.generated_dataset import GeneratedDataset
 
 
+def _extract_state_dict(artifact: object) -> dict[str, torch.Tensor]:
+    """Normalize common checkpoint layouts to a plain tensor state dict.
+
+    UCE-style checkpoints are often saved as a partial tensor map containing only the
+    edited attention weights. Other unlearning scripts may wrap that tensor map under
+    keys such as ``model_state_dict`` or ``state_dict``. We accept those common layouts
+    here so stage 4 can safely apply the edited tensors onto the base UNet.
+    """
+    if isinstance(artifact, dict):
+        for nested_key in ("model_state_dict", "state_dict", "unet_state_dict", "unet"):
+            nested = artifact.get(nested_key)
+            if isinstance(nested, dict):
+                artifact = nested
+                break
+
+    if not isinstance(artifact, dict):
+        raise TypeError(
+            "Expected a checkpoint dictionary containing tensor weights, "
+            f"got {type(artifact).__name__}."
+        )
+
+    state_dict: dict[str, torch.Tensor] = {}
+    for key, value in artifact.items():
+        if torch.is_tensor(value):
+            state_dict[str(key)] = value
+
+    if not state_dict:
+        raise ValueError("Checkpoint did not contain any tensor weights to load.")
+
+    return state_dict
+
+
 def answer_set_prompts(style: Optional[str] = None) -> List[str]:
     """Return the complete grid, or the 20 prompts for one style."""
     if style is not None and style not in cfg.STYLE_ENTITIES:
@@ -43,8 +75,26 @@ def _make_pipeline(model_path: str, device: str, unet_state_dict_path: Optional[
         safety_checker=None,
     )
     if unet_state_dict_path is not None:
-        state_dict = torch.load(unet_state_dict_path, map_location=device, weights_only=False)
-        pipe.unet.load_state_dict(state_dict)
+        artifact = torch.load(unet_state_dict_path, map_location=device, weights_only=False)
+        state_dict = _extract_state_dict(artifact)
+
+        base_unet_state = pipe.unet.state_dict()
+        compatible_updates: dict[str, torch.Tensor] = {}
+        for name, tensor in state_dict.items():
+            if name in base_unet_state and base_unet_state[name].shape == tensor.shape:
+                compatible_updates[name] = tensor.to(
+                    device=base_unet_state[name].device,
+                    dtype=base_unet_state[name].dtype,
+                )
+
+        if not compatible_updates:
+            raise ValueError(
+                "No compatible UNet tensors were found in "
+                f"{unet_state_dict_path}. The checkpoint may not match the base model."
+            )
+
+        base_unet_state.update(compatible_updates)
+        pipe.unet.load_state_dict(base_unet_state)
     pipe = pipe.to(device)
     pipe.set_progress_bar_config(disable=True)
     return pipe
