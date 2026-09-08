@@ -47,6 +47,23 @@ def _extract_state_dict(artifact: object) -> dict[str, torch.Tensor]:
     return state_dict
 
 
+def _validate_finite_tensors(state_dict: dict[str, torch.Tensor], checkpoint_path: str) -> None:
+    """Fail fast if the checkpoint contains NaN/inf tensors."""
+    bad_keys: list[str] = []
+    for name, tensor in state_dict.items():
+        if not torch.isfinite(tensor).all():
+            bad_keys.append(name)
+            if len(bad_keys) >= 10:
+                break
+
+    if bad_keys:
+        raise ValueError(
+            f"Checkpoint {checkpoint_path} contains non-finite tensors "
+            f"(examples: {bad_keys[:10]}). Re-run stage 3 and inspect the upstream "
+            "UCE training output; stage 4 cannot generate valid images from inf/NaN weights."
+        )
+
+
 def answer_set_prompts(style: Optional[str] = None) -> List[str]:
     """Return the complete grid, or the 20 prompts for one style."""
     if style is not None and style not in cfg.STYLE_ENTITIES:
@@ -77,6 +94,7 @@ def _make_pipeline(model_path: str, device: str, unet_state_dict_path: Optional[
     if unet_state_dict_path is not None:
         artifact = torch.load(unet_state_dict_path, map_location=device, weights_only=False)
         state_dict = _extract_state_dict(artifact)
+        _validate_finite_tensors(state_dict, unet_state_dict_path)
 
         base_unet_state = pipe.unet.state_dict()
         compatible_updates: dict[str, torch.Tensor] = {}
