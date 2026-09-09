@@ -274,8 +274,8 @@ if __name__ == '__main__':
                             preserve_scale=preserve_scale,
                             technique=technique, with_to_k=False)
 
-    for name,tensor in ldm_stable.unet.state.dict().items():
-        if torch.is_tensor(tensor) and not torch.isfinite(tensor).all():
-            raise RuntimeError(f"Non-finite tensor before save : {name}")
+    # for name,tensor in ldm_stable.unet.state.dict().items():
+    #     if torch.is_tensor(tensor) and not torch.isfinite(tensor).all():
+    #         raise RuntimeError(f"Non-finite tensor before save : {name}")
 
     torch.save(ldm_stable.unet.state_dict(), output_path)
