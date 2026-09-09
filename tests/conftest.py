@@ -26,6 +26,7 @@ _HEAVY_TEST_FILES = [
     "test_metrics/test_image_and_text.py",
     "test_unlearner/test_esd_training_state.py",
     "test_unlearner/test_esd_resume_equivalence.py",
+    "test_unlearner/test_salun.py",
     "test_unlearner/test_spare.py",
     "test_unlearner/test_unlearner_contract.py",
     "test_unlearner/test_lora_trainer.py",

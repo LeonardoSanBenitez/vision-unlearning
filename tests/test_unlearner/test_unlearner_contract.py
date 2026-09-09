@@ -47,6 +47,16 @@ def _minimal_fields(name: str) -> Dict[str, Any]:
         return {"pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4", "edit_concepts": "a cat"}
     if name == "ESD":
         return {"pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4", "erase_concept": "a cat"}
+    if name == "SalUn":
+        # Data-driven, so it needs the two splits, and it distils onto a substitute concept rather
+        # than pushing away from one -- hence the overwriting concept where ESD takes a concept to
+        # erase. Its model field follows UCE's and ESD's spelling, not the adapter classes'.
+        return {
+            "pretrained_model_name_or_path": "CompVis/stable-diffusion-v1-4",
+            "dataset_forget_name": "unused",
+            "dataset_retain_name": "unused",
+            "overwriting_concept": "a child",
+        }
     weighting: Any = GradientWeightingMethodMunba() if name == "UnlearnerLoraDirect" \
         else GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0)
     fields: Dict[str, Any] = {
