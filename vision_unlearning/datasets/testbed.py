@@ -16,7 +16,7 @@ logger = get_logger('testbed')
 # dependency on the benchmarks sub-package for callers that only need the
 # lower-level helper functions.
 _type_task = Literal['breeds', 'scenes', 'people']
-_type_method = Literal['distil', 'munba', 'uce']
+_type_method = Literal['distil', 'munba', 'uce', 'salun']
 _type_artifact_kind = Literal['lora_adapter', 'lora_adapter_inverted', 'partial_weights']
 _type_model = Literal['sd1.4']
 
@@ -57,7 +57,7 @@ def get_target_preprocessed(
 
 def get_target_overwrite(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     target: str,
 ) -> Tuple[str, str]:
     '''
@@ -195,7 +195,7 @@ task_to_dataset_map: Dict[Literal['scenes', 'objects', 'breeds', 'people'], str]
 ##########################################
 def get_unlearned_model_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
@@ -221,7 +221,7 @@ ARTIFACT_KIND_LOADERS: Dict[str, str] = {
 
 def exists_unlearned_model(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     target: str,
     artifact_filename: str,
@@ -245,7 +245,7 @@ def exists_unlearned_model(
 ##########################################
 def get_generated_dataset_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
@@ -313,7 +313,7 @@ def get_shared_baseline_folder(
 def get_off_image_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     target: str,
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     seed: int,
     prompt: str,

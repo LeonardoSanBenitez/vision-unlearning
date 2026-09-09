@@ -59,7 +59,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--method",
-        choices=["uce", "munba", "distil"],
+        choices=["uce", "munba", "distil", "salun"],
         default=None,
         help="Unlearning method.  Required unless --baseline is set.",
     )
@@ -219,7 +219,7 @@ def _generate_baseline_pass(
 
 def run_normal(
     task: Literal["scenes", "breeds", "people"],
-    method: Literal["uce", "munba", "distil"],
+    method: Literal["uce", "munba", "distil", "salun"],
     num_train_epochs: int,
     index_start: int,
     max_identities: int,
@@ -328,7 +328,23 @@ def run_normal(
             "final_eval_prompts_forget": example_prompts_forget,
             "final_eval_prompts_retain": example_prompts_retain,
         }
-        if method == "uce":
+        if method == "salun":
+            # The benchmark's own splits, and the substitute concept from the accessor rather than a
+            # literal. Nothing is generated for this method.
+            hyperparameters.update({
+                "pretrained_model_name_or_path": model_base_name,
+                "dataset_forget_name": dataset_forget_name,
+                "dataset_retain_name": dataset_retain_name,
+                "overwriting_concept": target_overwrite,
+                "train_method": "xattn",
+                "num_train_epochs": num_train_epochs,
+                "resolution": 512,
+                "random_flip": True,
+                "dataloader_num_workers": 0,
+                "per_device_train_batch_size": 1,
+                "device": device,
+            })
+        elif method == "uce":
             hyperparameters.update({
                 "pretrained_model_name_or_path": model_base_name,
                 "erase_scale": 30,
@@ -406,6 +422,9 @@ def run_normal(
         elif method == "uce":
             from vision_unlearning.unlearner import UCE, ConceptType  # noqa: F401
             unlearner = UCE(**hyperparameters)
+        elif method == "salun":
+            from vision_unlearning.unlearner import SalUn
+            unlearner = SalUn(**hyperparameters)
         else:
             raise NotImplementedError(f"Unknown method: {method}")
 
@@ -605,7 +624,7 @@ def main() -> None:
                 raise SystemExit("--method is required in normal mode (or use --baseline).")
             if args.num_train_epochs is None:
                 raise SystemExit("--num-train-epochs is required in normal mode (or use --baseline).")
-            method: Literal["uce", "munba", "distil"] = args.method  # type: ignore[assignment]
+            method: Literal["uce", "munba", "distil", "salun"] = args.method  # type: ignore[assignment]
             run_normal(
                 task=task,
                 method=method,

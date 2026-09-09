@@ -24,6 +24,7 @@ assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non
 from vision_unlearning.unlearner import Unlearner, UnlearnerSpare  # noqa: E402
 from vision_unlearning.unlearner import UnlearnerLoraDirect  # Munba  # noqa: E402
 from vision_unlearning.unlearner import UCE, ConceptType  # noqa: E402
+from vision_unlearning.unlearner import SalUn  # noqa: E402
 
 
 from vision_unlearning.utils.parameter_attribution import ParameterAttributionMethodSaliency  # noqa: E402
@@ -261,6 +262,24 @@ for index in range(index_start, index_start + max_identities):
             "device": device,
             "save_entire_model": False,
         })
+    elif method == 'salun':
+        # SalUn takes the benchmark's existing splits and nothing else: the forget images, the
+        # retain images, and the concept the forget side is pushed towards. No data is generated
+        # for it. The substitute concept comes from get_target_overwrite rather than a literal,
+        # so it cannot drift away from the phrase the images are generated and evaluated with.
+        hyperparameters.update({
+            "pretrained_model_name_or_path": model_base_name,
+            "dataset_forget_name": dataset_forget_name,
+            "dataset_retain_name": dataset_retain_name,
+            "overwriting_concept": target_overwrite,
+            "train_method": "xattn",
+            "num_train_epochs": num_train_epochs,
+            "resolution": 512,
+            "random_flip": True,
+            "dataloader_num_workers": 0,  # workers must pickle the transform; a nested function cannot be
+            "per_device_train_batch_size": 1,
+            "device": device,
+        })
     else:
         hyperparameters.update({
             "model_name_or_path": model_base_name,
@@ -347,6 +366,8 @@ for index in range(index_start, index_start + max_identities):
                 "lamb": 0.1,
             })
         unlearner = UCE(**hyperparameters)
+    elif method == 'salun':
+        unlearner = SalUn(**hyperparameters)
     else:
         raise NotImplementedError()
 

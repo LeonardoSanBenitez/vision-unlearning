@@ -260,3 +260,46 @@ def test_the_benchmark_gate_reads_those_records_by_prefix() -> None:
     assert "startswith" in source, (
         "the gate no longer matches by prefix, so the contract this file asserts is the wrong one"
     )
+
+
+##########################################
+# The substitute concept comes from the accessor, not from a literal
+##########################################
+
+def test_the_substitute_concept_is_read_from_the_accessor_not_written_as_a_literal() -> None:
+    """A distillation method's target concept must come from `get_target_overwrite`.
+
+    This is the defect that was found in one existing method by running it: the trainer had been
+    conditioned on a phrase written into the call site, while the images were generated and evaluated
+    with the phrase the accessor returns. The two agreed until one of them was edited, and the
+    disagreement was invisible because both are plausible strings.
+
+    The check is on the shape of the wiring rather than on a value, because a value test would pass
+    against a literal that happened to be spelled the same way today. What must be true is that the
+    two pipelines read the concept from the accessor and hand *that* to the unlearner.
+    """
+    for script in ("pipeline_03_unlearn_model.py", "pipeline_04_generate_dataset.py"):
+        source = _source_of(os.path.join("vision_unlearning", "benchmarks", "I_care", script))
+        assert "get_target_overwrite(" in source, (
+            f"{script} does not call get_target_overwrite; the concept must not be spelled out locally"
+        )
+        assert '"overwriting_concept": target_overwrite' in source, (
+            f"{script} does not pass the accessor's result as the overwriting concept"
+        )
+        for literal in ('"overwriting_concept": "', "'overwriting_concept': '"):
+            assert literal not in source, (
+                f"{script} writes the overwriting concept as a literal, which can drift away from "
+                "the phrase the images are generated and scored with"
+            )
+
+
+def test_the_forget_and_retain_splits_are_the_benchmark_s_own() -> None:
+    """Nothing is generated for the new method: it consumes the splits that already exist.
+
+    Its two dataset arguments must be the same variables every other data-driven method is given, so
+    that adding it created no new corpus and no new generation step.
+    """
+    source = _source_of(os.path.join("vision_unlearning", "benchmarks", "I_care", "pipeline_03_unlearn_model.py"))
+    salun_block = source.split("elif method == 'salun':", 1)[1].split("    else:", 1)[0]
+    assert '"dataset_forget_name": dataset_forget_name' in salun_block
+    assert '"dataset_retain_name": dataset_retain_name' in salun_block

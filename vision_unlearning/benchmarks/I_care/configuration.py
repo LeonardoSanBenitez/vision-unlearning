@@ -537,7 +537,7 @@ domain_model = ["Stable Diffusion 1.4"]
 # corresponding `type_*` Literals below exist.
 
 # Types (as they appear in the code/files)
-type_unlearning_algorithm = Literal["distil", "munba", "uce"]
+type_unlearning_algorithm = Literal["distil", "munba", "uce", "salun"]
 type_task = Literal["breeds", "scenes", "people"]
 type_model = Literal["sd1.4"]
 type_mp = Literal["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"]
@@ -734,8 +734,12 @@ ALGORITHM_REGISTRY: Dict[type_unlearning_algorithm, UnlearningAlgorithmSpec] = {
         name="uce", name_pretty="UCE",
         artifact_kind="partial_weights", artifact_filename="uce_sd_weights.safetensors",
     ),
+    "salun": UnlearningAlgorithmSpec(
+        name="salun", name_pretty="SalUn",
+        artifact_kind="partial_weights", artifact_filename="salun_sd_weights.safetensors",
+    ),
 }
-_UNLEARNING_ALGORITHM_DISPLAY_ORDER: List[type_unlearning_algorithm] = ["distil", "munba", "uce"]
+_UNLEARNING_ALGORITHM_DISPLAY_ORDER: List[type_unlearning_algorithm] = ["distil", "munba", "uce", "salun"]
 
 domain_unlearning_algorithm = [ALGORITHM_REGISTRY[k].name_pretty for k in _UNLEARNING_ALGORITHM_DISPLAY_ORDER]
 domain_mp = _pretty_names(MP_REGISTRY, _MP_DISPLAY_ORDER)
