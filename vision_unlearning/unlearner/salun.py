@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import os
 import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple, cast
@@ -7,6 +8,7 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 from pydantic import Field
+from safetensors import safe_open
 from safetensors.torch import save_file, load_file
 from datasets import load_dataset
 from torchvision import transforms
@@ -29,6 +31,63 @@ SALUN_WEIGHTS_FILENAME = 'salun_sd_weights.safetensors'
 #: the mask stage, and it is the artifact that makes the run auditable: the weights alone do not say
 #: which parameters were allowed to move.
 SALUN_MASK_FILENAME = 'salun_mask.safetensors'
+
+
+
+def _pack_bits(mask: torch.Tensor) -> torch.Tensor:
+    '''One bit per mask element instead of one byte, as a flat uint8 tensor.
+
+    The saliency mask is boolean and the safetensors format has no boolean dtype, so the obvious
+    encoding is one byte per element. On Stable Diffusion 1.4's cross-attention tensors that is 44 MB
+    per session, or 13 GB over a 300-session campaign, to store 44 million yes-or-no answers. Packed
+    it is 5.5 MB and 1.7 GB, which on a machine whose disk is the binding constraint is the difference
+    between affordable and not.
+
+    The final byte is zero-padded when the element count is not a multiple of eight; the true shape
+    travels in the file's metadata, and `_unpack_bits` needs it to undo this.
+    '''
+    flat = mask.flatten().to(torch.uint8)
+    padding = (-flat.numel()) % 8
+    if padding:
+        flat = torch.cat([flat, torch.zeros(padding, dtype=torch.uint8)])
+    bits = flat.reshape(-1, 8)
+    weights = torch.tensor([128, 64, 32, 16, 8, 4, 2, 1], dtype=torch.uint8)
+    return (bits * weights).sum(dim=1, dtype=torch.uint8).contiguous()
+
+
+def _unpack_bits(packed: torch.Tensor, shape: Tuple[int, ...]) -> torch.Tensor:
+    '''Undo `_pack_bits`, given the shape the metadata recorded.'''
+    weights = torch.tensor([128, 64, 32, 16, 8, 4, 2, 1], dtype=torch.uint8)
+    bits = ((packed.reshape(-1, 1) & weights) != 0).flatten()
+    count = 1
+    for dimension in shape:
+        count *= dimension
+    return bits[:count].reshape(shape)
+
+
+def load_mask(output_dir: str) -> Dict[str, torch.Tensor]:
+    '''Read back a saved saliency mask as boolean tensors.
+
+    Saving an artifact nothing can read is theatre, so this is the other half of `_save_mask`. It is
+    a module-level function rather than a method because reading a mask needs the folder and nothing
+    else -- not the hyperparameters that produced it.
+    '''
+    path = os.path.join(output_dir, SALUN_MASK_FILENAME)
+    with safe_open(path, framework='pt') as handle:
+        metadata = handle.metadata() or {}
+        packed = {name: handle.get_tensor(name) for name in handle.keys()}
+
+    if metadata.get('packed') != 'bits':
+        raise ValueError(
+            f'{path} does not declare bit packing, so its encoding is unknown. It was written by a '
+            'version of this class that stored one byte per element; rebuild the mask rather than '
+            'guessing which it is.'
+        )
+    shapes = json.loads(metadata['shapes'])
+    return {
+        name: _unpack_bits(tensor, tuple(int(d) for d in shapes[name].split(',')))
+        for name, tensor in packed.items()
+    }
 
 
 class SalUn(Unlearner):
@@ -572,6 +631,12 @@ class SalUn(Unlearner):
         mask, mask_context = self._build_mask(
             magnitudes, restrict_to=self._select_parameter_names(mask_pipeline.unet)
         )
+        # SAVED BEFORE THE FINE-TUNE, NOT AFTER IT. It used to be written at the end, beside the
+        # weights, and a real session lost its evaluation because this 44 MB write failed on a full
+        # disk *after* five minutes of training had already succeeded. The mask exists the moment it
+        # is built, so writing it here makes a storage problem cost ninety seconds instead of a whole
+        # session, and it is the cheap step failing before the expensive one rather than after.
+        self._save_mask(mask, mask_context)
         del magnitudes, mask_pipeline
         device_utils.empty_cache()
         t2 = time.time()
@@ -582,7 +647,6 @@ class SalUn(Unlearner):
         t3 = time.time()
 
         self._save_weights(trained_tensors)
-        self._save_mask(mask, mask_context)
         del pipeline, mask
         device_utils.empty_cache()
 
@@ -684,10 +748,18 @@ class SalUn(Unlearner):
         global cut, which the tensors alone cannot: a mask restricted to the trained parameters does
         not say what fraction of the whole denoiser it came from.
         """
+        os.makedirs(self.output_dir, exist_ok=True)
+        packed: Dict[str, torch.Tensor] = {}
+        shapes: Dict[str, str] = {}
+        for name, tensor in mask.items():
+            packed[name] = _pack_bits(tensor)
+            shapes[name] = ','.join(str(dimension) for dimension in tensor.shape)
         save_file(
-            {name: tensor.to(torch.uint8).contiguous() for name, tensor in mask.items()},
+            packed,
             os.path.join(self.output_dir, SALUN_MASK_FILENAME),
             metadata={
+                'packed': 'bits',
+                'shapes': json.dumps(shapes),
                 'mask_threshold': str(self.mask_threshold),
                 'mask_precision': self.mask_precision,
                 'mask_guidance': str(self.mask_guidance),
@@ -699,7 +771,10 @@ class SalUn(Unlearner):
                 'materialised_kept': str(context['materialised_kept']),
             },
         )
-        logger.info(f'Saved the saliency mask ({len(mask)} tensors) to {self.output_dir}')
+        logger.info(
+            f'Saved the saliency mask ({len(mask)} tensors, '
+            f'{sum(int(t.numel()) for t in packed.values())} bytes packed) to {self.output_dir}'
+        )
 
     @staticmethod
     def get_pipeline_from_modified_weights(pretrained_model_name_or_path: str, device: str | torch.device, output_dir: str) -> DiffusionPipeline:

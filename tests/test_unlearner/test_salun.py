@@ -234,17 +234,54 @@ def test_mutation_masking_after_the_step_lets_an_excluded_parameter_move() -> No
 
 def test_the_mask_round_trips_through_its_own_file(tmp_path: Any) -> None:
     '''The mask is saved as an artifact, not kept only in memory, so it must reload unchanged.'''
-    from safetensors.torch import load_file
+    from vision_unlearning.unlearner.salun import load_mask
 
     magnitudes = _magnitudes()
     unlearner = _unlearner(mask_threshold=0.5, output_dir=str(tmp_path))
     mask, context = unlearner._build_mask(magnitudes)
     unlearner._save_mask(mask, context)
 
-    reloaded = load_file(os.path.join(str(tmp_path), SALUN_MASK_FILENAME))
+    reloaded = load_mask(str(tmp_path))
     assert set(reloaded) == set(mask)
     for name in mask:
-        assert torch.equal(reloaded[name].bool(), mask[name])
+        assert torch.equal(reloaded[name], mask[name])
+        assert reloaded[name].dtype == torch.bool
+
+
+@pytest.mark.parametrize('shape', [(3, 5), (8,), (17,), (64, 64), (1,)])
+def test_bit_packing_round_trips_at_any_length(shape: Any) -> None:
+    '''One bit per element, including when the count is not a multiple of eight.
+
+    The padded tail is where this breaks if it breaks: the last byte carries bits that are not mask
+    elements, and unpacking has to drop exactly those and no others.
+    '''
+    from vision_unlearning.unlearner.salun import _pack_bits, _unpack_bits
+
+    torch.manual_seed(3)
+    mask = torch.rand(shape) > 0.5
+    assert torch.equal(_unpack_bits(_pack_bits(mask), shape), mask)
+
+
+def test_packing_is_eight_times_smaller_than_a_byte_per_element() -> None:
+    '''The reason packing exists: 44 MB per session becomes 5.5 MB, over 300 sessions.'''
+    from vision_unlearning.unlearner.salun import _pack_bits
+
+    mask = torch.zeros(8000, dtype=torch.bool)
+    assert _pack_bits(mask).numel() == 1000
+
+
+def test_an_unpacked_mask_file_is_refused_rather_than_guessed(tmp_path: Any) -> None:
+    '''A file written by an older encoding must not be silently read as if it were packed.'''
+    from safetensors.torch import save_file
+    from vision_unlearning.unlearner.salun import load_mask
+
+    save_file(
+        {'a': torch.zeros(4, dtype=torch.uint8)},
+        os.path.join(str(tmp_path), SALUN_MASK_FILENAME),
+        metadata={'mask_threshold': '0.5'},
+    )
+    with pytest.raises(ValueError, match='does not declare bit packing'):
+        load_mask(str(tmp_path))
 
 
 def test_the_weight_file_carries_the_settings_that_produced_it(tmp_path: Any) -> None:
