@@ -7,22 +7,22 @@ output included so you can read the results without running anything locally.
 
 The source notebooks (outputs cleared) live in ``tutorials/`` in the repository.
 
-Unlearning with FADE
+Unlearning with SPARE
 --------------------
 
-`Replace George W. Bush by Tony Blair using FADE
+`Replace George W. Bush by Tony Blair using SPARE
 <https://colab.research.google.com/drive/1ZJG9By4_u1Vqy_SYelxfzUUImRzayRYw?usp=sharing>`_
 
-A standard person-replacement task using the FADE algorithm.  Covers dataset
+A standard person-replacement task using the SPARE algorithm.  Covers dataset
 setup, algorithm configuration, and metric evaluation.
 
-`Replace George W. Bush by Tony Blair using FADE sparse-per-module
+`Replace George W. Bush by Tony Blair using SPARE sparse-per-module
 <https://colab.research.google.com/drive/1luM3kAoaBLoTwcsDcW3KO_SIiuIbwmWY?usp=sharing>`_
 
-Same task with the sparse-per-module variant of FADE, which applies weight
+Same task with the sparse-per-module variant of SPARE, which applies weight
 pruning per transformer module instead of globally.
 
-`Replace George W. Bush by Tony Blair using FADE sparse-per-weight
+`Replace George W. Bush by Tony Blair using SPARE sparse-per-weight
 <https://colab.research.google.com/drive/1ry5xXOPMuVm_LA_4Uyk27Aqe52L607kO?usp=sharing>`_
 
 Sparse-per-weight variant: the sparsity mask is applied at individual weight

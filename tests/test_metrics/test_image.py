@@ -1,8 +1,22 @@
+'''
+Every test here scores an image with `MetricQuality`, which calls `piq.brisque`. On its first call
+in a fresh environment, `piq` downloads its support-vector-regression weights from a GitHub release
+(`piq/brisque.py::_score_svr` -> `torch.hub.load_state_dict_from_url`) into the torch hub cache. The
+download is inside the dependency, not in this file or in `vision_unlearning`, so it cannot be
+avoided without vendoring third-party weights.
+
+That makes these tests genuinely network-dependent, and they fail when GitHub's release endpoint is
+briefly unavailable -- observed as `HTTP Error 503` and `RemoteDisconnected` on Python 3.10 while the
+identical code passed on 3.12 in the same run. They are therefore marked `network`: still run, still
+reported, but not part of the merge gate. See CONTRIBUTING.md section 6.
+'''
 import pytest
 from PIL import Image
 import numpy as np
 import tempfile
 from vision_unlearning.metrics.image import MetricQuality
+
+pytestmark = pytest.mark.network
 
 
 def random_image(size=(64, 64, 3)):

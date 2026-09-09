@@ -537,7 +537,7 @@ domain_model = ["Stable Diffusion 1.4"]
 # corresponding `type_*` Literals below exist.
 
 # Types (as they appear in the code/files)
-type_unlearning_algorithm = Literal["distil", "munba", "uce"]
+type_unlearning_algorithm = Literal["distil", "munba", "uce", "salun"]
 type_task = Literal["breeds", "scenes", "people"]
 type_model = Literal["sd1.4"]
 type_mp = Literal["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"]
@@ -599,6 +599,7 @@ type_s = Literal[
     "jacc",
     "dino",
     "act",
+    "unet_latent",  # cosine similarity of the final denoised latents the VAE decoder consumes
     "weight_overlap",  # cosine similarity of trained LoRA weight changes (B@A); scenes/distil only
 ]
 
@@ -705,11 +706,14 @@ S_REGISTRY: Dict[type_s, MetricWithDirectionSpec] = {
     "jacc": MetricWithDirectionSpec(name="jacc", name_pretty="Jacc Similarity", direction="↑"),
     "dino": MetricWithDirectionSpec(name="dino", name_pretty="DINOv2 Cosine Similarity", direction="↑"),
     "act": MetricWithDirectionSpec(name="act", name_pretty="UNet Cross-Attention Similarity", direction="↑"),
+    # No name_pretty: cosine similarity of the final denoised latent (the tensor the VAE decoder
+    # consumes), a candidate metric — not GUI-selectable until all three task matrices exist.
+    "unet_latent": MetricWithDirectionSpec(name="unet_latent", direction="↑"),
     # No name_pretty: cosine similarity of trained LoRA weight changes (B@A), scenes/distil
     # only — a diagnostic, not GUI-selectable (not in GUI_TO_BACKEND['similarity_metric']).
     "weight_overlap": MetricWithDirectionSpec(name="weight_overlap", direction="↑"),
 }
-_S_DISPLAY_ORDER: List[type_s] = ["clip", "jacc", "dino", "act"]  # weight_overlap excluded: no display name
+_S_DISPLAY_ORDER: List[type_s] = ["clip", "jacc", "dino", "act"]  # unet_latent, weight_overlap excluded: no display name
 
 L_REGISTRY: Dict[type_l, LSpec] = {
     "clip_embedding": LSpec(name="clip_embedding", name_pretty="Clip Embedding"),
@@ -718,11 +722,24 @@ L_REGISTRY: Dict[type_l, LSpec] = {
 _L_DISPLAY_ORDER: List[type_l] = ["clip_embedding", "dino_embedding"]
 
 ALGORITHM_REGISTRY: Dict[type_unlearning_algorithm, UnlearningAlgorithmSpec] = {
-    "distil": UnlearningAlgorithmSpec(name="distil", name_pretty="spare"),
-    "munba": UnlearningAlgorithmSpec(name="munba", name_pretty="Munba"),
-    "uce": UnlearningAlgorithmSpec(name="uce", name_pretty="UCE"),
+    "distil": UnlearningAlgorithmSpec(
+        name="distil", name_pretty="spare",
+        artifact_kind="lora_adapter", artifact_filename="pytorch_lora_weights.safetensors",
+    ),
+    "munba": UnlearningAlgorithmSpec(
+        name="munba", name_pretty="Munba",
+        artifact_kind="lora_adapter_inverted", artifact_filename="pytorch_lora_weights.safetensors",
+    ),
+    "uce": UnlearningAlgorithmSpec(
+        name="uce", name_pretty="UCE",
+        artifact_kind="partial_weights", artifact_filename="uce_sd_weights.safetensors",
+    ),
+    "salun": UnlearningAlgorithmSpec(
+        name="salun", name_pretty="SalUn",
+        artifact_kind="partial_weights", artifact_filename="salun_sd_weights.safetensors",
+    ),
 }
-_UNLEARNING_ALGORITHM_DISPLAY_ORDER: List[type_unlearning_algorithm] = ["distil", "munba", "uce"]
+_UNLEARNING_ALGORITHM_DISPLAY_ORDER: List[type_unlearning_algorithm] = ["distil", "munba", "uce", "salun"]
 
 domain_unlearning_algorithm = [ALGORITHM_REGISTRY[k].name_pretty for k in _UNLEARNING_ALGORITHM_DISPLAY_ORDER]
 domain_mp = _pretty_names(MP_REGISTRY, _MP_DISPLAY_ORDER)

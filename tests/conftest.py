@@ -9,14 +9,14 @@ import pytest
 # Test files that import torch/diffusers at module level (directly or transitively).
 # These fail at *collection* time in the lite tier (no torch installed), before any
 # marker is ever evaluated -- so a `heavy` marker cannot guard this boundary, only an
-# explicit collect_ignore list can. See CONTRIBUTING.md Section 6 and
-# PLAN-TASK-2026-07-01-TestTooling.md Workstream B2.
+# explicit collect_ignore list can. See CONTRIBUTING.md Section 6.
 #
 # A NEW heavy test file that is not added here will fail import in the lite CI job
 # (.github/workflows/lite.yml) with a ModuleNotFoundError, forcing the author to either
 # classify it here or keep it torch-free. That failure is the intended rot-protection
 # behaviour, not a bug.
 _HEAVY_TEST_FILES = [
+    "test_epoch_checkpoint_hook.py",
     "test_data_generation.py",
     "test_gradient_weighting.py",
     "test_model_management.py",
@@ -24,8 +24,15 @@ _HEAVY_TEST_FILES = [
     "test_metrics/test_image.py",
     "test_metrics/test_image_and_image.py",
     "test_metrics/test_image_and_text.py",
-    "test_unlearner/test_fade.py",
+    "test_unlearner/test_esd_training_state.py",
+    "test_unlearner/test_esd_resume_equivalence.py",
+    "test_benchmarks_i_care_methods.py",
+    "test_unlearner/test_salun.py",
+    "test_unlearner/test_spare.py",
+    "test_unlearner/test_unlearner_contract.py",
+    "test_unlearner/test_lora_trainer.py",
     "test_unlearner/test_gpu_unlearning.py",
+    "test_device.py",
 ]
 
 if importlib.util.find_spec("torch") is None:

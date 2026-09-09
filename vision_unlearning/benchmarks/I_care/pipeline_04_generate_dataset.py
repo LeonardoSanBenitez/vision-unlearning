@@ -36,6 +36,9 @@ from typing import Any, Dict, List, Literal, Optional
 import dotenv
 import torch
 
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
+from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -56,7 +59,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--method",
-        choices=["uce", "munba", "distil"],
+        choices=["uce", "munba", "distil", "salun"],
         default=None,
         help="Unlearning method.  Required unless --baseline is set.",
     )
@@ -107,6 +110,21 @@ def _parse_args() -> argparse.Namespace:
         default="assets",
         help="Local assets folder (default: assets).",
     )
+    parser.add_argument(
+        "--ledger-path",
+        default="",
+        metavar="PATH",
+        help=(
+            "Where to append the per-entity run ledger (debugging/traceability only, "
+            "not a paper artifact). Default (empty): '{base_folder}/logs/pipeline_04_ledger.jsonl'."
+        ),
+    )
+    parser.add_argument(
+        "--no-ledger",
+        action="store_true",
+        default=False,
+        help="Disable writing the run ledger for this invocation.",
+    )
     return parser.parse_args()
 
 
@@ -120,6 +138,7 @@ def run_baseline(
     replace_if_exists: bool,
     upload_if_recomputed: bool,
     base_folder: str,
+    ledger: Optional[RunLedger] = None,
 ) -> None:
     """Generate method-agnostic baseline images (original SD, no LoRA)."""
     from vision_unlearning.utils.logger import get_logger, setup_loggers
@@ -159,15 +178,48 @@ def run_baseline(
         "ALL DONE. folder=%s  elapsed=%.1f s  (avg %.2f s/image)",
         result_folder, elapsed, elapsed / n_images if n_images else 0.0,
     )
+    if ledger is not None:
+        ledger.record(f"GeneratedDatasetBaseline for {task}", status="ok")
 
 
 # ---------------------------------------------------------------------------
 # Normal mode
 # ---------------------------------------------------------------------------
 
+def _generate_baseline_pass(
+    model_base_name: str,
+    prompts: List[str],
+    output_path: str,
+    filenames: List[str],
+    batch_size: int,
+) -> None:
+    """Generate the `off` images: the unmodified base model, for every method, unconditionally.
+
+    This exists as its own function so that it cannot quietly acquire a per-method branch again. It
+    used to be one arm of a test on the method name, and the closed-form method's arm built its
+    *edited* pipeline on both the `on` and the `off` pass -- so that method's baseline images depicted
+    the edited model. The adapter arm happened to be correct because it passed `lora_name=None` here.
+
+    A baseline image must not depend on the method: it is what the generator produced before any
+    unlearning, and it is what every `on` image is compared against.
+    """
+    from vision_unlearning.utils.data_generation import generate_dataset  # noqa: PLC0415
+
+    generate_dataset(
+        model_base_name=model_base_name,
+        lora_name=None,
+        model_pipeline=None,
+        prompts=prompts,
+        output_path=output_path,
+        filenames=filenames,
+        batch_size=batch_size,
+        lora_requires_inversion=False,
+    )
+
+
 def run_normal(
     task: Literal["scenes", "breeds", "people"],
-    method: Literal["uce", "munba", "distil"],
+    method: Literal["uce", "munba", "distil", "salun"],
     num_train_epochs: int,
     index_start: int,
     max_identities: int,
@@ -175,6 +227,7 @@ def run_normal(
     seeds: List[int],
     limit_prompts: Optional[int],
     base_folder: str,
+    ledger: Optional[RunLedger] = None,
 ) -> None:
     """Unlearn the model and generate the per-entity evaluation dataset."""
     import pandas as pd
@@ -275,7 +328,23 @@ def run_normal(
             "final_eval_prompts_forget": example_prompts_forget,
             "final_eval_prompts_retain": example_prompts_retain,
         }
-        if method == "uce":
+        if method == "salun":
+            # The benchmark's own splits, and the substitute concept from the accessor rather than a
+            # literal. Nothing is generated for this method.
+            hyperparameters.update({
+                "pretrained_model_name_or_path": model_base_name,
+                "dataset_forget_name": dataset_forget_name,
+                "dataset_retain_name": dataset_retain_name,
+                "overwriting_concept": target_overwrite,
+                "train_method": "xattn",
+                "num_train_epochs": num_train_epochs,
+                "resolution": 512,
+                "random_flip": True,
+                "dataloader_num_workers": 0,
+                "per_device_train_batch_size": 1,
+                "device": device,
+            })
+        elif method == "uce":
             hyperparameters.update({
                 "pretrained_model_name_or_path": model_base_name,
                 "erase_scale": 30,
@@ -317,19 +386,16 @@ def run_normal(
             if free_memory > 20e9:
                 hyperparameters.update({
                     "per_device_train_batch_size": 4,
-                    "train_batch_size": 4,
                     "gradient_accumulation_steps": 1,
                 })
             elif free_memory > 14e9:
                 hyperparameters.update({
                     "per_device_train_batch_size": 2,
-                    "train_batch_size": 2,
                     "gradient_accumulation_steps": 2,
                 })
             else:
                 hyperparameters.update({
                     "per_device_train_batch_size": 2,
-                    "train_batch_size": 2,
                     "gradient_accumulation_steps": 2,
                 })
 
@@ -340,13 +406,15 @@ def run_normal(
         else:
             batch_size_inference = 25
 
+        from vision_unlearning.unlearner import Unlearner
+        unlearner: Unlearner
         if method == "distil":
-            from unlearner_lora_distillation import UnlearnerLoraDistillation
+            from vision_unlearning.unlearner import UnlearnerSpare
             hyperparameters["overwritting_concept"] = target_overwrite
             hyperparameters["gradient_weighting_method"] = GradientWeightingMethodSimple(
                 forget_weight=0.3, retain_weight=1.0
             )
-            unlearner = UnlearnerLoraDistillation(**hyperparameters)
+            unlearner = UnlearnerSpare(**hyperparameters)
         elif method == "munba":
             from vision_unlearning.unlearner import UnlearnerLoraDirect
             hyperparameters["gradient_weighting_method"] = GradientWeightingMethodMunba()
@@ -354,10 +422,16 @@ def run_normal(
         elif method == "uce":
             from vision_unlearning.unlearner import UCE, ConceptType  # noqa: F401
             unlearner = UCE(**hyperparameters)
+        elif method == "salun":
+            from vision_unlearning.unlearner import SalUn
+            unlearner = SalUn(**hyperparameters)
         else:
             raise NotImplementedError(f"Unknown method: {method}")
 
-        if replace_if_exists or not exists_unlearned_model(task, method, num_train_epochs, target):
+        artifact_filename = ALGORITHM_REGISTRY[method].artifact_filename
+        if replace_if_exists or not exists_unlearned_model(
+            task, method, num_train_epochs, target, artifact_filename
+        ):
             logger.info("Overwriting the entity '%s' by '%s'", target, target_overwrite)
             logger.info("%s", hyperparameters)
             eval_results = unlearner.train()
@@ -445,9 +519,21 @@ def run_normal(
             for seed in seeds:
                 for lora_state in ["on", "off"]:
                     filenames = [f"{lora_state}_{seed}_{p}.png" for p in prompts_gen]
-                    if method == "uce":
-                        from vision_unlearning.unlearner import UCE as _UCE
-                        model_pipeline = _UCE.get_pipeline_from_modified_weights(
+                    artifact_kind = ALGORITHM_REGISTRY[method].artifact_kind
+                    if lora_state == "off":
+                        _generate_baseline_pass(
+                            model_base_name=model_base_name,
+                            prompts=prompts_gen,
+                            output_path=generated_dataset_output_path,
+                            filenames=filenames,
+                            batch_size=batch_size_inference,
+                        )
+                    elif artifact_kind == "partial_weights":
+                        from vision_unlearning.unlearner.loaders import get_partial_weights_loader
+                        load_pipeline = get_partial_weights_loader(
+                            ALGORITHM_REGISTRY[method].artifact_filename
+                        )
+                        model_pipeline = load_pipeline(
                             pretrained_model_name_or_path=model_base_name,
                             device=device,
                             output_dir=output_dir,
@@ -463,16 +549,15 @@ def run_normal(
                             lora_requires_inversion=False,
                         )
                     else:
-                        lora_name = output_dir if (lora_state == "on") else None
                         generate_dataset(
                             model_base_name=model_base_name,
-                            lora_name=lora_name,
+                            lora_name=output_dir,
                             model_pipeline=None,
                             prompts=prompts_gen,
                             output_path=generated_dataset_output_path,
                             filenames=filenames,
                             batch_size=batch_size_inference,
-                            lora_requires_inversion=(method == "munba"),
+                            lora_requires_inversion=(artifact_kind == "lora_adapter_inverted"),
                         )
                     gc.collect()
                     torch.cuda.empty_cache()
@@ -488,6 +573,15 @@ def run_normal(
             "-" * 100 + "\nFinished: target='%s' (%d/%d)\n" + "-" * 100,
             target_preprocessed, index, index_start + max_identities - 1,
         )
+        if ledger is not None:
+            # A single "ok" per entity, not distinguishing unlearning-skipped from
+            # dataset-generation-skipped -- the two stages above already log their own
+            # skip/recompute decision; this is the entity-level completion marker (the
+            # assert above is the actual, existing correctness check for it).
+            ledger.record(
+                f"GeneratedDataset for {task}/{method}/{num_train_epochs}/index={index}",
+                status="ok",
+            )
 
     logger.info("ALL DONE.")
 
@@ -510,31 +604,43 @@ def main() -> None:
     args = _parse_args()
     task: Literal["scenes", "breeds", "people"] = args.task  # type: ignore[assignment]
 
-    if args.baseline:
-        run_baseline(
-            task=task,
-            seeds=args.seeds,
-            replace_if_exists=args.replace_if_exists,
-            upload_if_recomputed=args.upload_if_recomputed,
-            base_folder=args.base_folder,
-        )
-    else:
-        if args.method is None:
-            raise SystemExit("--method is required in normal mode (or use --baseline).")
-        if args.num_train_epochs is None:
-            raise SystemExit("--num-train-epochs is required in normal mode (or use --baseline).")
-        method: Literal["uce", "munba", "distil"] = args.method  # type: ignore[assignment]
-        run_normal(
-            task=task,
-            method=method,
-            num_train_epochs=args.num_train_epochs,
-            index_start=args.index_start,
-            max_identities=args.max_identities,
-            replace_if_exists=args.replace_if_exists,
-            seeds=args.seeds,
-            limit_prompts=args.limit_prompts,
-            base_folder=args.base_folder,
-        )
+    ledger: Optional[RunLedger] = None
+    if not args.no_ledger:
+        ledger_path = args.ledger_path or os.path.join(args.base_folder, "logs", "pipeline_04_ledger.jsonl")
+        ledger = RunLedger(ledger_path)
+
+    try:
+        if args.baseline:
+            run_baseline(
+                task=task,
+                seeds=args.seeds,
+                replace_if_exists=args.replace_if_exists,
+                upload_if_recomputed=args.upload_if_recomputed,
+                base_folder=args.base_folder,
+                ledger=ledger,
+            )
+        else:
+            if args.method is None:
+                raise SystemExit("--method is required in normal mode (or use --baseline).")
+            if args.num_train_epochs is None:
+                raise SystemExit("--num-train-epochs is required in normal mode (or use --baseline).")
+            method: Literal["uce", "munba", "distil", "salun"] = args.method  # type: ignore[assignment]
+            run_normal(
+                task=task,
+                method=method,
+                num_train_epochs=args.num_train_epochs,
+                index_start=args.index_start,
+                max_identities=args.max_identities,
+                replace_if_exists=args.replace_if_exists,
+                seeds=args.seeds,
+                limit_prompts=args.limit_prompts,
+                base_folder=args.base_folder,
+                ledger=ledger,
+            )
+    finally:
+        if ledger is not None:
+            print(f"Run ledger: {ledger.count} records written to {ledger.path}")
+            ledger.close()
 
 
 if __name__ == "__main__":

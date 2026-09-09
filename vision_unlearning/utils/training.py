@@ -1,9 +1,52 @@
 import random
-from typing import Optional
+from typing import Optional, Tuple
 import numpy as np
 import torch
 from diffusers.utils.torch_utils import is_compiled_module
 from accelerate import Accelerator
+
+from vision_unlearning.utils.logger import get_logger
+
+
+logger = get_logger('training')
+
+
+def compute_crop_top_left(original_size: Tuple[int, int], resolution: int, center_crop: bool) -> Tuple[int, int]:
+    '''
+    The (top, left) offset, in the resized image's coordinates, of the crop that
+    `Resize(resolution)` followed by `CenterCrop(resolution)` or `RandomCrop(resolution)` takes out
+    of an image whose original size is `original_size` = (height, width).
+
+    Stable Diffusion XL is conditioned on this offset, so that it can attribute the framing of a
+    cropped training image to the cropping rather than to the concept being trained. Stable
+    Diffusion 1.x has no such conditioning and ignores the value.
+
+    `Resize` with a single int scales the shorter edge to `resolution` and keeps the aspect ratio,
+    so a square image comes out exactly resolution x resolution and only one crop is possible,
+    (0, 0). For a non-square image the center crop offset is computed exactly here; a random crop's
+    offset is drawn inside the transform from the global generator, and recovering it would mean
+    drawing from that generator a second time and changing the training stream, so it is reported
+    as (0, 0) with a warning instead.
+    '''
+    height, width = original_size
+    if height <= 0 or width <= 0:
+        raise ValueError(f"original_size must be a positive (height, width), got {original_size}")
+
+    # Mirrors torchvision.transforms.functional._compute_resized_output_size for an int size
+    short, long = (height, width) if height <= width else (width, height)
+    new_short, new_long = resolution, int(resolution * long / short)
+    resized_height, resized_width = (new_short, new_long) if height <= width else (new_long, new_short)
+
+    if (resized_height, resized_width) == (resolution, resolution):
+        return (0, 0)
+    if center_crop:
+        return (int(round((resized_height - resolution) / 2.0)), int(round((resized_width - resolution) / 2.0)))
+    logger.warning(
+        f"Random crop of a non-square image (original size {original_size}, resized to "
+        f"{(resized_height, resized_width)}): the crop offset is not recoverable, reporting (0, 0). "
+        f"This only affects the Stable Diffusion XL micro-conditioning."
+    )
+    return (0, 0)
 
 
 def tokenize_captions(examples, tokenizer, caption_column, is_train=True):

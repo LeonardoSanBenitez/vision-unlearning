@@ -16,7 +16,8 @@ logger = get_logger('testbed')
 # dependency on the benchmarks sub-package for callers that only need the
 # lower-level helper functions.
 _type_task = Literal['breeds', 'scenes', 'people']
-_type_method = Literal['distil', 'munba', 'uce']
+_type_method = Literal['distil', 'munba', 'uce', 'salun']
+_type_artifact_kind = Literal['lora_adapter', 'lora_adapter_inverted', 'partial_weights']
 _type_model = Literal['sd1.4']
 
 
@@ -56,7 +57,7 @@ def get_target_preprocessed(
 
 def get_target_overwrite(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     target: str,
 ) -> Tuple[str, str]:
     '''
@@ -194,7 +195,7 @@ task_to_dataset_map: Dict[Literal['scenes', 'objects', 'breeds', 'people'], str]
 ##########################################
 def get_unlearned_model_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
@@ -204,19 +205,39 @@ def get_unlearned_model_folder(
     return os.path.join(base_folder, 'models', f"{task}_{target}_{method}_{num_train_epochs:03d}{_model_segment(model)}")
 
 
+#: How each declared artifact kind is turned back into a usable pipeline.
+#:
+#: The value is the name of the route, not a callable, so that this module keeps its independence
+#: from torch and from the benchmark package -- importing a loader here would drag both in. What the
+#: table buys is exhaustiveness: a method whose artifact kind is not a key fails at the dispatch
+#: below with a clear error, instead of falling into an `else` that treats it as a low-rank adapter
+#: and produces images from the wrong model.
+ARTIFACT_KIND_LOADERS: Dict[str, str] = {
+    'lora_adapter': 'adapter',
+    'lora_adapter_inverted': 'adapter_inverted',
+    'partial_weights': 'partial_weights_loader',
+}
+
+
 def exists_unlearned_model(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     target: str,
+    artifact_filename: str,
     base_folder: str = 'assets',
     model: _type_model = 'sd1.4',
 ) -> bool:
+    '''Whether the trained artifact for this session is on disk.
+
+    `artifact_filename` is required rather than inferred from `method`. This module deliberately
+    knows nothing about the benchmark package (see the note at the top), so it cannot look the answer
+    up; and the version that inferred it tested for one method by name and treated everything else as
+    a low-rank adapter, which meant any further weight-editing method silently reported "missing" for
+    an artifact that was sitting right there. The callers read the name from `ALGORITHM_REGISTRY`.
+    '''
     model_path = get_unlearned_model_folder(task, method, num_train_epochs, target, base_folder=base_folder, model=model)
-    if method == 'uce':
-        return os.path.exists(os.path.join(model_path, 'uce_sd_weights.safetensors'))
-    else:
-        return os.path.exists(os.path.join(model_path, 'pytorch_lora_weights.safetensors'))
+    return os.path.exists(os.path.join(model_path, artifact_filename))
 
 
 ##########################################
@@ -224,7 +245,7 @@ def exists_unlearned_model(
 ##########################################
 def get_generated_dataset_folder(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     target: str,
     base_folder: str = 'assets',
@@ -292,7 +313,7 @@ def get_shared_baseline_folder(
 def get_off_image_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     target: str,
-    method: Literal['munba', 'uce', 'distil'],
+    method: _type_method,
     num_train_epochs: int,
     seed: int,
     prompt: str,
@@ -413,6 +434,11 @@ class GeneratedDataset(Artifact):
     target: Optional[str] = None          # None → shared baseline (task-level)
     method: Optional[_type_method] = None  # None → baseline dataset
     num_train_epochs: Optional[int] = None
+    # What the method's training produced, declared rather than inferred from `method`. Required
+    # whenever `method` is set. This module keeps its independence from the benchmark package, so it
+    # cannot read ALGORITHM_REGISTRY itself -- the caller passes the two values from there.
+    artifact_kind: Optional[_type_artifact_kind] = None
+    artifact_filename: Optional[str] = None
     model: _type_model = 'sd1.4'          # base image-generating model; sd1.4 → unchanged names
     # base_folder, remote_repository_name, recompute_if_exists, upload_if_recomputed and
     # save_outputs are inherited from Artifact. save_outputs is unused here: image
@@ -432,6 +458,12 @@ class GeneratedDataset(Artifact):
             )
             assert self.num_train_epochs is not None, (
                 "num_train_epochs must be set when method is specified (entity dataset)."
+            )
+            assert self.artifact_kind is not None, (
+                "artifact_kind must be set when method is specified; read it from ALGORITHM_REGISTRY."
+            )
+            assert self.artifact_filename is not None, (
+                "artifact_filename must be set when method is specified; read it from ALGORITHM_REGISTRY."
             )
         if self.method is None and self.target is not None:
             raise ValueError(
@@ -653,8 +685,11 @@ class GeneratedDataset(Artifact):
             model_folder = get_unlearned_model_folder(
                 self.task, self.method, self.num_train_epochs, self.target, self.base_folder, self.model
             )
+            assert self.artifact_filename is not None
+            assert self.artifact_kind is not None
             if not exists_unlearned_model(
-                self.task, self.method, self.num_train_epochs, self.target, self.base_folder, self.model
+                self.task, self.method, self.num_train_epochs, self.target, self.artifact_filename,
+                self.base_folder, self.model,
             ):
                 raise FileNotFoundError(
                     f"Trained unlearned model not found at '{model_folder}'. "
@@ -669,20 +704,27 @@ class GeneratedDataset(Artifact):
                 for prompt in prompts
             ]
 
-            if self.method == 'uce':
-                from vision_unlearning.unlearner.uce_sd_erase import UCE  # noqa: PLC0415
-                logger.info(
-                    "_compute_from_scratch: loading UCE pipeline from %s on %s",
-                    model_folder, device,
+            if self.artifact_kind not in ARTIFACT_KIND_LOADERS:
+                raise ValueError(
+                    f'No load route is declared for artifact kind {self.artifact_kind!r}. '
+                    f'Known kinds: {", ".join(sorted(ARTIFACT_KIND_LOADERS))}. A new method must '
+                    'declare one rather than fall through to the adapter route.'
                 )
-                pipeline = UCE.get_pipeline_from_modified_weights(
+            if ARTIFACT_KIND_LOADERS[self.artifact_kind] == 'partial_weights_loader':
+                from vision_unlearning.unlearner.loaders import get_partial_weights_loader  # noqa: PLC0415
+                logger.info(
+                    "_compute_from_scratch: loading %s pipeline from %s on %s",
+                    self.method, model_folder, device,
+                )
+                load_pipeline = get_partial_weights_loader(self.artifact_filename)
+                pipeline = load_pipeline(
                     pretrained_model_name_or_path=model_base_name,
                     device=device,
                     output_dir=model_folder,
                 )
                 logger.info(
-                    "_compute_from_scratch: UCE pipeline loaded; generating %d images",
-                    len(seeds) * len(prompts),
+                    "_compute_from_scratch: %s pipeline loaded; generating %d images",
+                    self.method, len(seeds) * len(prompts),
                 )
                 generate_dataset(
                     model_base_name=None,
@@ -695,7 +737,7 @@ class GeneratedDataset(Artifact):
                     batch_size=batch_size,
                 )
             else:
-                # distil / munba — LoRA-based methods.
+                # A low-rank adapter, applied on top of the base model, inverted or not.
                 logger.info(
                     "_compute_from_scratch: loading %s LoRA from %s on %s",
                     self.method, model_folder, device,
@@ -708,7 +750,7 @@ class GeneratedDataset(Artifact):
                     output_path=self.folder_path,
                     seeds=seeds,
                     filenames=filenames,
-                    lora_requires_inversion=(self.method == 'munba'),
+                    lora_requires_inversion=(self.artifact_kind == 'lora_adapter_inverted'),
                     batch_size=batch_size,
                 )
 

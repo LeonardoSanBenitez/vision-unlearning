@@ -2,7 +2,7 @@
 #
 # This is the dependency set for the I-CARE analysis path (Result Templates, embeddings
 # *loading* and similarity computation, metrics that operate on already-generated data).
-# It does NOT cover: actual unlearning (FADE/munba training), embedding *generation*
+# It does NOT cover: actual unlearning (SPARE/munba training), embedding *generation*
 # (DINOv2/CLIP/act fingerprint extraction), or anything under the `gpu` pytest marker.
 # See CONTRIBUTING.md Section 6 and PLAN-TASK-2026-07-01-TestTooling.md for the full
 # lite/heavy/gpu tier rationale.

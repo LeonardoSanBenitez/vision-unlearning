@@ -1,5 +1,2 @@
 assets/
 reports/
-# Keep publication audit docs in git
-!reports/pub_audit/
-!reports/pub_audit/*.md

@@ -32,12 +32,22 @@ InterferenceMatrix, MetricSimilarityAlignment(Multi), and InterferenceVisualSumm
 ``interference_pair="clip_diff"``, so a cluster run backing that flow only needs
 ``--mp clip_diff``.
 
-By default (``--upload-if-recomputed``) each newly computed RT result is uploaded to
-HuggingFace immediately after computation.  Set ``HF_TOKEN`` in the environment.
+``--similarities`` restricts which pairwise similarity metric(s) are used by
+SimilarityMatrix, MetricSimilarityAlignment, and MetricSimilarityAlignmentMulti — where
+it is the exact *ordered feature list* of the joint regression, and therefore what makes
+a with-and-without comparison of a single metric expressible (two runs differing in one
+feature and nothing else, since the feature list is serialised into the result filename).
+The default is the standard enumeration; a candidate metric that does not yet have a
+matrix for every task is requested explicitly rather than being in that default.
 
-By default (``--skip-if-on-hf``) the HuggingFace ``results/`` tree is listed once at
-startup and any RT whose result file is already on HF is skipped entirely, avoiding
-thousands of per-file HTTP HEAD requests.
+With ``--upload-if-recomputed`` each newly computed RT result is uploaded to HuggingFace
+immediately after computation.  Set ``HF_TOKEN`` in the environment.  Off by default, so a
+plain run writes results locally only.
+
+With ``--skip-if-on-hf`` the HuggingFace ``results/`` tree is listed once at startup and any
+RT whose result file is already on HF is skipped entirely, avoiding thousands of per-file
+HTTP HEAD requests.  Off by default: that listing is slow on a repository this size, so it is
+worth paying only for a bulk run that would otherwise recompute many existing results.
 
 Run from: vision-unlearning/vision_unlearning/benchmarks/I_care/
 """
@@ -55,6 +65,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
+from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger, summarize  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +82,9 @@ _ALL_TASKS: List[str] = ["breeds", "scenes", "people"]
 _ALL_METHODS: List[str] = ["distil", "munba", "uce"]
 _ALL_MP: List[vb.type_mp] = cast(List[vb.type_mp], ["brisque_diff", "clip_diff", "rmse", "ssim", "dino_diff"])
 _ALL_S: List[vb.type_s] = cast(List[vb.type_s], ["clip", "jacc", "dino", "act", "weight_overlap"])
+# Every registered similarity metric, so --similarities can request one that is deliberately
+# not part of the default enumeration above (a candidate metric under evaluation).
+_S_CHOICES: List[vb.type_s] = cast(List[vb.type_s], list(get_args(vb.type_s)))
 _ALL_L: List[vb.type_l] = cast(List[vb.type_l], ["clip_embedding", "dino_embedding"])
 _ALL_ME: List[vb.type_me] = cast(List[vb.type_me], list(get_args(vb.type_me)))  # type: ignore[misc]
 _ALL_REG_ALGOS: List[str] = ["linear_regression", "random_forest"]
@@ -110,6 +124,29 @@ def list_hf_result_files(
             exc,
         )
         return frozenset()
+
+
+# ---------------------------------------------------------------------------
+# Run ledger — a module-level, optional sink for per-attempt outcomes.
+#
+# Threading a ledger argument through every one of the ~40 RT-construction call sites
+# below would touch every runner function for a purely additive debugging feature. A
+# single module-level slot, installed once in main() before the run starts and read by
+# _compute_and_report (and the two loops that do not go through it), keeps every existing
+# call site -- and the test suite, which calls _compute_and_report directly with no
+# ledger installed -- completely unaffected when logging is disabled (the default: None).
+# ---------------------------------------------------------------------------
+_ledger: Optional[RunLedger] = None
+
+
+def set_ledger(ledger: Optional[RunLedger]) -> None:
+    """Install (or clear, with ``None``) the run ledger used for this process."""
+    global _ledger
+    _ledger = ledger
+
+
+def _get_ledger() -> Optional[RunLedger]:
+    return _ledger
 
 
 def _should_skip(
@@ -167,14 +204,24 @@ def _compute_and_report(
     ``rt_factory()`` is invoked synchronously (not deferred/stored), the closures are
     evaluated immediately and are not subject to the late-binding-in-loops pitfall.
     """
+    ledger = _get_ledger()
     try:
         rt = rt_factory()
         if _should_skip(rt, hf_files, upload_if_recomputed):
+            if ledger is not None:
+                ledger.record(error_context, status="skipped")
             return
         rt.compute()
         print(".", end="", flush=True)
+        if ledger is not None:
+            ledger.record(error_context, status="ok")
     except Exception as exc:
         logger.warning("%s failed: %s", error_context, exc, exc_info=True)
+        if ledger is not None:
+            ledger.record(
+                error_context, status="failed",
+                exception_type=type(exc).__name__, message=str(exc),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -220,15 +267,18 @@ def run_metric_similarity_alignment(
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
     base_folder: str = "assets",
+    s_list: Optional[List[vb.type_s]] = None,
 ) -> None:
     """MetricSimilarityAlignment: (model, task, unlearning_algorithm, mp, s)."""
     if mp_list is None:
         mp_list = _ALL_MP
+    if s_list is None:
+        s_list = _ALL_S
     for model in _ALL_MODELS:
         for task in tasks:
             for unlearning_algorithm in methods:
                 for interference_pair in mp_list:
-                    for similarity_metric in _ALL_S:
+                    for similarity_metric in s_list:
                         _compute_and_report(
                             lambda: vb.ResultTemplateMetricSimilarityAlignment(  # type: ignore[arg-type]
                                 model=model,
@@ -255,16 +305,19 @@ def run_metric_similarity_alignment_multi(
     upload_if_recomputed: bool = False,
     mp_list: Optional[List[vb.type_mp]] = None,
     base_folder: str = "assets",
+    s_list: Optional[List[vb.type_s]] = None,
 ) -> None:
     """MetricSimilarityAlignmentMulti: (model, task, unlearning_algorithm, mp, s_list, reg_algo).
 
-    Runs with all three similarity metrics combined and both regression algorithms.
-    The combined run (clip+dino+jacc) is the primary analysis; the individual-metric
-    runs (clip-only, dino-only, jacc-only) serve as within-model baselines.
+    Runs one joint regression over the similarity metrics combined, for both regression
+    algorithms. ``s_list`` is the exact ordered feature list; it is what makes a
+    with-and-without comparison of a single metric expressible (two runs differing in one
+    feature and in nothing else, since the feature list is serialised into the result
+    filename).
     """
     if mp_list is None:
         mp_list = _ALL_MP
-    all_metrics = _ALL_S
+    all_metrics = _ALL_S if s_list is None else s_list
     regression_algorithms = _ALL_REG_ALGOS
     similarity_sets = [all_metrics]  # primary: all combined
 
@@ -334,11 +387,14 @@ def run_similarity_matrix(
     hf_files: FrozenSet[str] = frozenset(),
     upload_if_recomputed: bool = False,
     base_folder: str = "assets",
+    s_list: Optional[List[vb.type_s]] = None,
 ) -> None:
     """SimilarityMatrix: (model, task, similarity_metric)."""
+    if s_list is None:
+        s_list = _ALL_S
     for model in _ALL_MODELS:
         for task in tasks:
-            for similarity_metric in _ALL_S:
+            for similarity_metric in s_list:
                 _compute_and_report(
                     lambda: vb.ResultTemplateSimilarityMatrix(
                         model=model,
@@ -385,12 +441,21 @@ def run_significant_relationship(
     falls back to Numerical on InvalidAttributeTypeError.
     """
     me_list = _ALL_ME
+    ledger = _get_ledger()
     for model in _ALL_MODELS:
         for task in tasks:
             attributes = _sr_attributes_for_task(task)
             for unlearning_algorithm in methods:
                 for interference_entity in me_list:
                     for attribute in attributes:
+                        cat_context = (
+                            f"SignificantRelationshipCategorical for {model}/{task}/"
+                            f"{unlearning_algorithm}/{interference_entity}/{attribute}"
+                        )
+                        num_context = (
+                            f"SignificantRelationshipNumerical for {model}/{task}/"
+                            f"{unlearning_algorithm}/{interference_entity}/{attribute}"
+                        )
                         try:
                             rt_cat = vb.ResultTemplateSignificantRelationshipCategorical(  # type: ignore[arg-type]
                                 model=model,
@@ -403,8 +468,12 @@ def run_significant_relationship(
                                 base_folder=base_folder,
                             )
                             if _should_skip(rt_cat, hf_files, upload_if_recomputed):
+                                if ledger is not None:
+                                    ledger.record(cat_context, status="skipped")
                                 continue
                             rt_cat.compute()
+                            if ledger is not None:
+                                ledger.record(cat_context, status="ok")
                         except vb.InvalidAttributeTypeError:
                             try:
                                 rt_num = vb.ResultTemplateSignificantRelationshipNumerical(
@@ -418,8 +487,12 @@ def run_significant_relationship(
                                     base_folder=base_folder,
                                 )
                                 if _should_skip(rt_num, hf_files, upload_if_recomputed):
+                                    if ledger is not None:
+                                        ledger.record(num_context, status="skipped")
                                     continue
                                 rt_num.compute()
+                                if ledger is not None:
+                                    ledger.record(num_context, status="ok")
                             except Exception as e2:
                                 logger.warning(
                                     "SignificantRelationshipNumerical failed for "
@@ -427,8 +500,17 @@ def run_significant_relationship(
                                     model, task, unlearning_algorithm,
                                     interference_entity, attribute, e2,
                                 )
-                        except vb.InsufficientSamplesError:
-                            pass
+                                if ledger is not None:
+                                    ledger.record(
+                                        num_context, status="failed",
+                                        exception_type=type(e2).__name__, message=str(e2),
+                                    )
+                        except vb.InsufficientSamplesError as e_ins:
+                            if ledger is not None:
+                                ledger.record(
+                                    cat_context, status="failed",
+                                    exception_type=type(e_ins).__name__, message=str(e_ins),
+                                )
                         except Exception as e:
                             logger.warning(
                                 "SignificantRelationshipCategorical failed for "
@@ -436,6 +518,11 @@ def run_significant_relationship(
                                 model, task, unlearning_algorithm,
                                 interference_entity, attribute, e,
                             )
+                            if ledger is not None:
+                                ledger.record(
+                                    cat_context, status="failed",
+                                    exception_type=type(e).__name__, message=str(e),
+                                )
                         else:
                             print(".", end="", flush=True)
                 print("")
@@ -877,11 +964,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--action",
         default="run",
-        choices=["run", "aggregate", "all"],
+        choices=["run", "aggregate", "all", "ledger-summary"],
         help=(
             "What to do: 'run' computes RTs (default), "
             "'aggregate' builds rt_results.csv from existing JSONs, "
-            "'all' does both in sequence."
+            "'all' does both in sequence, "
+            "'ledger-summary' prints a grouped ok/skipped/failed report from --ledger-path "
+            "without running or aggregating anything."
         ),
     )
     parser.add_argument(
@@ -924,6 +1013,19 @@ def parse_args() -> argparse.Namespace:
         choices=_ALL_MP,
         metavar="METRIC",
         help="Per-pair interference metric(s) to include (default: all 5).",
+    )
+    parser.add_argument(
+        "--similarities",
+        nargs="+",
+        default=list(_ALL_S),
+        choices=_S_CHOICES,
+        metavar="METRIC",
+        help=(
+            "Pairwise similarity metric(s) to include, for SimilarityMatrix, "
+            "MetricSimilarityAlignment, and MetricSimilarityAlignmentMulti (where it is the "
+            f"exact ordered feature list of the joint regression). Default: {_ALL_S}. "
+            f"Available: {_S_CHOICES}"
+        ),
     )
     parser.add_argument(
         "--entity-count",
@@ -973,18 +1075,60 @@ def parse_args() -> argparse.Namespace:
             "Default: off."
         ),
     )
+    parser.add_argument(
+        "--ledger-path",
+        default="",
+        metavar="PATH",
+        help=(
+            "Where to append the per-attempt run ledger (one JSON line per RT "
+            "computation: ok/skipped/failed, with the commit SHA and a timestamp). "
+            "Debugging/traceability only -- not a Result Template, not a paper artifact. "
+            "Default (empty): '{base_folder}/logs/pipeline_08_ledger.jsonl', i.e. inside "
+            "the assets folder, which is already gitignored wholesale -- so the ledger is "
+            "never committed without any extra .gitignore rule. Also read by "
+            "--action ledger-summary (resolved against --base-folder the same way)."
+        ),
+    )
+    parser.add_argument(
+        "--no-ledger",
+        action="store_true",
+        default=False,
+        help="Disable writing the run ledger for this invocation.",
+    )
     return parser.parse_args()
 
 
+def _resolve_ledger_path(ledger_path: str, base_folder: str) -> str:
+    """Return ``ledger_path`` unchanged if set, else the default under ``base_folder``.
+
+    The default lives inside the assets folder (``{base_folder}/logs/...``) rather than
+    beside the code, so it inherits the assets folder's blanket ``.gitignore`` entry and
+    is never committed by accident, with no extra ignore rule to keep in sync.
+    """
+    if ledger_path:
+        return ledger_path
+    return os.path.join(base_folder, "logs", "pipeline_08_ledger.jsonl")
+
+
 def resolve_rt_names(requested: List[str]) -> List[str]:
-    """Return normalised RT names that match the requested list."""
+    """Return normalised RT names that match the requested list.
+
+    A name that matches a registered RT exactly resolves to that RT alone. Substring
+    matching is the fallback, and it stays available for the shorthands it was written
+    for -- but it cannot be used to request one RT whose name is a prefix of another's,
+    and asking for MetricSimilarityAlignment must not also run
+    MetricSimilarityAlignmentMulti with whatever arguments were meant for the first.
+    """
     if len(requested) == 1 and _normalize(requested[0]) == "all":
         return list(ALL_RT_NAMES)
 
     matched: List[str] = []
     for req in requested:
         norm_req = _normalize(req)
-        hits = [n for n in ALL_RT_NAMES if norm_req in n]
+        hits = (
+            [norm_req] if norm_req in ALL_RT_NAMES
+            else [n for n in ALL_RT_NAMES if norm_req in n]
+        )
         if not hits:
             logger.warning(
                 "RT name '%s' did not match any known RT. "
@@ -1001,10 +1145,21 @@ def resolve_rt_names(requested: List[str]) -> List[str]:
 
 def main() -> None:
     args = parse_args()
+    base_folder: str = args.base_folder
+    ledger_path = _resolve_ledger_path(args.ledger_path, base_folder)
+
+    if args.action == "ledger-summary":
+        print(summarize(ledger_path))
+        return
+
     tasks: List[str] = args.tasks
     methods: List[str] = args.methods
     upload: bool = args.upload_if_recomputed
-    base_folder: str = args.base_folder
+
+    ledger: Optional[RunLedger] = None
+    if args.action in ("run", "all") and not args.no_ledger:
+        ledger = RunLedger(ledger_path)
+        set_ledger(ledger)
 
     if args.action in ("run", "all"):
         rt_names = resolve_rt_names(args.rts)
@@ -1030,11 +1185,13 @@ def main() -> None:
             elif rt_name == "metricsimilarityalignment":
                 run_metric_similarity_alignment(
                     tasks, methods, hf_files, upload, mp_list=args.mp, base_folder=base_folder,
+                    s_list=args.similarities,
                 )
 
             elif rt_name == "metricsimilarityalignmentmulti":
                 run_metric_similarity_alignment_multi(
                     tasks, methods, hf_files, upload, mp_list=args.mp, base_folder=base_folder,
+                    s_list=args.similarities,
                 )
 
             elif rt_name == "interferencematrix":
@@ -1043,7 +1200,10 @@ def main() -> None:
                 )
 
             elif rt_name == "similaritymatrix":
-                run_similarity_matrix(tasks, hf_files, upload, base_folder=base_folder)
+                run_similarity_matrix(
+                    tasks, hf_files, upload, base_folder=base_folder,
+                    s_list=args.similarities,
+                )
 
             elif rt_name == "significantrelationship":
                 run_significant_relationship(tasks, methods, hf_files, upload, base_folder=base_folder)
@@ -1084,6 +1244,11 @@ def main() -> None:
             output_path=args.csv_output,
         )
         logger.info("Aggregation complete: %s", csv_path)
+
+    if ledger is not None:
+        logger.info("Run ledger: %d records written to %s", ledger.count, ledger.path)
+        set_ledger(None)
+        ledger.close()
 
 
 if __name__ == "__main__":

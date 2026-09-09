@@ -36,7 +36,7 @@ Machine unlearning is the problem of removing the influence of specific training
 data from a trained model — without retraining from scratch.  Vision Unlearning
 provides a standard, architecture-agnostic interface for the core building blocks:
 
-- **Unlearning algorithms** — FADE, UCE, Munba, and others
+- **Unlearning algorithms** — SPARE, UCE, Munba, and others
 - **Datasets** — standardised forget/retain splits for CIFAR-10/100, CelebA, and more
 - **Metrics** — quantitative measures of forgetting quality, retain performance, and side effects
 - **Evaluator** — a unified pipeline for running an algorithm and measuring all relevant metrics

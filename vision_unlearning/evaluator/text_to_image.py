@@ -31,6 +31,12 @@ class EvaluatorTextToImage(BaseModel):
     prompts_retain: List[str]
     metric_clip: MetricImageTextSimilarity
     compute_runtimes: bool = True
+    # Displaying is the right default for this class, which is used directly from notebooks. Callers
+    # that are not interactive must pass False: `plt.show()` blocks until a window is closed whenever
+    # matplotlib has an interactive backend, so an unattended run hangs forever with no error and no
+    # output. That is invisible under a headless backend, which is why it survives in containers and
+    # appears only on a desktop. The figure is rendered with `fig.canvas.draw()` and returned in the
+    # images mapping either way, so passing False loses nothing but the window.
     plot_show: bool = True
 
     def evaluate(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:

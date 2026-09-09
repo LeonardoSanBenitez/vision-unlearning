@@ -1,12 +1,13 @@
 
 import os
+import json
 import math
 import shutil
 import time
 from pathlib import Path
 import random
-from typing import List, Optional, Tuple, Dict, Any
-from pydantic import Field
+from typing import List, Literal, Optional, Tuple, Dict, Any
+from pydantic import Field, field_validator
 from abc import abstractmethod
 from PIL import Image
 import numpy as np
@@ -15,14 +16,14 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torchvision import transforms
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
 from transformers import set_seed
 
 from datasets import load_dataset
 from huggingface_hub.repocard_data import EvalResult
 from huggingface_hub import create_repo, upload_folder
 import diffusers
-from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, StableDiffusionPipeline, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, StableDiffusionPipeline, StableDiffusionXLPipeline, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import cast_training_params
 from diffusers.utils import convert_state_dict_to_diffusers
@@ -41,6 +42,7 @@ from vision_unlearning.evaluator import EvaluatorTextToImage, plot_gradient_conf
 from vision_unlearning.utils.model_management import save_model_card
 from vision_unlearning.utils.training import unwrap_model, preprocess_train, collate_fn
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple
+from vision_unlearning.utils import device as device_utils
 
 
 def unlearn_lora(
@@ -51,10 +53,24 @@ def unlearn_lora(
     requires_inversion: bool = True,
     return_original: bool = True,
     return_learned: bool = True,
+    variant: Optional[str] = None,
+    device_map: Optional[str] = None,
 ) -> Tuple[Optional[StableDiffusionPipeline], Optional[StableDiffusionPipeline], StableDiffusionPipeline]:
     '''
     id can be both a local dir or a huggingface model id
     return pipeline_original, pipeline_learned, pipeline_unlearned
+
+    variant selects the weight files to read, e.g. "fp16". When None (the default) the argument is
+    not passed at all and the full-precision weights are read and then cast, which is what every
+    Stable Diffusion 1.x caller has always done. Stable Diffusion XL cannot be loaded that way on a
+    16 GB machine: its full-precision denoiser alone is 10.3 GB and the read fills system memory
+    before the cast can shrink it.
+
+    device_map is passed to from_pretrained when given, e.g. "balanced", which places each component
+    on the graphics card as it is read instead of assembling the whole pipeline in system memory
+    first. When it is set the pipelines are NOT moved with .to(device) afterwards, because placement
+    is then the loader's responsibility. When None (the default) the loads and the move are exactly
+    what they have always been.
 
     Inspired by @inproceedings{zhang2023composing,
         title={Composing Parameter-Efficient Modules with Arithmetic Operations},
@@ -64,16 +80,27 @@ def unlearn_lora(
     }
     Source: https://github.com/hkust-nlp/PEM_composition/tree/main/exps/composition_for_unlearning
     '''
+    variant_kwargs: Dict[str, Any] = {} if variant is None else {"variant": variant}
+    device_map_kwargs: Dict[str, Any] = {} if device_map is None else {"device_map": device_map}
+
+    def _load() -> Any:
+        '''One pipeline, loaded and placed. Written once so the three loads below cannot drift.'''
+        pipeline = AutoPipelineForText2Image.from_pretrained(
+            model_original_id, torch_dtype=torch.float16, safety_checker=None,
+            **variant_kwargs, **device_map_kwargs,
+        )
+        return pipeline if device_map is not None else pipeline.to(device)
+
     pipeline_original: Optional[StableDiffusionPipeline] = None
     if return_original:
-        pipeline_original = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+        pipeline_original = _load()
 
     pipeline_learned: Optional[StableDiffusionPipeline] = None
     if return_learned:
-        pipeline_learned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+        pipeline_learned = _load()
         pipeline_learned.load_lora_weights(model_lora_id, weight_name=weight_name)  # type: ignore
 
-    pipeline_unlearned = AutoPipelineForText2Image.from_pretrained(model_original_id, torch_dtype=torch.float16, safety_checker=None).to(device)
+    pipeline_unlearned = _load()
     pipeline_unlearned.load_lora_weights(model_lora_id, weight_name=weight_name)
 
     # TODO: put inversion in function
@@ -92,7 +119,7 @@ def unlearn_lora(
         logger.info(f"Inverted {total} params for pipeline_unlearned")
     else:
         # pipeline_unlearned remains as it was trained, pipeline_learned is inverted
-        # FADE, for example, falls in this case
+        # SPARE, for example, falls in this case
         if return_learned:
             total: int = 0  # type: ignore
             sum_before_invert: float = sum([float(param.sum()) for name, param in pipeline_learned.unet.named_parameters() if "lora_A" in name])  # type: ignore
@@ -107,6 +134,17 @@ def unlearn_lora(
     return pipeline_original, pipeline_learned, pipeline_unlearned
 
 
+def epochs_to_save(save_lora_at_epochs: Optional[List[int]], epoch_1based: int) -> bool:
+    """Whether an intermediate LoRA adapter checkpoint is requested at this 1-based epoch.
+
+    Pure and side-effect free, so the checkpoint scheduling can be unit-tested without
+    running any training. Returns False when no epochs are requested.
+    """
+    if save_lora_at_epochs is None:
+        return False
+    return epoch_1based in save_lora_at_epochs
+
+
 class UnlearnerLora(Unlearner):
     '''
     Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
@@ -119,7 +157,7 @@ class UnlearnerLora(Unlearner):
     # General arguments
     lora_r: int = Field(default=32, description="Dimensionality of the LoRA rank (R).")
     lora_alpha: int = Field(default=64, description="Lora alpha.")
-    # lora_dropout: float = Field(default=0.0, metadata={"help": "Lora dropout."})
+    lora_dropout: float = Field(default=0.0, description="Dropout probability applied to the LoRA layers during training.")
     target_modules: List[str] = Field(default=["to_k", "to_q", "to_v", "to_out.0"], description="Which module will be added the lora adapter.")  # See docs: https://huggingface.co/docs/peft/v0.17.0/en/package_reference/lora#peft.LoraConfig
     is_lora_negated: bool = Field(default=True, description="If Lora is trained to be good at the task (as suggestion by Zhang2023). If true, the trained model should be inverted using `unlearn_lora` before usage")  # noqa
     seed: int = Field(default=42, description="Random seed for initialization.")
@@ -128,6 +166,7 @@ class UnlearnerLora(Unlearner):
     model_name_or_path: str = Field(description="Path to the pre-trained model or model identifier from huggingface.co/models")
     revision: Optional[str] = Field(None, description="Revision of pretrained model identifier from huggingface.co/models.")
     variant: Optional[str] = Field(None, description="Variant of the model files of the pretrained model identifier from huggingface.co/models, e.g., fp16.")
+    pretrained_vae_model_name_or_path: Optional[str] = Field(None, description="Path or identifier of an autoencoder to use instead of the base model's own. Supply one that is safe in half precision (e.g. madebyollin/sdxl-vae-fp16-fix) when training in half precision; leave as None to load the base model's autoencoder and keep it in float32.")  # noqa
     # tokenizer_name: Optional[str] = Field(default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"})
 
     # Dataset related
@@ -144,6 +183,8 @@ class UnlearnerLora(Unlearner):
     validation_epochs: int = Field(1, description="Run fine-tuning validation every X epochs.")
 
     resolution: int = Field(512, description="Resolution for input images.")
+    micro_conditioning_original_size: Optional[Tuple[int, int]] = Field(None, description="Stable Diffusion XL only. When set, every training example declares this (height, width) as its original size instead of the true size of its own photograph. Leave as None to keep declaring the true size, which is what the checkpoint was pretrained with. Set it to the size declared at generation time when the two would otherwise disagree: the size micro-conditioning is an input to every forward pass, so fitting an adapter under one declaration and using it under another is extrapolation.")  # noqa
+    micro_conditioning_target_size: Optional[Tuple[int, int]] = Field(None, description="Stable Diffusion XL only. When set, every training example declares this (height, width) as its target size instead of (resolution, resolution). Leave as None for the pretraining convention. See micro_conditioning_original_size.")  # noqa
     center_crop: bool = Field(False, description="Whether to center crop the input images.")
     random_flip: bool = Field(False, description="Whether to randomly flip images horizontally.")
 
@@ -200,6 +241,7 @@ class UnlearnerLora(Unlearner):
     checkpointing_steps: int = Field(500, description="Save training state checkpoint every X updates.")
     checkpoints_total_limit: Optional[int] = Field(None, description="Maximum number of checkpoints to store.")
     resume_from_checkpoint: Optional[str] = Field(None, description="Resume training from a previous checkpoint.")
+    save_lora_at_epochs: Optional[List[int]] = Field(default=None, description="1-based epoch numbers at which to also save the LoRA adapter into output_dir/epoch-{n}/. None disables (default). Entries must be positive ints; the list is deduplicated and sorted. On resume_from_checkpoint, epochs already passed are not re-saved.")
     noise_offset: float = Field(0.0, description="Scale of noise offset.")
 
     # Internal attributes
@@ -217,16 +259,52 @@ class UnlearnerLora(Unlearner):
     _tokenizer: Any = None
     _text_encoder: Any = None
     _vae: Any = None
+    # The second tokenizer/text encoder exist only on Stable Diffusion XL checkpoints; see _load_models
+    _tokenizer_2: Any = None
+    _text_encoder_2: Any = None
+    _is_xl: bool = False
     _unet: Optional[diffusers.models.unets.unet_2d_condition.UNet2DConditionModel] = None
 
     _train_forget_dataloader: Optional[torch.utils.data.DataLoader] = None
     _train_retain_dataloader: Optional[torch.utils.data.DataLoader] = None
+    # One iterator over the retain loader, held across steps and restarted when it is exhausted.
+    # The forget loader drives the epoch; the retain loader is cycled beneath it, which is the
+    # standard arrangement for two-loader forget/retain training.
+    _train_retain_iterator: Any = None
 
     _optimizer: Any = None
     _lr_scheduler: Any = None
     _lora_layers: Any = None
 
     _peak_mem: int = 0
+
+    # Stage boundaries, kept on the instance because the stages are separate methods and the runtime
+    # metrics reported by `evaluate` measure the intervals between them.
+    _timestamp_start: float = 0.0
+    _timestamp_models_loaded: float = 0.0
+    _timestamp_training_started: float = 0.0
+    _timestamp_training_finished: float = 0.0
+    # The last epoch index the training loop entered, which the final validation labels its images with.
+    _last_epoch: int = 0
+    # One row per optimizer step: the losses the tracker receives, kept so they can also be written
+    # to disk beside the adapter (`_save_loss_history`).
+    _loss_history: List[Dict[str, Any]] = []
+
+    @field_validator('save_lora_at_epochs', mode='before')
+    @classmethod
+    def _validate_save_lora_at_epochs(cls, value: Any) -> Optional[List[int]]:
+        if value is None:
+            return None
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("save_lora_at_epochs must be a list of positive integers, or None.")
+        cleaned: List[int] = []
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, int):
+                raise ValueError(f"save_lora_at_epochs entries must be int, got {type(item).__name__}: {item!r}")
+            if item < 1:
+                raise ValueError(f"save_lora_at_epochs entries must be >= 1 (1-based epochs), got {item}")
+            cleaned.append(item)
+        return sorted(set(cleaned))
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         self._output_dir_checkpoints = self.output_dir
@@ -252,6 +330,7 @@ class UnlearnerLora(Unlearner):
         return LoraConfig(
             r=self.lora_r,
             lora_alpha=self.lora_alpha,  # type: ignore  # TODO: should this be int or float?
+            lora_dropout=self.lora_dropout,
             init_lora_weights="gaussian",
             target_modules=self.target_modules,
         )
@@ -273,6 +352,16 @@ class UnlearnerLora(Unlearner):
     def _hook_before_load_model(self):
         return None
 
+    def _lora_pipeline_class(self) -> Any:
+        '''
+        The pipeline class whose save_lora_weights writes an adapter the base model can load back.
+
+        The two classes serialize the same denoiser state dict but under the key prefix their own
+        loader expects, so saving a Stable Diffusion XL adapter through the Stable Diffusion class
+        produces a file that loads into nothing.
+        '''
+        return StableDiffusionXLPipeline if self._is_xl else StableDiffusionPipeline
+
     def _save_lora_layers(self):
         '''
         Side-effects: modifies self._unet in-place (casts to float32), saves two directories self._output_dir_super and self._output_dir_sub
@@ -281,15 +370,211 @@ class UnlearnerLora(Unlearner):
         self._unet = self._unet.to(torch.float32)
         unwrapped_unet = unwrap_model(self._unet, self._accelerator)
         unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
-        StableDiffusionPipeline.save_lora_weights(
+        self._lora_pipeline_class().save_lora_weights(
             save_directory=self.output_dir,
             unet_lora_layers=unet_lora_state_dict,
             safe_serialization=True,
         )
 
-    def train(self):
+    def _end_training(self) -> None:
+        '''
+        Close the accelerator down, on a platform where its own teardown cannot run.
+
+        `Accelerator.end_training` does two things: it finishes every tracker, and it destroys the
+        distributed process group. The second reaches `torch.distributed.is_initialized()`
+        unconditionally, and on a torch build without distributed support that attribute does not
+        exist -- so the call raises `AttributeError` at the very end of `train()`, after the adapter
+        has been saved and the evaluation has been computed, discarding the evaluation records that
+        `train()` exists to return. Measured on this machine: a 200-epoch session that had already
+        written every checkpoint ended in that exception and returned nothing.
+
+        There is no process group to destroy when distributed support is absent, so the tracker half
+        is performed and the teardown half is skipped, rather than the whole method being skipped.
+        '''
+        assert self._accelerator is not None
+        if torch.distributed.is_available():
+            self._accelerator.end_training()
+            return
+        for tracker in self._accelerator.trackers:
+            tracker.finish()
+        logger.warning(
+            "torch.distributed is unavailable in this build, so the accelerator's process-group "
+            "teardown is skipped; trackers were finished."
+        )
+
+    def _save_loss_history(self) -> None:
+        '''
+        Write the per-step training losses into output_dir as loss_history.json.
+
+        The losses already reach the accelerator's tracker, which makes them readable only from a
+        tracker run. A run's loss curve is the first thing anyone asks for when a session looks
+        wrong, so it is also written as a plain artifact: one row per optimizer step, in step order,
+        each carrying the step, the epoch, both losses and the learning rate in force.
+        '''
+        path = os.path.join(self.output_dir, 'loss_history.json')
+        with open(path, 'w', encoding='utf-8') as handle:
+            json.dump(self._loss_history, handle, indent=2)
+        logger.info(f"Wrote {len(self._loss_history)} optimizer steps of loss history to {path}")
+
+    def _assert_save_epochs_within_training(self) -> None:
+        '''
+        Fail fast if an intermediate checkpoint is requested beyond the training horizon.
+
+        A requested epoch greater than num_train_epochs is a configuration error, not a
+        silently-skipped no-op. Called at train-start once num_train_epochs is finalized.
+        '''
+        if self.save_lora_at_epochs is not None and max(self.save_lora_at_epochs) > self.num_train_epochs:
+            raise ValueError(
+                f"save_lora_at_epochs requests epoch {max(self.save_lora_at_epochs)}, but training runs only "
+                f"{self.num_train_epochs} epochs; a requested checkpoint beyond training is a configuration error."
+            )
+
+    def _save_lora_layers_to(self, target_dir: str) -> None:
+        '''
+        Save the current LoRA adapter into target_dir WITHOUT mutating training state.
+
+        Unlike _save_lora_layers, this does not cast self._unet to float32 in place, so it is
+        safe to call at intermediate epochs while training continues. Under mixed_precision="no"
+        the unet is already float32, so the saved adapter is identical to the one _save_lora_layers
+        would write at the same point.
+
+        Known limitation: this saves the base LoRA adapter. A subclass that overrides the final
+        _save_lora_layers with different artifact semantics (e.g. UnlearnerSpareSparsePerWeight,
+        which writes separate super/sub adapters) would need to override _save_lora_layers_to as well to
+        emit matching intermediate checkpoints; those subclasses simply do not set save_lora_at_epochs.
+        '''
+        assert self._unet is not None
+        os.makedirs(target_dir, exist_ok=True)
+        unwrapped_unet = unwrap_model(self._unet, self._accelerator)
+        unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
+        self._lora_pipeline_class().save_lora_weights(
+            save_directory=target_dir,
+            unet_lora_layers=unet_lora_state_dict,
+            safe_serialization=True,
+        )
+
+    def _vae_dtype(self) -> torch.dtype:
+        '''
+        The autoencoder is the one frozen component that is unsafe in half precision: its activations
+        overflow the float16 range and it returns not-a-number latents without raising, so the failure
+        arrives as a loss that has quietly stopped meaning anything.
+
+        It therefore stays in float32 unless the caller supplied an autoencoder built for half
+        precision, in which case that autoencoder is used at the training dtype as intended. Under
+        mixed_precision="no" the training dtype is float32 already, so this returns what the code
+        used before it existed.
+        '''
+        if self.pretrained_vae_model_name_or_path is not None:
+            return self._weight_dtype
+        return torch.float32
+
+    def _load_models(self) -> None:
+        '''
+        Load the frozen components of the training stack, and decide which base-model family this
+        checkpoint belongs to.
+
+        The checkpoint is the switch, so the caller never selects a family: a Stable Diffusion XL
+        denoiser declares `addition_embed_type == "text_time"`, meaning it expects pooled text
+        embeddings and the micro-conditioning sizes on every forward call, and its repository
+        carries the second tokenizer and text encoder that produce them. Stable Diffusion 1.x
+        declares neither, and this method then performs exactly the five loads it always did.
+        '''
+        # The family is decided from the denoiser's configuration alone, before any weights are
+        # read, because the decision changes how they must be read. Measured on a 16 GB machine:
+        # loading the Stable Diffusion XL denoiser the way Stable Diffusion 1.x is loaded -- full
+        # precision into system memory, then cast -- drove free system memory from 5.34 GB to
+        # 0.54 GB and the run was aborted. Its full-precision weights are about 10.3 GB and the read
+        # fills memory before the cast can shrink it, which is the same reason `unlearn_lora` takes
+        # a `variant`. So on that branch the dtype and the weight variant are requested at load
+        # time; on the Stable Diffusion path no argument is added and the loads are what they were.
+        unet_config = UNet2DConditionModel.load_config(self.model_name_or_path, subfolder="unet")
+        self._is_xl = dict(unet_config).get("addition_embed_type") == "text_time"
+        weight_kwargs: Dict[str, Any] = {}
+        if self._is_xl:
+            weight_kwargs["torch_dtype"] = self._weight_dtype
+            if self.variant is not None:
+                weight_kwargs["variant"] = self.variant
+
+        self._noise_scheduler = DDPMScheduler.from_pretrained(self.model_name_or_path, subfolder="scheduler")
+        self._tokenizer = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer")
+        self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder", **weight_kwargs)
+        # The autoencoder is deliberately excluded from weight_kwargs: its dtype is _vae_dtype()'s
+        # decision, not the training dtype's, and it is small enough that loading it in full
+        # precision costs nothing worth the risk of contradicting that guard.
+        self._vae = AutoencoderKL.from_pretrained(
+            self.pretrained_vae_model_name_or_path or self.model_name_or_path,
+            subfolder=("vae" if self.pretrained_vae_model_name_or_path is None else None),
+        )
+        self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet", **weight_kwargs)
+        assert self._unet is not None
+
+        if self._is_xl:
+            logger.info(f"{self.model_name_or_path} is a Stable Diffusion XL checkpoint: loading its second tokenizer and text encoder")
+            assert getattr(self._unet.config, "addition_embed_type", None) == "text_time", (
+                "the denoiser's configuration said this was a Stable Diffusion XL checkpoint before loading, "
+                "and the loaded denoiser disagrees"
+            )
+            self._tokenizer_2 = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer_2")
+            self._text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(self.model_name_or_path, subfolder="text_encoder_2", **weight_kwargs)
+
+    def _encode_conditioning(self, batch: Dict[str, Any], role: Literal["forget", "retain", "override"]) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        '''
+        The text conditioning for one role of one batch, in the form the loaded denoiser expects.
+
+        The role, rather than a raw dictionary key, is the argument because Stable Diffusion XL
+        needs two tokenizations of the same caption where Stable Diffusion needs one. "forget" and
+        "retain" both read the batch's own caption; "override" reads the overwriting caption that
+        only a forget batch carries.
+
+        Returns the encoder hidden states, and the added conditioning to pass to the denoiser:
+        empty on Stable Diffusion, and on Stable Diffusion XL the pooled output of the second text
+        encoder plus the micro-conditioning sizes (original size, crop offset, target size).
+        '''
+        ids_key = "forget_ids" if role == "override" else "input_ids"
+        if not self._is_xl:
+            return self._text_encoder(batch[ids_key], return_dict=False)[0], {}
+
+        for required in (f"{ids_key}_2", "original_sizes", "crop_top_lefts"):
+            if required not in batch:
+                raise KeyError(
+                    f"Stable Diffusion XL conditioning needs '{required}' in the batch; the dataloader "
+                    f"of {type(self).__name__} does not provide it."
+                )
+
+        # The penultimate hidden state of each encoder, concatenated on the feature dimension, and
+        # the pooled output of the second encoder only -- the convention Stable Diffusion XL was
+        # trained with, and the one its own pipeline uses at inference time.
+        outputs_one = self._text_encoder(batch[ids_key], output_hidden_states=True, return_dict=False)
+        outputs_two = self._text_encoder_2(batch[f"{ids_key}_2"], output_hidden_states=True, return_dict=False)
+        prompt_embeds = torch.concat([outputs_one[-1][-2], outputs_two[-1][-2]], dim=-1)
+        pooled_prompt_embeds = outputs_two[0].view(prompt_embeds.shape[0], -1)
+
+        assert self._accelerator is not None
+        # The two declarations the caller may override. The crop offset is never overridden: it is a
+        # property of how this particular photograph was cropped, not a property of the regime the
+        # adapter is deployed in.
+        target_size = self.micro_conditioning_target_size or (self.resolution, self.resolution)
+        declared_original_sizes: List[Any] = (
+            [self.micro_conditioning_original_size] * len(batch["original_sizes"])
+            if self.micro_conditioning_original_size is not None
+            else batch["original_sizes"]
+        )
+        time_ids = torch.cat([
+            torch.tensor([list(original_size) + list(crop_top_left) + list(target_size)])
+            for original_size, crop_top_left in zip(declared_original_sizes, batch["crop_top_lefts"])
+        ]).to(self._accelerator.device, dtype=self._weight_dtype)
+
+        return prompt_embeds, {"text_embeds": pooled_prompt_embeds, "time_ids": time_ids}
+
+    def train(self) -> List[EvalResult]:
+        '''Load the models, fit the adapter, save it, and evaluate what was produced.
+
+        The four stages are separate methods so that a caller -- or a test -- can observe one of
+        them. What this method promises is unchanged: it returns the evaluation records, and
+        `evaluate` is part of it rather than something the caller has to remember to run.
+        '''
         self._pre_checks()
-        t0 = time.time()
+        self._timestamp_start = time.time()
         os.makedirs(self.output_dir, exist_ok=True)
 
         set_seed(self.seed)
@@ -319,16 +604,15 @@ class UnlearnerLora(Unlearner):
 
         # Load scheduler, tokenizer and models
         self._hook_before_load_model()
-        self._noise_scheduler = DDPMScheduler.from_pretrained(self.model_name_or_path, subfolder="scheduler")
-        self._tokenizer = CLIPTokenizer.from_pretrained(self.model_name_or_path, subfolder="tokenizer")
-        self._text_encoder = CLIPTextModel.from_pretrained(self.model_name_or_path, subfolder="text_encoder")
-        self._vae = AutoencoderKL.from_pretrained(self.model_name_or_path, subfolder="vae")
-        self._unet = UNet2DConditionModel.from_pretrained(self.model_name_or_path, subfolder="unet")
+        self._load_models()
         assert self._noise_scheduler is not None
         assert self._tokenizer is not None
         assert self._text_encoder is not None
         assert self._vae is not None
         assert self._unet is not None
+        if self._is_xl:
+            assert self._tokenizer_2 is not None
+            assert self._text_encoder_2 is not None
 
         # freeze parameters of models to save more memory
         self._unet.requires_grad_(False)
@@ -336,11 +620,57 @@ class UnlearnerLora(Unlearner):
         self._text_encoder.requires_grad_(False)
 
         self._unet.to(self._accelerator.device, dtype=self._weight_dtype)
-        self._vae.to(self._accelerator.device, dtype=self._weight_dtype)
+        self._vae.to(self._accelerator.device, dtype=self._vae_dtype())
         self._text_encoder.to(self._accelerator.device, dtype=self._weight_dtype)
 
-        t1 = time.time()
+        if self._is_xl:
+            self._text_encoder_2.requires_grad_(False)
+            self._text_encoder_2.to(self._accelerator.device, dtype=self._weight_dtype)
+
+        self._timestamp_models_loaded = time.time()
         self._train_forget_dataloader, self._train_retain_dataloader = self._prepare_dataloaders()
+        assert self._train_forget_dataloader is not None
+        assert self._train_retain_dataloader is not None
+
+        self._fit()
+
+        self._accelerator.wait_for_everyone()
+        if self._accelerator.is_main_process:
+            self._save_loss_history()
+            self._save_lora_layers()
+
+        del self._unet
+        del self._noise_scheduler
+        del self._tokenizer
+        del self._text_encoder
+        del self._vae
+        if self._is_xl:
+            del self._tokenizer_2
+            del self._text_encoder_2
+        device_utils.empty_cache()
+
+        eval_results = self.evaluate()
+
+        self._end_training()
+
+        logger.info('Training completed successfully =D')
+
+        # TODO: merging the lora the with model isn't supported
+        # Merge is tricky with diffusers, see https://github.com/huggingface/diffusers/issues/2900
+        # def merge(self, model):
+
+        return eval_results
+
+    def _fit(self) -> None:
+        '''Attach the adapter, build the optimizer and run the training loop.
+
+        Everything here operates on the models `_load_models` has already put on the device, and
+        leaves the trained adapter in `_unet`; saving it is the caller's job. This is the seam a
+        one-step training test needs: it is the whole of what training computes, and none of the
+        loading or evaluation around it.
+        '''
+        assert self._accelerator is not None
+        assert self._unet is not None
         assert self._train_forget_dataloader is not None
         assert self._train_retain_dataloader is not None
 
@@ -377,9 +707,14 @@ class UnlearnerLora(Unlearner):
 
         self._hook_after_lora_init()
 
-        self._lora_layers = filter(lambda p: p.requires_grad, self._unet.parameters())
-        logger.info(f"Number of lora layers: {len(list(filter(lambda p: p.requires_grad, self._unet.parameters())))}")  # I think this _has_ to be recalculated, even if it looks ugly, not sure
-        # [x for x in self._lora_layers]
+        # A list, not a filter. The optimizer below iterates whatever it is given in order to build
+        # its parameter group, which exhausts a generator -- and the same object is handed to
+        # clip_grad_norm_ on every step, which then sees no parameters and clips nothing. Measured
+        # before this was a list: gradient 1000.0 stayed 1000.0 through a clip at max_grad_norm 5.0,
+        # reported total norm 0.0, against norm 4472.14 and gradient 0.224 for the identical call
+        # given a list.
+        self._lora_layers = [p for p in self._unet.parameters() if p.requires_grad]
+        logger.info(f"Number of lora layers: {len(self._lora_layers)}")
 
         if self.gradient_checkpointing:
             self._unet.enable_gradient_checkpointing()
@@ -451,13 +786,15 @@ class UnlearnerLora(Unlearner):
                 )
         self.num_train_epochs = math.ceil(self.max_train_steps / num_update_steps_per_epoch)  # Recalculate our number of training epochs
 
+        self._assert_save_epochs_within_training()
+
         # Initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
         if self._accelerator.is_main_process:
             self._accelerator.init_trackers("text2image-fine-tune", config={k: v for k, v in self.model_dump().items() if isinstance(v, (str, float, int, type(None)))})
 
         # Train!
-        t2 = time.time()
+        self._timestamp_training_started = time.time()
         total_batch_size = self.per_device_train_batch_size * self._accelerator.num_processes * self.gradient_accumulation_steps
 
         logger.info("***** Running training *****")
@@ -505,7 +842,7 @@ class UnlearnerLora(Unlearner):
             disable=not self._accelerator.is_local_main_process,  # Only show the progress bar once on each machine.
         )
 
-        torch.cuda.reset_peak_memory_stats()
+        device_utils.reset_peak_memory_stats()
         self._peak_mem = 0
 
         for epoch in range(first_epoch, self.num_train_epochs):
@@ -514,7 +851,19 @@ class UnlearnerLora(Unlearner):
             train_loss_forget = 0.0  # TODO: plot graph of losses after training
             train_loss_retain = 0.0
             for step, batch_forget in enumerate(self._train_forget_dataloader):  # type: ignore
-                batch_retain = next(iter(self._train_retain_dataloader))
+                # `next(iter(loader))` would build a NEW iterator on every step and therefore
+                # always hand back the first batch of a freshly shuffled pass -- sampling the retain
+                # set with replacement rather than traversing it. Measured on a 20-item stand-in:
+                # 13 distinct items over five such calls, against 20 when one iterator is advanced.
+                # For the people task (5 forget images, 200 epochs, 495 retain images) that left
+                # about 13 % of the retain set, roughly 65 images, expected never to be seen at all.
+                if self._train_retain_iterator is None:
+                    self._train_retain_iterator = iter(self._train_retain_dataloader)
+                try:
+                    batch_retain = next(self._train_retain_iterator)
+                except StopIteration:
+                    self._train_retain_iterator = iter(self._train_retain_dataloader)
+                    batch_retain = next(self._train_retain_iterator)
                 min_length = min(len(batch_forget["pixel_values"]), len(batch_retain["pixel_values"]))
                 batch_forget["pixel_values"] = batch_forget["pixel_values"][:min_length]
                 batch_retain["pixel_values"] = batch_retain["pixel_values"][:min_length]
@@ -528,6 +877,20 @@ class UnlearnerLora(Unlearner):
                 batch_forget["input_ids"] = batch_forget["input_ids"].to(self._accelerator.device)
                 batch_retain["input_ids"] = batch_retain["input_ids"].to(self._accelerator.device)
 
+                if self._is_xl:
+                    # The same truncation and device placement for what Stable Diffusion XL adds to
+                    # a batch, so that the second half of the conditioning stays aligned with the
+                    # images it describes. As with input_ids above, the forget batch comes off a
+                    # prepared dataloader and is already on the device; the retain batch is not.
+                    # A dataloader that does not provide them is reported by _encode_conditioning,
+                    # which names the missing field and the trainer that owns the dataloader.
+                    for batch in (batch_forget, batch_retain):
+                        if "input_ids_2" in batch:
+                            batch["input_ids_2"] = batch["input_ids_2"][:min_length].to(self._accelerator.device)
+                        for key in ("original_sizes", "crop_top_lefts"):
+                            if key in batch:
+                                batch[key] = batch[key][:min_length]
+
                 with self._accelerator.accumulate(self._unet):
                     loss_forget, loss_retain = self._train_one_batch(batch_forget, batch_retain)
                     # Gather the losses across all processes for logging (if we use distributed training).
@@ -540,6 +903,13 @@ class UnlearnerLora(Unlearner):
                     global_step += 1
                     self._accelerator.log({"train_loss_forget": train_loss_forget}, step=global_step)
                     self._accelerator.log({"train_loss_retain": train_loss_retain}, step=global_step)
+                    self._loss_history.append({
+                        "step": global_step,
+                        "epoch": epoch,
+                        "loss_forget": train_loss_forget,
+                        "loss_retain": train_loss_retain,
+                        "learning_rate": self._lr_scheduler.get_last_lr()[0],
+                    })
                     train_loss_forget = 0.0
                     train_loss_retain = 0.0
 
@@ -577,7 +947,7 @@ class UnlearnerLora(Unlearner):
                                 get_peft_model_state_dict(unwrapped_unet)
                             )
 
-                            StableDiffusionPipeline.save_lora_weights(
+                            self._lora_pipeline_class().save_lora_weights(
                                 save_directory=save_path,
                                 unet_lora_layers=unet_lora_state_dict,
                                 safe_serialization=True,
@@ -606,18 +976,25 @@ class UnlearnerLora(Unlearner):
                     self._images.update(log_validation(pipeline, self._accelerator, epoch, self.num_validation_images, self.validation_prompt, self.seed))
 
                     del pipeline
-                    torch.cuda.empty_cache()
+                    device_utils.empty_cache()
 
-        self._accelerator.wait_for_everyone()
-        if self._accelerator.is_main_process:
-            self._save_lora_layers()
+                self._last_epoch = epoch
 
-        del self._unet
-        del self._noise_scheduler
-        del self._tokenizer
-        del self._text_encoder
-        del self._vae
-        torch.cuda.empty_cache()
+                if epochs_to_save(self.save_lora_at_epochs, epoch + 1):
+                    # epoch is 0-based; save_lora_at_epochs is 1-based. On resume, epochs before
+                    # first_epoch are never entered by this loop, so they are not re-saved.
+                    self._save_lora_layers_to(os.path.join(self.output_dir, f"epoch-{epoch + 1}"))
+
+    def evaluate(self) -> List[EvalResult]:
+        '''Score the saved adapter against the base model, and write the model card.
+
+        Called by `train`, and callable on its own. `UCE` exposes the same method, so the two
+        families of unlearner agree on where evaluation lives.
+        '''
+        assert self._accelerator is not None
+
+        # A non-main process has nothing to evaluate and no card to write.
+        eval_results: List[EvalResult] = []
 
         ###############################
         # Post training evaluation
@@ -630,7 +1007,7 @@ class UnlearnerLora(Unlearner):
 
         # Final inference
         if self._accelerator.is_main_process:
-            t3 = time.time()
+            self._timestamp_training_finished = time.time()
             if self.validation_prompt is not None:
                 pipeline = DiffusionPipeline.from_pretrained(
                     self.model_name_or_path,
@@ -639,9 +1016,9 @@ class UnlearnerLora(Unlearner):
                     torch_dtype=self._weight_dtype,
                 )
                 pipeline.load_lora_weights(self._output_dir_lora)  # load attention processors
-                self._images.update(log_validation(pipeline, self._accelerator, epoch, self.num_validation_images, self.validation_prompt, self.seed, is_final_validation=True))  # run inference
+                self._images.update(log_validation(pipeline, self._accelerator, self._last_epoch, self.num_validation_images, self.validation_prompt, self.seed, is_final_validation=True))  # run inference
                 del pipeline
-                torch.cuda.empty_cache()
+                device_utils.empty_cache()
 
             assert self._output_dir_lora is not None
             pipeline_original, pipeline_learned, pipeline_unlearned = unlearn_lora(self.model_name_or_path, self._output_dir_lora, device=self._accelerator.device, weight_name=self._lora_weight_name, requires_inversion=self.is_lora_negated)
@@ -657,6 +1034,7 @@ class UnlearnerLora(Unlearner):
                 prompts_retain=self.final_eval_prompts_retain,
                 metric_clip=MetricImageTextSimilarity(metrics=['clip']),
                 compute_runtimes=self.compute_runtimes,
+                plot_show=self.plot_show,
             )
 
             eval_results, images2 = evaluator.evaluate()
@@ -674,25 +1052,25 @@ class UnlearnerLora(Unlearner):
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime init seconds (~↓)',
-                    metric_value=t1 - t0,
+                    metric_value=self._timestamp_models_loaded - self._timestamp_start,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime data loading seconds (~↓)',
-                    metric_value=t2 - t1,
+                    metric_value=self._timestamp_training_started - self._timestamp_models_loaded,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime training seconds (↓)',
-                    metric_value=t3 - t2,
+                    metric_value=self._timestamp_training_finished - self._timestamp_training_started,
                     **metric_common_attributes,  # type: ignore
                 ))
                 eval_results.append(EvalResult(
                     metric_type='runtime',
                     metric_name=f'Runtime eval seconds (~↓)',
-                    metric_value=t4 - t3,
+                    metric_value=t4 - self._timestamp_training_finished,
                     **metric_common_attributes,  # type: ignore
                 ))
 
@@ -733,15 +1111,6 @@ class UnlearnerLora(Unlearner):
                     commit_message="End of training",
                     ignore_patterns=["step_*", "epoch_*"],
                 )
-
-        self._accelerator.end_training()
-
-        logger.info('Training completed successfully =D')
-
-        # TODO: merging the lora the with model isn't supported
-        # Merge is tricky with diffusers, see https://github.com/huggingface/diffusers/issues/2900
-        # def merge(self, model):
-
         return eval_results
 
     @abstractmethod
@@ -822,11 +1191,11 @@ class UnlearnerLoraDirect(UnlearnerLora):
 
     def _train_one_batch(self, batch_forget, batch_retain):
         # Convert images to latent space
-        latents_forget = self._vae.encode(batch_forget["pixel_values"].to(dtype=self._weight_dtype)).latent_dist.sample()
-        latents_forget = latents_forget * self._vae.config.scaling_factor
+        latents_forget = self._vae.encode(batch_forget["pixel_values"].to(dtype=self._vae_dtype())).latent_dist.sample()
+        latents_forget = (latents_forget * self._vae.config.scaling_factor).to(dtype=self._weight_dtype)
 
-        latents_retain = self._vae.encode(batch_retain["pixel_values"].to(dtype=self._weight_dtype)).latent_dist.sample()
-        latents_retain = latents_retain * self._vae.config.scaling_factor
+        latents_retain = self._vae.encode(batch_retain["pixel_values"].to(dtype=self._vae_dtype())).latent_dist.sample()
+        latents_retain = (latents_retain * self._vae.config.scaling_factor).to(dtype=self._weight_dtype)
 
         # Sample noise that we'll add to the latents
         noise_forget = torch.randn_like(latents_forget)
@@ -853,8 +1222,8 @@ class UnlearnerLoraDirect(UnlearnerLora):
         noisy_latents_retain = self._noise_scheduler.add_noise(latents_retain, noise_forget, timesteps_forget)
 
         # Get the text embedding for conditioning
-        encoder_hidden_states_forget = self._text_encoder(batch_forget["input_ids"], return_dict=False)[0]
-        encoder_hidden_states_retain = self._text_encoder(batch_retain["input_ids"], return_dict=False)[0]
+        encoder_hidden_states_forget, added_cond_kwargs_forget = self._encode_conditioning(batch_forget, "forget")
+        encoder_hidden_states_retain, added_cond_kwargs_retain = self._encode_conditioning(batch_retain, "retain")
 
         # Get the target for loss depending on the prediction type
         if self.prediction_type is not None:
@@ -871,8 +1240,8 @@ class UnlearnerLoraDirect(UnlearnerLora):
             raise ValueError(f"Unknown prediction type {self._noise_scheduler.config.prediction_type}")
 
         # Predict the noise residual and compute loss
-        model_pred_forget = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, return_dict=False)[0]  # type: ignore
-        model_pred_retain = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, return_dict=False)[0]  # type: ignore
+        model_pred_forget = self._unet(noisy_latents_forget, timesteps_forget, encoder_hidden_states_forget, added_cond_kwargs=added_cond_kwargs_forget, return_dict=False)[0]  # type: ignore
+        model_pred_retain = self._unet(noisy_latents_retain, timesteps_retain, encoder_hidden_states_retain, added_cond_kwargs=added_cond_kwargs_retain, return_dict=False)[0]  # type: ignore
 
         loss_forget = F.mse_loss(model_pred_forget.float(), target_forget.float(), reduction="mean")  # This is a Tensor of shape [], aka is a float
         loss_retain = F.mse_loss(model_pred_retain.float(), target_retain.float(), reduction="mean")

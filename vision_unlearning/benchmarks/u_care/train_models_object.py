@@ -9,7 +9,7 @@ import argparse
 sys.path.append('..')
 sys.path.append('../../vision-unlearning')
 
-from unlearner_lora_distillation_UC import UnlearnerLoraDistillation_UC
+from unlearner_lora_distillation_UC import UnlearnerSpare_UC
 
 from vision_unlearning.utils.logger import get_logger, setup_loggers
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethodSimple
@@ -166,7 +166,7 @@ def train_model_object(model_name_or_path,
         
     logger.info(hyperparameters)
 
-    unlearner = UnlearnerLoraDistillation_UC(
+    unlearner = UnlearnerSpare_UC(
         model_name_or_path=model_name_or_path,
         dataset_forget_name=dataset_root,
         dataset_retain_name=dataset_root,
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         prog='train_models_object',
-        description='Generate unlearned models with FADE for UnlearnCanvaEval')
+        description='Generate unlearned models with SPARE for UnlearnCanvaEval')
     parser.add_argument('--pretrained_model_base_path', type=str, default="assets/data/sd", required=False, help="Name or path to trained model that should be modified.")
     parser.add_argument('--dataset_base_path', type=str, default="assets/data/forget_classes", required=False, help="Root path to the dataset, where the json files with retain and forget info can be found.")
     parser.add_argument('--output_dir', type=str, default="assets/models", required=False, help="Folder to save unlearned models.")
