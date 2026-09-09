@@ -23,6 +23,10 @@ from vision_unlearning.utils import device as device_utils
 
 ESD_WEIGHTS_FILENAME = 'esd_sd_weights.safetensors'
 
+#: Periodic training state, written so a long run that dies is resumed instead of repeated.
+#: Not the deliverable -- the deliverable is ESD_WEIGHTS_FILENAME, written once at the end.
+ESD_TRAINING_STATE_FILENAME = 'esd_training_state.pt'
+
 #: Module classes whose parameters may be selected for training. Mirrors the reference
 #: implementation's own set; the two ``LoRACompatible*`` names are diffusers' legacy aliases and are
 #: included so the selection does not silently shrink on an older checkpoint.
@@ -149,6 +153,19 @@ class ESD(Unlearner):
     output_dir: str = Field(
         default='../esd_models',
         description='Output directory for model predictions and checkpoints.'
+    )
+    checkpoint_every_steps: Optional[int] = Field(
+        default=None,
+        description='Write the full training state every N optimizer steps, so an interrupted run resumes '
+                    'from the last one instead of starting over. None disables it. This costs one write of '
+                    'the trained tensors plus the optimizer moments per checkpoint and nothing else; a run '
+                    'short enough to repeat cheaply does not need it.'
+    )
+    resume_from_training_state: bool = Field(
+        default=False,
+        description='On start, continue from the training state in output_dir if one is present. When it is '
+                    'absent this is a no-op and training starts from step 0, so it is safe to leave on for a '
+                    'run that may need to be restarted.'
     )
     device: str = 'cuda:0'
     compute_runtimes: bool = Field(True, description='Whether to compute the runtimes of the training, for evaluation purposes.')
@@ -323,6 +340,100 @@ class ESD(Unlearner):
         pipeline.unet.requires_grad_(False)
         return cast(_DiffusionPipelineComponents, pipeline)
 
+    def _training_state_path(self) -> str:
+        '''Where the periodic training state lives. One file, overwritten, never accumulated.'''
+        return os.path.join(self.output_dir, ESD_TRAINING_STATE_FILENAME)
+
+    def _save_training_state(
+        self,
+        completed_steps: int,
+        trainable: Dict[str, torch.nn.Parameter],
+        optimizer: torch.optim.Optimizer,
+        depth_sampler: random.Random,
+    ) -> None:
+        '''Write everything needed to continue this run exactly, atomically.
+
+        Four things are needed and all four are here: the trained tensors, the optimizer moments
+        (Adam carries per-parameter state, so dropping it would change the trajectory at the resume
+        point), the depth sampler's own state (it draws both the depth and the sampling noise, so
+        continuing it is what keeps the remaining steps the steps this run would have taken), and
+        the number of steps already completed.
+
+        Written to a temporary name and renamed into place, because the reason this method exists is
+        that the process gets killed without warning -- and a half-written state file would be worse
+        than none, since it would be loaded on the next start.
+        '''
+        os.makedirs(self.output_dir, exist_ok=True)
+        state = {
+            'completed_steps': completed_steps,
+            'total_steps': self._total_steps(),
+            'tensors': {name: parameter.detach().cpu().contiguous()
+                        for name, parameter in trainable.items()},
+            'optimizer': optimizer.state_dict(),
+            'depth_sampler': depth_sampler.getstate(),
+            'seed': self.seed,
+            'learning_rate': self.learning_rate,
+        }
+        final_path = self._training_state_path()
+        temporary_path = final_path + '.partial'
+        torch.save(state, temporary_path)
+        os.replace(temporary_path, final_path)
+        logger.info(f'ESD training state written at step {completed_steps}: {final_path}')
+
+    def _load_training_state(
+        self,
+        trainable: Dict[str, torch.nn.Parameter],
+        optimizer: torch.optim.Optimizer,
+        depth_sampler: random.Random,
+    ) -> int:
+        '''Restore a previous run into the live objects and return the step to continue from.
+
+        Returns 0 when there is nothing to resume, which is the ordinary case. Refuses to resume
+        across a changed configuration: the seed and the learning rate decide the trajectory, so
+        continuing a state written under different ones would silently produce a run that matches
+        neither configuration.
+        '''
+        state_path = self._training_state_path()
+        if not self.resume_from_training_state or not os.path.exists(state_path):
+            return 0
+
+        state = torch.load(state_path, map_location='cpu', weights_only=False)
+        for field_name in ('seed', 'learning_rate'):
+            recorded = state.get(field_name)
+            current = getattr(self, field_name)
+            if recorded != current:
+                raise ValueError(
+                    f'Refusing to resume: the saved training state has {field_name}={recorded!r} and this '
+                    f'run has {field_name}={current!r}. These decide the trajectory, so resuming across a '
+                    f'change would produce a run matching neither configuration. Delete {state_path} to '
+                    f'start over.'
+                )
+        if state['total_steps'] != self._total_steps():
+            raise ValueError(
+                f"Refusing to resume: the saved training state was for {state['total_steps']} optimizer "
+                f'steps and this run asks for {self._total_steps()}. Delete {state_path} to start over.'
+            )
+
+        missing = set(trainable) - set(state['tensors'])
+        unexpected = set(state['tensors']) - set(trainable)
+        if missing or unexpected:
+            raise ValueError(
+                f'Refusing to resume: the saved training state does not match the selected tensors '
+                f'({len(missing)} missing, {len(unexpected)} unexpected). This happens when train_method '
+                f'or the base checkpoint changed. Delete {state_path} to start over.'
+            )
+
+        with torch.no_grad():
+            for name, parameter in trainable.items():
+                parameter.copy_(state['tensors'][name].to(parameter.device, parameter.dtype))
+        optimizer.load_state_dict(state['optimizer'])
+        depth_sampler.setstate(state['depth_sampler'])
+        completed_steps = int(state['completed_steps'])
+        logger.info(
+            f'ESD resuming from {state_path}: {completed_steps} of {self._total_steps()} steps already done.'
+        )
+        return completed_steps
+
     def _fit(self, pipeline: _DiffusionPipelineComponents) -> Dict[str, torch.Tensor]:
         '''Run the optimization and return the trained tensors, keyed by their denoiser parameter name.
 
@@ -353,7 +464,11 @@ class ESD(Unlearner):
         depth_sampler = random.Random(self.seed)
 
         total_steps = self._total_steps()
-        for step in range(total_steps):
+        # Restores the tensors, the optimizer moments and the sampler into the objects built above,
+        # and returns 0 when there is nothing to resume, which is the ordinary case.
+        first_step = self._load_training_state(trainable, optimizer, depth_sampler)
+
+        for step in range(first_step, total_steps):
             optimizer.zero_grad(set_to_none=True)
 
             depth = depth_sampler.randint(0, self.num_inference_steps - 1)
@@ -380,6 +495,11 @@ class ESD(Unlearner):
                 optimizer.step()
 
             logger.info(f'ESD step {step + 1}/{total_steps}: loss {loss.item():.6f}, depth {depth}')
+
+            # Written after the step is logged, so the state on disk is always a state whose step
+            # appears in the log -- the two records agree rather than being one apart.
+            if self.checkpoint_every_steps is not None and (step + 1) % self.checkpoint_every_steps == 0:
+                self._save_training_state(step + 1, trainable, optimizer, depth_sampler)
 
         return {name: parameter.detach().cpu().contiguous() for name, parameter in trainable.items()}
 
