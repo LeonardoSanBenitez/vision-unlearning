@@ -9,8 +9,7 @@ import pytest
 # Test files that import torch/diffusers at module level (directly or transitively).
 # These fail at *collection* time in the lite tier (no torch installed), before any
 # marker is ever evaluated -- so a `heavy` marker cannot guard this boundary, only an
-# explicit collect_ignore list can. See CONTRIBUTING.md Section 6 and
-# PLAN-TASK-2026-07-01-TestTooling.md Workstream B2.
+# explicit collect_ignore list can. See CONTRIBUTING.md Section 6.
 #
 # A NEW heavy test file that is not added here will fail import in the lite CI job
 # (.github/workflows/lite.yml) with a ModuleNotFoundError, forcing the author to either
