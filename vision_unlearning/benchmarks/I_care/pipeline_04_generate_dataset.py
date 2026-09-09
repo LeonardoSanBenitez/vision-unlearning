@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Literal, Optional
 import dotenv
 import torch
 
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
 
 
@@ -184,6 +185,37 @@ def run_baseline(
 # ---------------------------------------------------------------------------
 # Normal mode
 # ---------------------------------------------------------------------------
+
+def _generate_baseline_pass(
+    model_base_name: str,
+    prompts: List[str],
+    output_path: str,
+    filenames: List[str],
+    batch_size: int,
+) -> None:
+    """Generate the `off` images: the unmodified base model, for every method, unconditionally.
+
+    This exists as its own function so that it cannot quietly acquire a per-method branch again. It
+    used to be one arm of a test on the method name, and the closed-form method's arm built its
+    *edited* pipeline on both the `on` and the `off` pass -- so that method's baseline images depicted
+    the edited model. The adapter arm happened to be correct because it passed `lora_name=None` here.
+
+    A baseline image must not depend on the method: it is what the generator produced before any
+    unlearning, and it is what every `on` image is compared against.
+    """
+    from vision_unlearning.utils.data_generation import generate_dataset  # noqa: PLC0415
+
+    generate_dataset(
+        model_base_name=model_base_name,
+        lora_name=None,
+        model_pipeline=None,
+        prompts=prompts,
+        output_path=output_path,
+        filenames=filenames,
+        batch_size=batch_size,
+        lora_requires_inversion=False,
+    )
+
 
 def run_normal(
     task: Literal["scenes", "breeds", "people"],
@@ -377,7 +409,10 @@ def run_normal(
         else:
             raise NotImplementedError(f"Unknown method: {method}")
 
-        if replace_if_exists or not exists_unlearned_model(task, method, num_train_epochs, target):
+        artifact_filename = ALGORITHM_REGISTRY[method].artifact_filename
+        if replace_if_exists or not exists_unlearned_model(
+            task, method, num_train_epochs, target, artifact_filename
+        ):
             logger.info("Overwriting the entity '%s' by '%s'", target, target_overwrite)
             logger.info("%s", hyperparameters)
             eval_results = unlearner.train()
@@ -465,9 +500,21 @@ def run_normal(
             for seed in seeds:
                 for lora_state in ["on", "off"]:
                     filenames = [f"{lora_state}_{seed}_{p}.png" for p in prompts_gen]
-                    if method == "uce":
-                        from vision_unlearning.unlearner import UCE as _UCE
-                        model_pipeline = _UCE.get_pipeline_from_modified_weights(
+                    artifact_kind = ALGORITHM_REGISTRY[method].artifact_kind
+                    if lora_state == "off":
+                        _generate_baseline_pass(
+                            model_base_name=model_base_name,
+                            prompts=prompts_gen,
+                            output_path=generated_dataset_output_path,
+                            filenames=filenames,
+                            batch_size=batch_size_inference,
+                        )
+                    elif artifact_kind == "partial_weights":
+                        from vision_unlearning.unlearner.loaders import get_partial_weights_loader
+                        load_pipeline = get_partial_weights_loader(
+                            ALGORITHM_REGISTRY[method].artifact_filename
+                        )
+                        model_pipeline = load_pipeline(
                             pretrained_model_name_or_path=model_base_name,
                             device=device,
                             output_dir=output_dir,
@@ -483,16 +530,15 @@ def run_normal(
                             lora_requires_inversion=False,
                         )
                     else:
-                        lora_name = output_dir if (lora_state == "on") else None
                         generate_dataset(
                             model_base_name=model_base_name,
-                            lora_name=lora_name,
+                            lora_name=output_dir,
                             model_pipeline=None,
                             prompts=prompts_gen,
                             output_path=generated_dataset_output_path,
                             filenames=filenames,
                             batch_size=batch_size_inference,
-                            lora_requires_inversion=(method == "munba"),
+                            lora_requires_inversion=(artifact_kind == "lora_adapter_inverted"),
                         )
                     gc.collect()
                     torch.cuda.empty_cache()

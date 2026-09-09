@@ -205,7 +205,7 @@ class TestGeneratedDatasetFolderPath(unittest.TestCase):
     def test_entity_dataset_folder_path(self) -> None:
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400, base_folder='assets',
+            method='distil', num_train_epochs=400, base_folder='assets', artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         self.assertEqual(
             ds.folder_path,
@@ -215,7 +215,7 @@ class TestGeneratedDatasetFolderPath(unittest.TestCase):
     def test_entity_dataset_epochs_zero_padded(self) -> None:
         ds = GeneratedDataset(
             task='breeds', target='poodle',
-            method='uce', num_train_epochs=0, base_folder='assets',
+            method='uce', num_train_epochs=0, base_folder='assets', artifact_kind='partial_weights', artifact_filename='uce_sd_weights.safetensors',
         )
         self.assertIn('_000', ds.folder_path)
 
@@ -234,7 +234,7 @@ class TestGeneratedDatasetIdentity(unittest.TestCase):
     def test_entity_dataset_is_not_baseline(self) -> None:
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400,
+            method='distil', num_train_epochs=400, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         self.assertFalse(ds.is_baseline)
 
@@ -244,11 +244,11 @@ class TestGeneratedDatasetValidation(unittest.TestCase):
 
     def test_method_without_target_raises(self) -> None:
         with self.assertRaises((ValidationError, AssertionError)):
-            GeneratedDataset(task='people', method='distil', num_train_epochs=400)
+            GeneratedDataset(task='people', method='distil', num_train_epochs=400, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors')
 
     def test_method_without_epochs_raises(self) -> None:
         with self.assertRaises((ValidationError, AssertionError)):
-            GeneratedDataset(task='people', target='Colin Powell', method='distil')
+            GeneratedDataset(task='people', target='Colin Powell', method='distil', artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors')
 
     def test_baseline_with_no_target_is_valid(self) -> None:
         ds = GeneratedDataset(task='breeds')
@@ -282,7 +282,7 @@ class TestGeneratedDatasetFilePath(unittest.TestCase):
     def test_on_file_path_entity_dataset(self) -> None:
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400, base_folder='assets',
+            method='distil', num_train_epochs=400, base_folder='assets', artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         path = ds.file_path('on', 42, 'An image of Colin Powell')
         self.assertIn('on_42_', path)
@@ -309,7 +309,7 @@ class TestGeneratedDatasetHfConfigName(unittest.TestCase):
     def test_entity_dataset_config_name(self) -> None:
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400,
+            method='distil', num_train_epochs=400, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         self.assertEqual(ds.hf_config_name, 'generated_people_Colin Powell_distil_400')
 
@@ -324,7 +324,7 @@ class TestGeneratedDatasetHfPathInRepo(unittest.TestCase):
     def test_entity_dataset_hf_path_in_repo(self) -> None:
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400,
+            method='distil', num_train_epochs=400, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         self.assertEqual(ds.hf_path_in_repo, 'datasets/generated_people_Colin Powell_distil_400')
 
@@ -377,7 +377,7 @@ class TestGeneratedDatasetExists(unittest.TestCase):
             prompts = ['An image of Colin Powell']
             ds = GeneratedDataset(
                 task='people', target='Colin Powell',
-                method='distil', num_train_epochs=400, base_folder=tmp,
+                method='distil', num_train_epochs=400, base_folder=tmp, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
             )
             # Legacy folder: both on_ and off_ present; only on_ should count
             files = [
@@ -545,7 +545,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
         """FileNotFoundError is raised when the trained model does not exist on disk."""
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400,
+            method='distil', num_train_epochs=400, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         # exists_unlearned_model will return False because the path does not exist
         # in the test environment — no patching needed.
@@ -559,7 +559,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
         with model_base_name + lora_name + lora_requires_inversion=False."""
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400,
+            method='distil', num_train_epochs=400, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         seeds = [42]
         prompts = ['An image of Colin Powell']
@@ -592,7 +592,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
         """For munba, lora_requires_inversion must be True."""
         ds = GeneratedDataset(
             task='people', target='Brad Pitt',
-            method='munba', num_train_epochs=400,
+            method='munba', num_train_epochs=400, artifact_kind='lora_adapter_inverted', artifact_filename='pytorch_lora_weights.safetensors',
         )
         seeds = [42]
         prompts = ['An image of Brad Pitt']
@@ -613,7 +613,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
         from vision_unlearning.unlearner.uce_sd_erase import UCE
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='uce', num_train_epochs=400,
+            method='uce', num_train_epochs=400, artifact_kind='partial_weights', artifact_filename='uce_sd_weights.safetensors',
         )
         seeds = [42]
         prompts = ['An image of Colin Powell']
@@ -851,7 +851,7 @@ class TestGeneratedDatasetComputeBatchSize(unittest.TestCase):
         """_compute_from_scratch passes batch_size to generate_dataset (entity dataset)."""
         ds = GeneratedDataset(
             task='people', target='Colin Powell',
-            method='distil', num_train_epochs=400,
+            method='distil', num_train_epochs=400, artifact_kind='lora_adapter', artifact_filename='pytorch_lora_weights.safetensors',
         )
         seeds = [42]
         prompts = ['An image of Colin Powell']
@@ -1224,7 +1224,7 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
             seeds = [42]
             prompts = ['An image of a griffon bruxellois dog']
             ds = GeneratedDataset(task='breeds', target='a griffon bruxellois dog',
-                                  method='uce', num_train_epochs=0, base_folder=tmp)
+                                  method='uce', num_train_epochs=0, base_folder=tmp, artifact_kind='partial_weights', artifact_filename='uce_sd_weights.safetensors')
 
             def fake_download(folder_datasets: str, dataset_repository: str,
                               dataset_config: str, token: str, path_in_repo: str = None,  # type: ignore[assignment]

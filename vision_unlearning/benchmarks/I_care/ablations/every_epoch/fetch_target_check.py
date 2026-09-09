@@ -32,13 +32,15 @@ def fetch_target_images(task: str, target_hf_name: str, epochs: int, icare_asset
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     from huggingface_hub import hf_hub_download
     from vision_unlearning.datasets.testbed import GeneratedDataset
-    from vision_unlearning.benchmarks.I_care.configuration import type_task
+    from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY, type_task
 
     task_literal = cast(type_task, task)
     prompt = f"An image of {target_hf_name}"
 
     entity_dataset = GeneratedDataset(
         task=task_literal, target=target_hf_name, method=METHOD, num_train_epochs=epochs,
+        artifact_kind=ALGORITHM_REGISTRY[METHOD].artifact_kind,
+        artifact_filename=ALGORITHM_REGISTRY[METHOD].artifact_filename,
         base_folder=icare_assets,
     )
     baseline_dataset = GeneratedDataset(task=task_literal, base_folder=icare_assets)

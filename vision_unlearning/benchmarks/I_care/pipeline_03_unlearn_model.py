@@ -31,6 +31,7 @@ from vision_unlearning.utils.logger import get_logger, setup_loggers  # noqa: E4
 from vision_unlearning.datasets import UnlearnDatasetImagenette  # noqa: E402
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple, GradientWeightingMethodMunba  # noqa: E402
 from vision_unlearning.benchmarks.I_care import check_eval_results  # noqa: E402
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY  # noqa: E402
 from vision_unlearning.datasets.testbed import (  # noqa: E402
     get_target_overwrite,
     get_unlearned_model_folder,
@@ -350,7 +351,10 @@ for index in range(index_start, index_start + max_identities):
         raise NotImplementedError()
 
 
-    if replace_if_exists or not exists_unlearned_model(task, method, num_train_epochs, target, base_folder=base_folder):
+    artifact_filename = ALGORITHM_REGISTRY[method].artifact_filename
+    if replace_if_exists or not exists_unlearned_model(
+        task, method, num_train_epochs, target, artifact_filename, base_folder=base_folder
+    ):
         logger.info(f"Overwritting the entity '{target}' by '{target_overwrite}'")
         logger.info(hyperparameters)
         eval_results = unlearner.train()
@@ -413,6 +417,8 @@ for index in range(index_start, index_start + max_identities):
             target=target_preprocessed,
             method=method,
             num_train_epochs=num_train_epochs,
+            artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+            artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
             base_folder=base_folder,
         )
         generated_dataset_output_path = ds_entity.folder_path

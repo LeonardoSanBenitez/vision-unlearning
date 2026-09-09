@@ -18,6 +18,7 @@ from vision_unlearning.datasets.testbed import (
     GeneratedDataset,
 )
 from vision_unlearning.benchmarks.I_care import get_interference_per_pair_path, save_interference_per_pair
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
 
 logger = get_logger('unlearning_analysis')
@@ -213,7 +214,11 @@ def evaluate_one(prompt, seed, plot: bool = False) -> dict:
     # TODO can this be batched?
 
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(task=task,  # type: ignore[arg-type]
+                              target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
+                              artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+                              artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
+                              base_folder=base_folder)
     out_off = Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, seed, prompt, base_folder=base_folder))  # type: ignore[arg-type]
     out_on = Image.open(ds_entity.file_path('on', seed, prompt))
 
@@ -260,7 +265,11 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
     evaluate_one() per seed.
     """
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(task=task,  # type: ignore[arg-type]
+                              target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
+                              artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+                              artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
+                              base_folder=base_folder)
     imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt, base_folder=base_folder)) for s in seeds]  # type: ignore[arg-type]
     imgs_on = [Image.open(ds_entity.file_path('on', s, prompt)) for s in seeds]
 
@@ -324,7 +333,11 @@ for index in range(index_start, index_start + max_identities):
             _ledger.record(_entity_context, status='skipped')
         continue
 
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(task=task,  # type: ignore[arg-type]
+                              target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
+                              artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+                              artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
+                              base_folder=base_folder)
     try:
         ds_entity.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
     except FileNotFoundError as exc:

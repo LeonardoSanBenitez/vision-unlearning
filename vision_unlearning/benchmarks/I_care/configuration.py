@@ -722,9 +722,18 @@ L_REGISTRY: Dict[type_l, LSpec] = {
 _L_DISPLAY_ORDER: List[type_l] = ["clip_embedding", "dino_embedding"]
 
 ALGORITHM_REGISTRY: Dict[type_unlearning_algorithm, UnlearningAlgorithmSpec] = {
-    "distil": UnlearningAlgorithmSpec(name="distil", name_pretty="spare"),
-    "munba": UnlearningAlgorithmSpec(name="munba", name_pretty="Munba"),
-    "uce": UnlearningAlgorithmSpec(name="uce", name_pretty="UCE"),
+    "distil": UnlearningAlgorithmSpec(
+        name="distil", name_pretty="spare",
+        artifact_kind="lora_adapter", artifact_filename="pytorch_lora_weights.safetensors",
+    ),
+    "munba": UnlearningAlgorithmSpec(
+        name="munba", name_pretty="Munba",
+        artifact_kind="lora_adapter_inverted", artifact_filename="pytorch_lora_weights.safetensors",
+    ),
+    "uce": UnlearningAlgorithmSpec(
+        name="uce", name_pretty="UCE",
+        artifact_kind="partial_weights", artifact_filename="uce_sd_weights.safetensors",
+    ),
 }
 _UNLEARNING_ALGORITHM_DISPLAY_ORDER: List[type_unlearning_algorithm] = ["distil", "munba", "uce"]
 
