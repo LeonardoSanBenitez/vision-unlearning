@@ -126,7 +126,7 @@ def test_the_cheap_threshold_reproduces_a_stable_rank_cut(with_ties: bool, thres
     decides. On a real denoiser there are six figures of them.
     '''
     magnitudes = _magnitudes(with_ties=with_ties)
-    built = _unlearner(mask_threshold=threshold)._build_mask(magnitudes)
+    built, _ = _unlearner(mask_threshold=threshold)._build_mask(magnitudes)
     expected = _stable_rank_mask(magnitudes, threshold)
     assert _differing(built, expected) == 0
 
@@ -141,13 +141,13 @@ def test_the_tied_case_is_not_vacuous() -> None:
 def test_the_mask_keeps_the_requested_fraction() -> None:
     magnitudes = _magnitudes()
     total = sum(int(tensor.numel()) for tensor in magnitudes.values())
-    built = _unlearner(mask_threshold=0.25)._build_mask(magnitudes)
+    built, _ = _unlearner(mask_threshold=0.25)._build_mask(magnitudes)
     assert sum(int(torch.sum(mask)) for mask in built.values()) == int(total * 0.25)
 
 
 def test_a_threshold_of_one_keeps_everything() -> None:
     magnitudes = _magnitudes()
-    built = _unlearner(mask_threshold=1.0)._build_mask(magnitudes)
+    built, _ = _unlearner(mask_threshold=1.0)._build_mask(magnitudes)
     assert all(bool(mask.all()) for mask in built.values())
 
 
@@ -155,10 +155,10 @@ def test_mutation_a_local_threshold_is_not_the_global_one() -> None:
     '''Mutation 1: rank within the trained subset instead of over every parameter.'''
     magnitudes = _magnitudes()
     unlearner = _unlearner(mask_threshold=0.5)
-    global_mask = unlearner._build_mask(magnitudes)
+    global_mask, _ = unlearner._build_mask(magnitudes)
 
     cross_only = {name: tensor for name, tensor in magnitudes.items() if 'attn2' in name}
-    local_mask = unlearner._build_mask(cross_only)
+    local_mask, _ = unlearner._build_mask(cross_only)
 
     name = 'down_blocks.0.attn2.to_k.weight'
     assert int(torch.sum(global_mask[name] != local_mask[name])) > 0
@@ -171,7 +171,7 @@ def test_mutation_keeping_the_bottom_fraction_is_a_different_mask() -> None:
     the top one, and any count-based check would pass either way.
     '''
     magnitudes = _magnitudes()
-    top = _unlearner(mask_threshold=0.25)._build_mask(magnitudes)
+    top, _ = _unlearner(mask_threshold=0.25)._build_mask(magnitudes)
 
     flat = torch.cat([tensor.flatten() for tensor in magnitudes.values()])
     cut = int(flat.numel() * 0.25)
@@ -238,8 +238,8 @@ def test_the_mask_round_trips_through_its_own_file(tmp_path: Any) -> None:
 
     magnitudes = _magnitudes()
     unlearner = _unlearner(mask_threshold=0.5, output_dir=str(tmp_path))
-    mask = unlearner._build_mask(magnitudes)
-    unlearner._save_mask(mask)
+    mask, context = unlearner._build_mask(magnitudes)
+    unlearner._save_mask(mask, context)
 
     reloaded = load_file(os.path.join(str(tmp_path), SALUN_MASK_FILENAME))
     assert set(reloaded) == set(mask)
@@ -446,3 +446,62 @@ def test_a_masked_out_parameter_does_not_move_during_a_real_fit() -> None:
         'a parameter the mask excludes moved, so the mask was applied after the step'
     moved = [name for name in trained_names if not torch.equal(trained[name], before[name].cpu())]
     assert moved, 'nothing moved at all, so the test cannot distinguish the two orderings'
+
+
+# ---------------------------------------------------------------- the restricted mask
+#
+# The mask is only ever used to multiply the gradients of the trained tensors, so only those are
+# materialised. The saving is not cosmetic: on Stable Diffusion 1.4 the full mask is 860 MB per
+# session, which a 300-session campaign would turn into 258 GB of tensors that multiply gradients no
+# optimizer steps. A real run failed writing it, which is how this was found.
+#
+# The danger in restricting is that it silently changes the mask, in two ways that a count would not
+# reveal: by ranking within the subset instead of globally, and by mis-accounting the ties consumed
+# by tensors that are not materialised.
+
+def test_restricting_does_not_change_which_elements_are_kept() -> None:
+    magnitudes = _magnitudes()
+    unlearner = _unlearner(mask_threshold=0.5)
+    name = 'down_blocks.0.attn2.to_k.weight'
+
+    full, full_context = unlearner._build_mask(magnitudes)
+    restricted, restricted_context = unlearner._build_mask(magnitudes, restrict_to=[name])
+
+    assert set(restricted) == {name}
+    assert torch.equal(restricted[name], full[name])
+    assert restricted_context['global_kept'] == full_context['global_kept']
+    assert restricted_context['boundary_value'] == full_context['boundary_value']
+
+
+def test_restricting_still_accounts_for_ties_consumed_by_other_tensors() -> None:
+    '''The subtle one: a tie taken by an earlier tensor is not available to a later one.
+
+    With ties present, the shortfall above the boundary is filled in traversal order across the whole
+    model. If the restricted build skipped the tensors it is not materialising, the tensors it does
+    materialise would be handed ties that a full build had already spent, and would keep too many.
+    The fixture is quantized precisely so that this case exists.
+    '''
+    magnitudes = _magnitudes(with_ties=True)
+    unlearner = _unlearner(mask_threshold=0.5)
+    name = 'down_blocks.0.attn2.to_k.weight'  # the SECOND tensor in traversal order
+
+    full, _ = unlearner._build_mask(magnitudes)
+    restricted, _ = unlearner._build_mask(magnitudes, restrict_to=[name])
+
+    assert torch.equal(restricted[name], full[name])
+    # And the case is not vacuous: some ties must actually have been consumed before this tensor.
+    flat = torch.cat([tensor.flatten() for tensor in magnitudes.values()])
+    cut = int(flat.numel() * 0.5)
+    boundary, above = unlearner._global_threshold(magnitudes, cut)
+    assert cut - above > 0, 'no ties were consumed, so this test proves nothing'
+
+
+def test_the_context_records_the_global_cut_the_subset_came_from() -> None:
+    '''A restricted mask cannot say what it is a subset of, so the record has to.'''
+    magnitudes = _magnitudes()
+    name = 'down_blocks.0.attn2.to_k.weight'
+    _, context = _unlearner(mask_threshold=0.5)._build_mask(magnitudes, restrict_to=[name])
+
+    assert context['global_elements'] == sum(int(t.numel()) for t in magnitudes.values())
+    assert context['materialised_elements'] == magnitudes[name].numel()
+    assert context['global_kept'] > context['materialised_kept']

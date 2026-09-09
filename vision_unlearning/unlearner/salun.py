@@ -364,20 +364,37 @@ class SalUn(Unlearner):
         boundary = float(torch.tensor([low], dtype=torch.int32).view(torch.float32).item())
         return boundary, count_above(boundary)
 
-    def _build_mask(self, magnitudes: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        '''The binary mask: the top ``mask_threshold`` fraction of elements by global rank.
+    def _build_mask(
+        self, magnitudes: Dict[str, torch.Tensor], restrict_to: Optional[List[str]] = None,
+    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
+        '''The binary mask -- the top ``mask_threshold`` fraction of elements by GLOBAL rank.
+
+        ``restrict_to`` limits which parameters are materialised, NOT which take part in the ranking.
+        The boundary and the tie accounting are computed over every parameter of the denoiser either
+        way, because the threshold is a global rank and a top fraction taken within a subset is a
+        different mask. What restricting saves is memory and disk: the mask is only ever used to
+        multiply the gradients of the trained tensors, so on Stable Diffusion 1.4 at ``xattn`` the
+        useful part is 44 million elements rather than 860 million, and storing all of them cost
+        860 MB per session -- 258 GB over a 300-session campaign, for tensors that multiply gradients
+        no optimizer ever steps.
 
         Ties at the boundary are real -- on this model they run to six figures -- so the shortfall
         left after keeping everything strictly above the boundary is filled by the tied elements in
-        the order the parameters are traversed, which is what makes this reproduce a stable rank cut
-        element for element rather than merely in count.
+        the order the parameters are traversed. That traversal covers ALL parameters, including the
+        ones not being materialised, because a tie consumed by an earlier tensor is not available to
+        a later one; skipping them would change which elements the restricted mask keeps.
+
+        Returns the mask and a record of how it was cut, which is what the saved file's metadata
+        carries: a mask restricted to a subset does not otherwise say what it was a subset of.
         '''
+        wanted = set(restrict_to) if restrict_to is not None else None
         total = sum(int(tensor.numel()) for tensor in magnitudes.values())
         keep = int(total * self.mask_threshold)
         boundary, above = self._global_threshold(magnitudes, keep)
         remaining = keep - above
 
         masks: Dict[str, torch.Tensor] = {}
+        kept_in_subset = 0
         for name, tensor in magnitudes.items():
             flat = (tensor > boundary).flatten()
             if remaining > 0:
@@ -386,14 +403,26 @@ class SalUn(Unlearner):
                 if take.numel() > 0:
                     flat[take] = True
                     remaining -= int(take.numel())
-            masks[name] = flat.reshape(tensor.shape)
+            if wanted is None or name in wanted:
+                masks[name] = flat.reshape(tensor.shape)
+                kept_in_subset += int(torch.sum(flat))
 
-        kept = sum(int(torch.sum(mask)) for mask in masks.values())
+        context = {
+            'threshold': self.mask_threshold,
+            'global_elements': total,
+            'global_kept': keep,
+            'boundary_value': boundary,
+            'elements_above_boundary': above,
+            'materialised_tensors': len(masks),
+            'materialised_elements': sum(int(mask.numel()) for mask in masks.values()),
+            'materialised_kept': kept_in_subset,
+        }
         logger.info(
-            f'Saliency mask keeps {kept} of {total} denoiser elements '
-            f'({100.0 * kept / total:.2f} %) at threshold {self.mask_threshold}'
+            f'Saliency mask cut at {boundary:.6e}: {keep} of {total} denoiser elements kept '
+            f'({100.0 * keep / total:.2f} %); materialised for {len(masks)} tensors, '
+            f'{kept_in_subset} of {context["materialised_elements"]} kept in them'
         )
-        return masks
+        return masks, context
 
     ##########################################
     # Training
@@ -538,7 +567,11 @@ class SalUn(Unlearner):
         forget_loader, retain_loader = self._dataloaders(mask_pipeline.tokenizer)
         t1 = time.time()
         magnitudes = self._accumulate_saliency(mask_pipeline, forget_loader)
-        mask = self._build_mask(magnitudes)
+        # Only the trained tensors' mask is ever used, so only those are materialised -- the ranking
+        # behind the threshold still covers every parameter.
+        mask, mask_context = self._build_mask(
+            magnitudes, restrict_to=self._select_parameter_names(mask_pipeline.unet)
+        )
         del magnitudes, mask_pipeline
         device_utils.empty_cache()
         t2 = time.time()
@@ -549,7 +582,7 @@ class SalUn(Unlearner):
         t3 = time.time()
 
         self._save_weights(trained_tensors)
-        self._save_mask(mask)
+        self._save_mask(mask, mask_context)
         del pipeline, mask
         device_utils.empty_cache()
 
@@ -644,18 +677,26 @@ class SalUn(Unlearner):
         )
         logger.info(f'Saved {len(tensors)} SalUn weight tensors to {self.output_dir}')
 
-    def _save_mask(self, mask: Dict[str, torch.Tensor]) -> None:
-        '''Save the saliency mask beside the weights.
+    def _save_mask(self, mask: Dict[str, torch.Tensor], context: Dict[str, Any]) -> None:
+        """Save the saliency mask beside the weights, with the cut that produced it.
 
-        Stored as uint8 rather than bool because the safetensors format has no boolean dtype.
-        '''
+        Stored as uint8 because the safetensors format has no boolean dtype. The metadata carries the
+        global cut, which the tensors alone cannot: a mask restricted to the trained parameters does
+        not say what fraction of the whole denoiser it came from.
+        """
         save_file(
             {name: tensor.to(torch.uint8).contiguous() for name, tensor in mask.items()},
             os.path.join(self.output_dir, SALUN_MASK_FILENAME),
             metadata={
                 'mask_threshold': str(self.mask_threshold),
                 'mask_precision': self.mask_precision,
+                'mask_guidance': str(self.mask_guidance),
+                'train_method': self.train_method,
                 'seed': str(self.seed),
+                'global_elements': str(context['global_elements']),
+                'global_kept': str(context['global_kept']),
+                'boundary_value': repr(context['boundary_value']),
+                'materialised_kept': str(context['materialised_kept']),
             },
         )
         logger.info(f'Saved the saliency mask ({len(mask)} tensors) to {self.output_dir}')
