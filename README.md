@@ -71,6 +71,7 @@ Even though the feasibility demonstration of the I-CARE methodology is not per s
 
 This work analyzes how unlearning one entity (the emitter) affects the performance on other closely-related entities (the receivers). Each task is defined by carefully selecting a diverse and representative set of entities (concepts that will undergo unlearning). Each entity is annotated with relevant attributes, and separately unlearned using different unlearning methods. Each unlearned model is then used to generate images for all entities, allowing fine-grained analysis of the effects caused by the unlearning process. Last but not least, all entities contain the same amount of images and were carefully selected so as to be balanced across at least 2 attributes.
 
+If you use the I-CARE methodology or its feasibility demonstration, please cite [https://arxiv.org/abs/2609.00003](https://arxiv.org/abs/2609.00003).
 
 ## Unlearn Canvas
 TODO... still under construction...
