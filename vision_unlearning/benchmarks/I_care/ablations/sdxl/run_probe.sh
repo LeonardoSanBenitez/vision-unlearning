@@ -9,7 +9,7 @@
 # Usage (from this directory):  bash run_probe.sh
 set -u
 
-PY="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+PY="${PYTHON:-python}"
 export HF_HUB_DISABLE_XET=1
 export PYTHONUNBUFFERED=1
 

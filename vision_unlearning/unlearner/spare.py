@@ -232,8 +232,8 @@ class UnlearnerSpare(UnlearnerLora):
         def add_micro_conditioning(examples, images):  # type: ignore
             '''
             Record what Stable Diffusion XL's micro-conditioning is told about each image: its size
-            before any resizing, and the offset of the crop the transforms took out of it (D6 of
-            PLAN-TASK-2026-08-12-SDXL). Recorded for both base models -- Stable Diffusion simply
+            before any resizing, and the offset of the crop the transforms took out of it.
+            Recorded for both base models -- Stable Diffusion simply
             never reads them -- so that a batch has one shape whichever checkpoint is loaded.
             '''
             examples["original_sizes"] = [(image.height, image.width) for image in images]

@@ -1,5 +1,5 @@
 '''
-S4 of PLAN-TASK-2026-08-12-SDXL: choose the training hyperparameters, on valid 768-pixel images.
+Choose the training hyperparameters, on valid 768-pixel images.
 
 Trains the target `Mark_Philippoussis` for TEN epochs at a given learning rate, adapter rank, alpha and
 forget weight, saving adapters at epochs 1, 3, 5 and 10; then renders three entities -- the target and
@@ -10,8 +10,8 @@ use, and builds a contact sheet. 15 images per run.
 
 **The hyperparameters are four command-line numbers with defaults, not a named set.** The defaults are
 the inherited Stable Diffusion 1.4 values (learning rate 6e-4, rank 16, alpha 4, forget weight 0.3),
-which is the setting the plan's methodological-transfer claim rests on: keep them and the base model is
-the only variable against the existing Stable Diffusion 1.4 curves. To try the colleague's tuned values
+which is the setting the methodological-transfer claim rests on: keep them and the base model is
+the only variable against the existing Stable Diffusion 1.4 curves. To try other tuned values
 instead, pass them:
 
     python run_schedule_probe.py --stage train --learning-rate 1e-4 --lora-r 4 --forget-weight 0.5
@@ -42,7 +42,7 @@ one where collateral damage is expected if the training works at all, one where 
 mean the training destroys everything.
 
 **Positive control, free.** The off-baselines are the base model at the frozen configuration, seed 42,
-for entities the S1 gate already generated. The report stage diffs them against
+for entities the generation check already generated. The report stage diffs them against
 `assets/campaign_seed42/off_<entity>_seed42.png` and reports the per-entity mean absolute difference.
 It must land at the cross-process reproducibility noise of about 0.0003 of 255; anything larger means
 this script is not asking for what the campaign asks for, and every number below it is about a
@@ -90,9 +90,9 @@ _DEFAULT_LORA_R = 16
 _DEFAULT_LORA_ALPHA = 4
 _DEFAULT_FORGET_WEIGHT = 0.3
 
-# The S1 off-baselines this probe's own off-baselines are checked against (see the module docstring's
+# The earlier off-baselines this probe's own off-baselines are checked against (see the module docstring's
 # positive control), and the tolerance that check applies. 0.0003 of 255 is the cross-process
-# agreement measured in `assets/verify_refactored_base.json`; 0.01 is the same slack the S1 gate used.
+# agreement measured in `assets/verify_refactored_base.json`; 0.01 is the same slack the generation check used.
 _CONTROL_DIR = _OUT / "campaign_seed42"
 _CONTROL_TOLERANCE = 0.01
 

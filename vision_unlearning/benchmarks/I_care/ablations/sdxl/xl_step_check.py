@@ -23,8 +23,8 @@ host down.
     python xl_step_check.py
 
 Writes assets/xl_step_check.json and prints every number it records. Like every check in this stage
-it prints measurements, never a verdict: the pass condition lives in the plan and in the job entry,
-not in this file's exit code.
+it prints measurements, never a verdict: the pass condition is judged by reading them,
+not by this file's exit code.
 '''
 import argparse
 import json

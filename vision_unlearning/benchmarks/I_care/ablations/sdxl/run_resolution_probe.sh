@@ -19,8 +19,8 @@ MAX_TICKS="${2:-60}"
 TICK_S="${3:-30}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning"
-PY="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+REPO_ROOT="$(cd "$HERE/../../../../.." && pwd)"
+PY="${PYTHON:-python}"
 
 free_gb () {
     "$PY" -c "import psutil; print(round(psutil.virtual_memory().available / 1024**3, 2))"

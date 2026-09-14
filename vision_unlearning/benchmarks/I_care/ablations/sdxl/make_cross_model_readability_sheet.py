@@ -1,6 +1,6 @@
-'''S1 of PLAN-TASK-2026-08-12-SDXL: can a reader compare the two models at all, at their own sizes?
+'''Can a reader compare the two models at all, at their own sizes?
 
-The two models are deliberately read at different resolutions (D3): Stable Diffusion 1.4 at 512, its
+The two models are deliberately read at different resolutions: Stable Diffusion 1.4 at 512, its
 native size, and Stable Diffusion XL at 768, the largest this card reaches. Stable Diffusion XL at
 512 renders unusable images for two seeds in five, so a common-resolution comparison would compare a
 working model against a broken one.
@@ -104,7 +104,7 @@ def main() -> None:
         "stable_diffusion_noise_floor_per_entity": {
             entity: noise_floor["per_entity"][entity] for entity in _ENTITIES},
         "stable_diffusion_noise_floor_summary": noise_floor["summary"],
-        "stable_diffusion_xl_noise_floor_at_768": "not measured yet -- plan stage S8",
+        "stable_diffusion_xl_noise_floor_at_768": "not measured yet",
         "pairs": pairs,
     }
     _RESULT.write_text(json.dumps(result, indent=2), encoding="utf-8")

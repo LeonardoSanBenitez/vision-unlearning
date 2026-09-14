@@ -1,4 +1,4 @@
-"""S1 of PLAN-TASK-2026-08-12-SDXL: the resource monitor and pre-launch headroom check.
+"""The resource monitor and pre-launch headroom check.
 
 ``ResourceMonitor`` is ported unchanged from
 ``vision_unlearning/benchmarks/I_care/ablations/every_epoch/run_demo_trajectory.py`` (the class already used by

@@ -16,8 +16,8 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning"
-PY="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+REPO_ROOT="$(cd "$HERE/../../../../.." && pwd)"
+PY="${PYTHON:-python}"
 
 cd "$HERE" || exit 3
 # tr -d strips any carriage return the interpreter's stdout translation may add; a label carrying one

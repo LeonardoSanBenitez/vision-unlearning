@@ -543,8 +543,7 @@ class TestAllowlistEntriesStillHold:
     """``_ALLOWLIST`` entries are a visible, justified exception to the fitness gate above.
 
     An allow-entry naming a module or callee that no longer exists is dead weight that
-    silently widens the gate's blind spot -- the low-footprint "reason still holds" check
-    from the plan (W-D.3).
+    silently widens the gate's blind spot -- the low-footprint "reason still holds" check.
     """
 
     def test_allowlisted_modules_are_still_gated_modules(self) -> None:

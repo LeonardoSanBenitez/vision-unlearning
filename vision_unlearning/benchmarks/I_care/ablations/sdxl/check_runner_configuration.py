@@ -1,4 +1,4 @@
-'''S1 gate of PLAN-TASK-2026-08-12-SDXL: does the campaign runner ask for the frozen configuration?
+'''Does the campaign runner ask for the frozen configuration?
 
 `run_campaign.py` was re-pointed at the configuration validated in `assets/VALIDATION_REPORT_01.md`
 (768 pixels, size micro-conditioning declared as 1024, guidance 7.5, one `generate_dataset` call per

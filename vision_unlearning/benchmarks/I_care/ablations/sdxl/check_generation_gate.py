@@ -1,4 +1,4 @@
-"""S2 of PLAN-TASK-2026-08-12-SDXL: can the shared generation function drive SDXL, and is it deterministic?
+"""Can the shared generation function drive SDXL, and is it deterministic?
 
 Three questions, each of which would be expensive to discover during the campaign, and none of which is
 answered by the feasibility probe (that probe drove ``StableDiffusionXLPipeline`` directly; the campaign drives
@@ -17,21 +17,21 @@ C6  Is generation reproducible?  ``generate_dataset`` enables ``torch.use_determ
     loaded once per image or once per stage is a factor-of-three difference in the budget, and the numbers to
     decide that are measured here.
 
-Resolution: 512x512 explicitly, per the plan's D3.  ``generate_dataset`` gained optional ``height``/``width``
-parameters for this (plan D10) -- without them SDXL falls back to its own default of 1024, which is measured
+Resolution: 512x512 explicitly.  ``generate_dataset`` gained optional ``height``/``width``
+parameters for this -- without them SDXL falls back to its own default of 1024, which is measured
 infeasible on this machine.
 
 **One pipeline per process.** Measured here, the hard way: building a second Stable Diffusion XL pipeline in a
 process that had already held one drove free system memory to 1.31 GB and the watchdog killed the run, even
 though ``del`` plus ``empty_cache`` had already returned the video memory. So the cross-reload comparison is a
 second invocation, not a fourth phase of the first, and the campaign inherits the same constraint: one
-generation process per epoch, which extends the plan's C11 (training and generation in separate processes) to
+generation process per epoch, which extends the rule that training and generation run in separate processes to
 the generation stages themselves.
 
 Run from this directory, with the GPU-capable interpreter and PYTHONPATH at the vision-unlearning repo root::
 
-    PY=".../sd-interpretability/.venv/Scripts/python.exe"
-    PYTHONPATH=/c/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning \
+    PY=python
+    PYTHONPATH=<vision-unlearning repository root> \
         HF_HUB_DISABLE_XET=1 "$PY" check_generation_gate.py --phase main
     PYTHONPATH=... HF_HUB_DISABLE_XET=1 "$PY" check_generation_gate.py --phase reload
 

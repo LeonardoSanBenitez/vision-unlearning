@@ -322,7 +322,7 @@ def test_an_unrecognised_keyword_is_an_error() -> None:
 # ---------------------------------------------------------------- the real code paths
 #
 # The tests above pin the mask construction, and a mutation run showed that they do NOT cover two of
-# the four properties gate G6a fixes: the sign and form of the guidance term, and the ordering of the
+# the four properties the tests must pin: the sign and form of the guidance term, and the ordering of the
 # mask against the optimizer step. Both were tested as patterns reproduced inside the test rather
 # than as behaviour of the methods, so a broken implementation passed them. The tests below drive
 # `_accumulate_saliency` and `_fit` themselves, against a denoiser small enough to run on the

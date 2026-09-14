@@ -19,8 +19,8 @@ WAIT_TICKS="${3:-60}"
 TICK_S="${4:-30}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning"
-PY="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+REPO_ROOT="$(cd "$HERE/../../../../.." && pwd)"
+PY="${PYTHON:-python}"
 LOG="assets/validate_generation_768.log"
 MARKER="VALIDATE_GENERATION_768_DONE"
 

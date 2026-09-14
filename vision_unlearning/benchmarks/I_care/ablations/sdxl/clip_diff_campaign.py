@@ -1,6 +1,6 @@
 '''Scores the whole Stable Diffusion XL campaign with CLIP, from the images already on disk.
 
-This is the metric layer the validation report (plan stage S9) and the figures (S10) both read. It
+This is the metric layer the validation report and the figures both read. It
 loads no Stable Diffusion XL pipeline and generates nothing: it reads `assets/campaign_seed{seed}.json`,
 opens each image, and scores it. The scoring itself -- both text conditions, and why there are two --
 is `clip_scoring.py`, which `random_ten_control.py` shares, so this file only assembles the campaign's

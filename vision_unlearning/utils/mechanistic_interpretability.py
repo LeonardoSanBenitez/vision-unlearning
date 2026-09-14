@@ -26,8 +26,6 @@ Actual fingerprint dimensionality for SD 1.4 (16 cross-attn layers):
     up[1]: 3×1280=3840, up[2]: 3×640=1920, up[3]: 3×320=960
     Total: 12480 dims  (SD1.4 has 3 CrossAttnDownBlocks, not 2)
 
-Run from: unlearning/unlearning-analysis/
-Interpreter: C:/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe
 """
 from __future__ import annotations
 

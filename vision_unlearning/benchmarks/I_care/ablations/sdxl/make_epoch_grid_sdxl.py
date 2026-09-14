@@ -1,4 +1,4 @@
-'''S10 of PLAN-TASK-2026-08-12-SDXL: the epoch-by-entity image grid for a Stable Diffusion XL campaign.
+'''The epoch-by-entity image grid for a Stable Diffusion XL campaign.
 
 Rows are the off-baseline followed by every saved checkpoint; columns are the entities, the forget
 target pinned to column 0 and the rest ordered by their `clip_diff` at the last checkpoint, most

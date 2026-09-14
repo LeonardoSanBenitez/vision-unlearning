@@ -21,8 +21,7 @@ jobs:
       # here silently drifted to Poetry 2.x while Docker stayed on 1.8.5 -- Poetry's
       # lock-file format/content-hash changed between major versions, so CI started
       # rejecting a perfectly valid Docker-generated poetry.lock with "pyproject.toml
-      # changed significantly since poetry.lock was last generated" (discovered
-      # 2026-07-02, PLAN-TASK-2026-07-01-TestTooling.md).
+      # changed significantly since poetry.lock was last generated".
       - run: pip install "poetry~=1.2"
       - name: Cache Poetry dependencies
         uses: actions/cache@v4

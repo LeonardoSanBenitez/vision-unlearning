@@ -1,4 +1,4 @@
-'''S10 of PLAN-TASK-2026-08-12-SDXL: the trajectories behind the epoch grid, one line per entity.
+'''The trajectories behind the epoch grid, one line per entity.
 
 The grid shows what the images look like; this shows the same numbers as curves, which is what makes
 the TIMING visible -- when the target leaves the noise floor, which receivers follow it, and whether

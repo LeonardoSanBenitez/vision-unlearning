@@ -1,4 +1,4 @@
-'''S6.5 of PLAN-TASK-2026-08-12-SDXL: the random-ten control, measured exactly like the campaign.
+'''The random-ten control, measured exactly like the campaign.
 
 The campaign measures ten entities that were chosen *because* Stable Diffusion 1.4 damaged them (the
 target plus its nine strongest receivers). That selection makes one reading impossible: if those nine
@@ -48,7 +48,7 @@ from watchdog import ResourceMonitor, check_headroom
 
 # The drawing seed is a module constant so the control set is reproducible from the repository alone,
 # and it is written into the artifact beside the names it produced. 20260812 is the date the control
-# was approved in the plan; any fixed integer would do, and the point is only that it is not chosen
+# was designed; any fixed integer would do, and the point is only that it is not chosen
 # after seeing which entities came out.
 _DRAW_SEED = 20260812
 _N_CONTROL = 10

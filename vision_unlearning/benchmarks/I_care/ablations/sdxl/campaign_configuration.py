@@ -1,21 +1,21 @@
 '''
 The one place the Stable Diffusion XL ablation's frozen configuration is written down.
 
-Everything here is consumed by both `run_campaign.py` (plan stages S5-S7, the 200-epoch campaign) and
-`run_schedule_probe.py` (plan stage S4, the hyperparameter probe). It exists because those two must
-agree by construction: S4 chooses training hyperparameters by looking at images, and that choice only
-transfers to S5 if the probe trained and rendered under exactly what the campaign will train and
+Everything here is consumed by both `run_campaign.py` (the 200-epoch campaign) and
+`run_schedule_probe.py` (the hyperparameter probe). It exists because those two must
+agree by construction: the probe chooses training hyperparameters by looking at images, and that choice
+only transfers to the campaign if the probe trained and rendered under exactly what the campaign will train and
 render under. Two copies of the same constants would let them drift silently, and the drift would
 only be visible as a result nobody could reproduce.
 
 Three groups of facts live here:
 
-* **The frozen generation configuration** of plan section 2.1 -- 768 pixels, size micro-conditioning
+* **The frozen generation configuration** -- 768 pixels, size micro-conditioning
   declared as 1024, guidance 7.5, and the card settings this machine needs at that resolution. Fixed
-  by the user's 2026-08-17 directive and validated in `assets/VALIDATION_REPORT_01.md` (20 of 20
+  and validated in `assets/VALIDATION_REPORT_01.md` (20 of 20
   off-baselines depict the right person at both campaign seeds). No script may vary it.
 * **The training configuration** every run shares: resolution 768, gradient checkpointing on, the
-  deployed size micro-conditioning declared (D14). The hyperparameters plan stage S4 is choosing --
+  deployed size micro-conditioning declared. The hyperparameters the probe is choosing --
   learning rate, rank, alpha, forget weight -- are arguments to `training_hyperparameters`, not
   constants, because they are exactly what is not settled yet.
 * **The entity order** read from the every-epoch selection file, never retyped.
@@ -144,7 +144,7 @@ def training_hyperparameters(
 ) -> Dict[str, Any]:
     '''Builds the full `UnlearnerSpare` argument set the probe and the campaign share.
 
-    Everything that is settled is fixed here; the four values plan stage S4 is choosing are
+    Everything that is settled is fixed here; the four values the probe is choosing are
     parameters. Post-training evaluation is left empty on purpose: it is stubbed out by the callers
     (`step_check_support`), because building the pipelines `unlearn_lora` needs for it on top of the
     training-time weights still resident is the three-simultaneous-pipeline condition C7/S2 measured

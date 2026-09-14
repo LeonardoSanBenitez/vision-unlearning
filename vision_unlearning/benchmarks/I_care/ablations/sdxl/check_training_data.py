@@ -1,4 +1,4 @@
-"""S0 of PLAN-TASK-2026-08-12-SDXL: assert the target's forget/retain split is what training assumes.
+"""Assert the target's forget/retain split is what training assumes.
 
 Filesystem/content check only, no library call, no hardware. Asserts on
 ``assets/datasets/lfw_splits_filtered/Mark_Philippoussis/``: the forget split holds exactly 5 images, all

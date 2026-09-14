@@ -1,4 +1,4 @@
-'''Figures for the mid-task validation report (plan stage S7.5).
+'''Figures for the mid-task validation report.
 
 Four figures, each answering one question a reader of the validation report has to be able to check for
 themselves, with the number printed beside the image it was computed from:

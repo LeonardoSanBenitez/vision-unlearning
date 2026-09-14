@@ -10,8 +10,8 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO="C:/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning"
-PY="C:/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+REPO="$(cd "$HERE/../../../../.." && pwd)"
+PY="${PYTHON:-python}"
 LITE="$REPO/.venv-lite/Scripts/python.exe"
 MODELS="$HERE/assets/models"
 export PYTHONPATH="$REPO"

@@ -4,17 +4,16 @@
 # *loading* and similarity computation, metrics that operate on already-generated data).
 # It does NOT cover: actual unlearning (SPARE/munba training), embedding *generation*
 # (DINOv2/CLIP/act fingerprint extraction), or anything under the `gpu` pytest marker.
-# See CONTRIBUTING.md Section 6 and PLAN-TASK-2026-07-01-TestTooling.md for the full
-# lite/heavy/gpu tier rationale.
+# The three tiers are lite (this file), heavy (the full Poetry environment) and gpu
+# (manual runs only).
 #
 # Versions are pinned FROM poetry.lock (the authoritative Docker environment), NOT
 # free-floating, so mypy/pycodestyle agree between the lite venv and CI/Docker (an
-# unpinned install gave stub-skew false positives in mypy during the Phase 0 spike --
-# see PLAN-TASK-2026-07-01-TestTooling.md Phase 0 finding 3).
+# unpinned install gives stub-skew false positives in mypy).
 #
 # pytest-cov is NOT part of this list: it is only needed for the coverage-reporting job
 # (all_version_pytest.yml), which runs against the full/heavy environment, not the lite
-# tier. hypothesis is added here once Workstream E pins it in poetry.lock.
+# tier.
 #
 # Regeneration command (run after poetry.lock changes, from the vision-unlearning repo
 # root, inside the Docker container so `poetry show` reflects the locked versions):

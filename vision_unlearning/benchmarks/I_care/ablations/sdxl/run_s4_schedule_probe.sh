@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives one whole run of plan stage S4 -- train, generate, report -- one process per stage, in risk
+# Drives one whole run of the hyperparameter probe -- train, generate, report -- one process per stage, in risk
 # order, and RESUMABLE: re-running it after the machine was switched off picks up where it stopped.
 #
 #   bash run_s4_schedule_probe.sh                                              # inherited defaults
@@ -26,8 +26,8 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE" || exit 3
 
-REPO_ROOT="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning"
-PY="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+REPO_ROOT="$(cd "$HERE/../../../../.." && pwd)"
+PY="${PYTHON:-python}"
 HP=("$@")
 CHECKPOINTS=(1 3 5 10)
 

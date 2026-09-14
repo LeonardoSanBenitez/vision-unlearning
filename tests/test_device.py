@@ -53,8 +53,8 @@ def test_the_memory_reading_is_zero_rather_than_an_error_without_a_device(monkey
 def test_availability_alone_is_not_treated_as_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
     """The whole point of the module: `is_available()` is True in the state that raises.
 
-    A guard written as `if torch.cuda.is_available():` -- the obvious one, and the one the plan
-    originally specified -- passes here and lets the call through. That is the mutation.
+    A guard written as `if torch.cuda.is_available():` -- the obvious one --
+    passes here and lets the call through. That is the mutation.
     """
     _pretend_context_is_missing(monkeypatch)
 

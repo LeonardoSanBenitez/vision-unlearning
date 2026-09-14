@@ -1,8 +1,8 @@
 '''
-S5/S6 of PLAN-TASK-2026-08-12-SDXL: the full SPARE-unlearning campaign of `Mark_Philippoussis` on
+The full SPARE-unlearning campaign of `Mark_Philippoussis` on
 Stable Diffusion XL.
 
-TRAINING HYPERPARAMETERS: settled by plan stage S4 on 2026-08-19 (learning rate 6e-4, rank 16, alpha
+TRAINING HYPERPARAMETERS: settled by the hyperparameter probe (`run_schedule_probe.py`) (learning rate 6e-4, rank 16, alpha
 4, forget weight 0.3 -- the inherited Stable Diffusion 1.4 values, unchanged). The first campaign's
 selection was made from images generated at 512 and is void with the rest of that campaign; the
 constants below are the ten-epoch, 768-pixel selection that replaced it. See the constants' own
@@ -72,7 +72,7 @@ _MODEL_DIR = _OUT / "campaign_model"
 _MANIFEST_TEMPLATE = "campaign_seed{seed}.json"
 _N_EPOCHS = 200
 
-# The hyperparameters plan stage S4 selected on 2026-08-19: the inherited Stable Diffusion 1.4 values,
+# The hyperparameters the probe selected: the inherited Stable Diffusion 1.4 values,
 # unchanged, which is what makes the base model the only variable against the existing Stable Diffusion
 # 1.4 curves. Evidence, on 768-pixel images at the frozen generation configuration: the target's
 # clip_diff runs +2.37 / +4.22 / -6.58 / -6.00 over epochs 1/3/5/10 against a 2.258 noise floor, and the

@@ -1,4 +1,4 @@
-'''Plan stage S7 -- the Stable Diffusion XL noise floor of `clip_diff`.
+'''The Stable Diffusion XL noise floor of `clip_diff`.
 
 WHAT A NOISE FLOOR IS, since the term is load-bearing in this task and is not general vocabulary.
 

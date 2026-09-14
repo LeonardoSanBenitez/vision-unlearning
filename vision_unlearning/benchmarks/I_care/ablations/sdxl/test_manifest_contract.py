@@ -1,8 +1,8 @@
 '''
-S5 contract test (plan §9 S5): the campaign manifest never silently drifts from the canonical
+Contract test: the campaign manifest never silently drifts from the canonical
 selection file or the canonical checkpoint list.
 
-Catches exactly the class of mistake Cidral's R1 review (F4) caught in this plan's own first draft: a
+Catches one class of mistake: a
 transcribed entity list or checkpoint list that quietly diverges from the file it is supposed to be
 read from, changing a denominator everywhere downstream without any test failing. Pure JSON
 comparisons only -- no GPU, no torch, no model load, runs in a second.

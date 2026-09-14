@@ -1,7 +1,6 @@
 """No-training environment preflight for the every-epoch SPARE spike (W3).
 
-Answers the cheap go/no-go questions before any GPU training time is spent (see the plan's
-risk-ordered preflight): is ROCm/CUDA live, is there VRAM headroom for the 12 GB batch config,
+Answers the cheap go/no-go questions before any GPU training time is spent: is ROCm/CUDA live, is there VRAM headroom for the 12 GB batch config,
 is Stable Diffusion 1.4 already cached, and is the breeds spike-target split present. Prints a
 PREFLIGHT_OK / PREFLIGHT_FAIL line and returns non-zero on any hard failure so a launcher can gate
 on it. Touches the GPU only with a trivial matmul; it does not train and does not download SD1.4.

@@ -641,7 +641,7 @@ class TestGeneratedDatasetComputeFromScratchEntity(unittest.TestCase):
 
 
 class TestGetTargetOverwriteMethodInvariance(unittest.TestCase):
-    """Issue 1 (Cidral 2026-05-23): get_target_overwrite ignores the method argument.
+    """get_target_overwrite ignores the method argument.
 
     0_generate_dataset_original.py builds prompts with method='distil' hardcoded.
     3_compute_caused_interferences.py and 3_compute_embeddings.py build prompts
@@ -778,7 +778,7 @@ class TestGetTargetPreprocessedCharacterization(unittest.TestCase):
 
 
 class TestGeneratedDatasetComputeBatchSize(unittest.TestCase):
-    """Issue 3 (Cidral 2026-05-23): batch_size must be forwarded through compute() and
+    """batch_size must be forwarded through compute() and
     _compute_from_scratch() to generate_dataset().
 
     The plan documents batch_size=16 as optimal for this hardware.  Before this fix,
@@ -869,7 +869,7 @@ class TestGeneratedDatasetComputeBatchSize(unittest.TestCase):
 
 
 class TestGeneratedDatasetExistsPartialPromptWarning(unittest.TestCase):
-    """Issue 4 (Cidral 2026-05-23): exists() is unsafe with a partial prompt list for
+    """exists() is unsafe with a partial prompt list for
     the shared baseline.
 
     The shared baseline folder contains images for ALL entities in the task.
@@ -936,7 +936,7 @@ class TestGeneratedDatasetExistsPartialPromptWarning(unittest.TestCase):
 
 
 class TestComputeFromScratchMetadataJsonl(unittest.TestCase):
-    """Issue 5 (Cidral 2026-05-23): metadata.jsonl in entity _compute_from_scratch
+    """metadata.jsonl in entity _compute_from_scratch
     is only mock-verified.
 
     The unit tests for entity _compute_from_scratch mock generate_dataset(), so they
@@ -1320,8 +1320,7 @@ class TestGeneratedDatasetComputeHFDownload(unittest.TestCase):
         and does not attempt HF access on the second call (idempotency).
 
         This guards against regressions where re-calling compute() triggers redundant
-        downloads or generations for a caller bug-fix scenario (Cidral review 2026-05-23,
-        question 1: 'is compute() idempotent?').
+        downloads or generations for a caller bug-fix scenario.
         """
         with tempfile.TemporaryDirectory() as tmp:
             seeds = [42, 43]
@@ -1349,8 +1348,8 @@ class TestGetOffImagePathSeedPromptValidation(unittest.TestCase):
     """get_off_image_path raises ValueError when the shared baseline folder exists
     but does not contain the requested seed/prompt combination.
 
-    This validates the fail-loud contract added per Cidral review 2026-05-23
-    (questions 2 and 3: seed mismatch and metadata_filtered subset tests).
+    This validates the fail-loud contract for a seed mismatch and for a
+    metadata_filtered subset.
     """
 
     def _setup_baseline_folder(
@@ -1402,7 +1401,6 @@ class TestGetOffImagePathSeedPromptValidation(unittest.TestCase):
         If metadata_filtered is a pruned subset and the baseline was computed only
         with prompts from that subset, a downstream caller requesting a prompt not
         in the subset will get a clear error rather than a silently wrong path.
-        (Cidral review 2026-05-23, question 3: metadata_filtered subset test.)
         """
         from vision_unlearning.datasets.testbed import get_off_image_path
         with tempfile.TemporaryDirectory() as tmp:

@@ -105,8 +105,8 @@ def test_column_order_breaks_ties_by_name_so_it_is_deterministic() -> None:
 
 
 def test_column_order_is_computed_per_seed_from_that_seed_s_own_values() -> None:
-    """Each seed's figure is ordered by its own last epoch (the plan's earlier two-seed shared order was
-    dropped by the user in favour of self-contained figures), so identical entities with different values
+    """Each seed's figure is ordered by its own last epoch (a shared order across seeds was
+    dropped in favour of self-contained figures), so identical entities with different values
     must give different orders."""
     names = ["target", "a", "b"]
     seed_42 = column_order(last_row={0: -10.0, 1: -8.0, 2: -1.0}, names=names, target_index=0)

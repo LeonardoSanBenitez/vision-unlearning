@@ -45,8 +45,8 @@ WAIT_TICKS="${WAIT_TICKS:-60}"
 TICK_S="${TICK_S:-30}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning"
-PY="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+REPO_ROOT="$(cd "$HERE/../../../../.." && pwd)"
+PY="${PYTHON:-python}"
 
 cd "$HERE" || exit 3
 LOG="assets/${NAME}.log"

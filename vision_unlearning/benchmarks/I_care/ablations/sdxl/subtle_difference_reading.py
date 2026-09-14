@@ -1,7 +1,7 @@
-'''S10 of PLAN-TASK-2026-08-12-SDXL: the same entity, the same epochs, the two base models side by side.
+'''The same entity, the same epochs, the two base models side by side.
 
-This is the figure the task exists for. The user's question was not "does the number go down on
-Stable Diffusion XL" -- it was whether the I-CARE reading of *subtle, subjective* differences survives
+The question here is not "does the number go down on
+Stable Diffusion XL" -- it is whether the I-CARE reading of *subtle, subjective* differences survives
 a change of base model. So this puts one entity's Stable Diffusion 1.4 row directly above its Stable
 Diffusion XL row, epoch by epoch, and lets a human read the two.
 

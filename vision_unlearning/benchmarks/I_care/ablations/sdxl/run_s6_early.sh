@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# S6 early half: generate the seed-42 campaign images at checkpoints 1, 3 and 5, one process per
+# Early half of the campaign: generate the seed-42 campaign images at checkpoints 1, 3 and 5, one process per
 # epoch, each through run_campaign_stage.sh so that the headroom wait, the retry and the per-attempt
-# logs apply to every one of them. Stops after epoch 5 -- the plan's sign-off gate sits there.
+# logs apply to every one of them. Stops after epoch 5, where the images are reviewed before the rest runs.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

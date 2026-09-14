@@ -75,7 +75,7 @@ test: run-interactive-docker
 	# truncated to `--ignore=E701` (everything after the first comma became unused $(2),
 	# $(3), ... arguments to the macro). Calling docker directly sidesteps the problem.
 	# --exclude matches pycodestyle.yml's u_care exclusion, PLUS reports/: fixing the
-	# truncation bug above (verified this session, see PLAN-TASK-2026-07-01-TestTooling.md)
+	# truncation bug above
 	# means this line now actually executes with the full ignore list for the first time,
 	# which surfaced that reports/ (git-ignored, so invisible to CI, but present on disk
 	# from prior local research sessions) has ~100 pre-existing style violations of its

@@ -7,7 +7,7 @@ epochs (default 2) with the new ``save_lora_at_epochs`` hook, then:
   * validates each ``epoch-{n}`` adapter by safetensors CONTENT (non-empty LoRA keys), not existence;
   * checks final-equivalence: the last requested epoch's adapter equals the root final adapter tensorwise;
   * generates images with the epoch-{max} adapter and MEASURES fixed model-load time separately from
-    marginal per-image time (F6), via two generate calls of different sizes;
+    marginal per-image time, via two generate calls of different sizes;
   * runs the section-5 seed/baseline characterization (regenerate one stored baseline off-image and
     compare SSIM / max abs pixel diff) - report only, does not gate;
   * monitors CPU / RAM / VRAM throughout and HARD-EXITS before a RAM crash (a low-RAM abort is itself the

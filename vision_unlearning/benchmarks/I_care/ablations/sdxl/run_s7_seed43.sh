@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# S7: the whole second seed. Trains seed 43 for 200 epochs, generates its 140 images one epoch per
+# The whole second seed. Trains seed 43 for 200 epochs, generates its 140 images one epoch per
 # process, then re-scores BOTH seeds with CLIP so the two trajectories land in one artifact.
 #
 # Three things this fixes relative to how the seed-42 half was driven on 2026-08-19:
@@ -27,8 +27,8 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SEED=43
-REPO_ROOT="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/unlearning/vision-unlearning"
-PY="/c/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe"
+REPO_ROOT="$(cd "$HERE/../../../../.." && pwd)"
+PY="${PYTHON:-python}"
 
 echo "=== s7: training seed ${SEED} at $(date +%H:%M:%S)"
 WAIT_TICKS=240 bash "$HERE/run_campaign_stage.sh" train "$SEED" -
