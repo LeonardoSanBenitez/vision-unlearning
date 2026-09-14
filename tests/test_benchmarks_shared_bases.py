@@ -53,7 +53,10 @@ def test_configuration_record_shapes_import_from_shared_location() -> None:
     assert MetricWithDirectionSpec(name="weight_overlap", direction="↑").name_pretty is None
     # ...but required on the two (name, name_pretty) records.
     assert LSpec(name="dino_embedding", name_pretty="DINOv2 Embedding").name_pretty == "DINOv2 Embedding"
-    assert UnlearningAlgorithmSpec(name="distil", name_pretty="spare").name_pretty == "spare"
+    assert UnlearningAlgorithmSpec(
+        name="distil", name_pretty="spare",
+        artifact_kind="lora_adapter", artifact_filename="pytorch_lora_weights.safetensors",
+    ).name_pretty == "spare"
 
 
 def test_icare_reimports_resolve_to_the_shared_definitions() -> None:

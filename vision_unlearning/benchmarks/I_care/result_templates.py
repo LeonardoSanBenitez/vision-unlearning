@@ -59,6 +59,7 @@ from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.artifact import ArtifactNotAvailableError
 from vision_unlearning.benchmarks.result_template import ResultTemplate
 from vision_unlearning.benchmarks.I_care.configuration import (
+    ALGORITHM_REGISTRY,
     type_model,
     type_task,
     type_unlearning_algorithm,
@@ -3416,6 +3417,8 @@ class ResultTemplateVisualSummaryBase(ResultTemplate):
             target=emitter_target,
             method=self.unlearning_algorithm,
             num_train_epochs=num_train_epochs,
+            artifact_kind=ALGORITHM_REGISTRY[self.unlearning_algorithm].artifact_kind,
+            artifact_filename=ALGORITHM_REGISTRY[self.unlearning_algorithm].artifact_filename,
             base_folder=self.base_folder,
             model=self.model,
         ).compute(seeds, prompts)

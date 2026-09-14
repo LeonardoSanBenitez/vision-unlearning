@@ -300,6 +300,7 @@ def build_manifest(
 # ---------------------------------------------------------------------------
 # Core embedding function (lives in vision_unlearning — imported here)
 # ---------------------------------------------------------------------------
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY  # noqa: E402
 from vision_unlearning.benchmarks.I_care.embeddings import embed_forgetting_session  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -744,6 +745,8 @@ if __name__ == "__main__":
         ds_entity = GeneratedDataset(  # type: ignore[arg-type]
             task=task,  # type: ignore[arg-type]
             target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
+            artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+            artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
         )
         dataset_folder = ds_entity.folder_path
 

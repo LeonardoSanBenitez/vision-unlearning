@@ -43,6 +43,23 @@ class LSpec(BaseModel):
 
 
 class UnlearningAlgorithmSpec(BaseModel):
-    """A `(software name, display name)` record for an unlearning method."""
+    """A record for an unlearning method: its names, and what kind of artifact it produces.
+
+    The artifact fields are declarative and deliberately torch-free, so that the code deciding how to
+    load a method's output can read the answer from one place instead of testing the method's name.
+    Before them, "what kind of artifact does this method produce" was encoded four times, in four
+    files, as `if method == 'uce': ... else: treat it as a low-rank adapter` -- which meant a new
+    weight-editing method silently fell into the adapter branch and produced nothing usable.
+
+    `artifact_kind` values:
+
+    * `lora_adapter` -- a low-rank adapter directory, applied on top of the base model.
+    * `lora_adapter_inverted` -- the same, but trained to be good at the task and therefore applied
+      inverted (this is what Munba does).
+    * `partial_weights` -- a file of modified denoiser tensors, copied into the base model by the
+      method's own static loader. Both weight-editing methods here produce this.
+    """
     name: str
     name_pretty: str
+    artifact_kind: Literal['lora_adapter', 'lora_adapter_inverted', 'partial_weights']
+    artifact_filename: str

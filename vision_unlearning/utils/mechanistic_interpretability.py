@@ -26,8 +26,6 @@ Actual fingerprint dimensionality for SD 1.4 (16 cross-attn layers):
     up[1]: 3×1280=3840, up[2]: 3×640=1920, up[3]: 3×320=960
     Total: 12480 dims  (SD1.4 has 3 CrossAttnDownBlocks, not 2)
 
-Run from: unlearning/unlearning-analysis/
-Interpreter: C:/Users/Leonardo/Desktop/zoo/dev-science-ops/sd-interpretability/.venv/Scripts/python.exe
 """
 from __future__ import annotations
 
@@ -137,6 +135,23 @@ def extract_unet_crossattn_activations(
         h = attn2_modules[name].register_forward_hook(_make_hook(name))
         handles.append(h)
 
+    # ------------------------------------------------------------------ #
+    # TODO (determinism gap — fix the NEXT time these fingerprints are     #
+    # recomputed, so we can verify nothing shifts): this loop passes a     #
+    # per-seed torch.Generator, but — unlike                              #
+    # vision_unlearning.utils.data_generation.generate_dataset — it does   #
+    # NOT enable torch.use_deterministic_algorithms(True), does NOT set    #
+    # CUBLAS_WORKSPACE_CONFIG=':4096:8', and does NOT seed the global      #
+    # torch / numpy / random state. On AMD ROCm, kernel selection for      #
+    # GEMM/attention is non-deterministic without that regime, so the raw  #
+    # fingerprints here are NOT bit-reproducible for a given seed. It is    #
+    # tolerable for `act` only because the fingerprint is averaged over     #
+    # spatial positions, denoising steps, and seeds before cosine          #
+    # similarity, which washes out most kernel-level noise. Any per-entity  #
+    # LATENT captured here (e.g. a future z_0 similarity) is a single       #
+    # un-averaged tensor and would NOT be protected by that averaging, so   #
+    # adopt generate_dataset's full determinism regime before trusting it.  #
+    # ------------------------------------------------------------------ #
     try:
         for seed in seeds:
             generator = torch.Generator(device=device).manual_seed(seed)

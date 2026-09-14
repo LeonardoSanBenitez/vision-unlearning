@@ -1,7 +1,7 @@
 # Vision Unlearning
 ![Mypy](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/mypy.yml/badge.svg?branch=dev&job=mypy)
 ![Pycodestyle](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pycodestyle.yml/badge.svg?branch=dev&job=pycodestyle)
-![Pytest](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/pytest.yml/badge.svg?branch=dev&job=pytest)
+![Pytest](https://github.com/LeonardoSanBenitez/vision-unlearning/actions/workflows/all_version_pytest.yml/badge.svg?branch=dev)
 ![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/LeonardoSanBenitez/vision-unlearning/dev/coverage.json)
 [![PyPI](https://img.shields.io/pypi/v/vision-unlearning.svg)](https://pypi.org/project/vision-unlearning/)
 [![Python](https://img.shields.io/pypi/pyversions/vision-unlearning.svg)](https://pypi.org/project/vision-unlearning/)
@@ -16,7 +16,7 @@
 pip install vision-unlearning
 ```
 
-Compatible with python 3.10 to 3.12.
+Compatible with python 3.10 and 3.11.
 
 ## What is Vision Unlearning?
 
@@ -45,9 +45,9 @@ For practitioners, Vision Unlearning provides:
 
 # Tutorials
 
-* [Replace _George W. Bush_ by _Tony Blair_ using FADE](https://colab.research.google.com/drive/1ZJG9By4_u1Vqy_SYelxfzUUImRzayRYw?usp=sharing)
-* [Replace _George W. Bush_ by _Tony Blair_ using FADE sparse-per-module](https://colab.research.google.com/drive/1luM3kAoaBLoTwcsDcW3KO_SIiuIbwmWY?usp=sharing)
-* [Replace _George W. Bush_ by _Tony Blair_ using FADE sparse-per-weigth](https://colab.research.google.com/drive/1ry5xXOPMuVm_LA_4Uyk27Aqe52L607kO?usp=sharing)
+* [Replace _George W. Bush_ by _Tony Blair_ using SPARE](https://colab.research.google.com/drive/1ZJG9By4_u1Vqy_SYelxfzUUImRzayRYw?usp=sharing)
+* [Replace _George W. Bush_ by _Tony Blair_ using SPARE sparse-per-module](https://colab.research.google.com/drive/1luM3kAoaBLoTwcsDcW3KO_SIiuIbwmWY?usp=sharing)
+* [Replace _George W. Bush_ by _Tony Blair_ using SPARE sparse-per-weigth](https://colab.research.google.com/drive/1ry5xXOPMuVm_LA_4Uyk27Aqe52L607kO?usp=sharing)
 * [Forget _cat_ using UCE (with hyperparam tunning)](https://drive.google.com/file/d/1OZtNkntOj-dVpo-T1kQdPMK7TMYX3ctf/view?usp=sharing)
 * [Forget _church_ using Munba](https://colab.research.google.com/drive/1eyjrNMcYi0PK37U0ZLcwydy153yiJUJ9?usp=sharing)
 

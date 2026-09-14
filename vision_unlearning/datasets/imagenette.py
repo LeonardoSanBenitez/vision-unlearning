@@ -3,7 +3,11 @@ import os
 import requests
 import tarfile
 import numpy as np
-from torchvision import datasets, transforms
+# Imported under leading-underscore names so that `from vision_unlearning.datasets.imagenette
+# import *` does NOT re-export torchvision's `datasets`/`transforms`. Leaking `datasets`
+# shadowed the `vision_unlearning.datasets` subpackage and broke `import
+# vision_unlearning.datasets.testbed` after this module was star-imported.
+from torchvision import datasets as _tv_datasets, transforms as _tv_transforms
 from vision_unlearning.datasets.base import UnlearnDataset, UnlearnDatasetSplit
 
 
@@ -66,14 +70,14 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         self.mean = (0.485, 0.456, 0.406)
         self.std = (0.229, 0.224, 0.225)
 
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(self.mean, self.std)
+        transform = _tv_transforms.Compose([
+            _tv_transforms.ToTensor(),
+            _tv_transforms.Normalize(self.mean, self.std)
         ])
 
         # Load the dataset using ImageFolder
-        train_set = datasets.ImageFolder(train_path, transform=transform)
-        test_set = datasets.ImageFolder(val_path, transform=transform)
+        train_set = _tv_datasets.ImageFolder(train_path, transform=transform)
+        test_set = _tv_datasets.ImageFolder(val_path, transform=transform)
 
         self._classes = train_set.classes
         assert self._classes is not None
@@ -92,7 +96,7 @@ class UnlearnDatasetImagenette(UnlearnDataset):
         valid_data = [train_set.samples[i] for i in val_idxs_stacked]
         valid_targets = [train_set.targets[i] for i in val_idxs_stacked]
 
-        valid_set = datasets.ImageFolder(
+        valid_set = _tv_datasets.ImageFolder(
             train_path,
             transform=transform,
             loader=lambda x: train_set.loader(x),  # Use the same loader as the training set

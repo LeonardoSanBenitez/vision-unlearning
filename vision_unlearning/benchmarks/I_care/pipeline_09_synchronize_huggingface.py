@@ -52,7 +52,7 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, 
 import pandas as pd
 from pydantic import BaseModel
 
-from vision_unlearning.benchmarks.I_care.configuration import unlearning_algorithm_to_epochs
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY, unlearning_algorithm_to_epochs
 from vision_unlearning.benchmarks.I_care.metadata import (
     get_embedding_hf_path,
     get_embedding_output_path,
@@ -303,7 +303,10 @@ def annotate_local_existence(
             task_t = cast(_type_task, item.task)
             method_t = cast(_type_method, item.method)
             epochs = unlearning_algorithm_to_epochs[item.task][item.method]
-            item.local_exists = exists_unlearned_model(task_t, method_t, epochs, item.name, base_folder=base_folder)
+            artifact_filename = ALGORITHM_REGISTRY[method_t].artifact_filename
+            item.local_exists = exists_unlearned_model(
+                task_t, method_t, epochs, item.name, artifact_filename, base_folder=base_folder
+            )
         elif item.stage == "generated-datasets":
             if item.task not in prompts_by_task:
                 task_t = cast(_type_task, item.task)

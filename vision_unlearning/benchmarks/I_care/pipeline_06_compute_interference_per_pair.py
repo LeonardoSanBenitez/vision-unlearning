@@ -18,6 +18,8 @@ from vision_unlearning.datasets.testbed import (
     GeneratedDataset,
 )
 from vision_unlearning.benchmarks.I_care import get_interference_per_pair_path, save_interference_per_pair
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
+from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
 
 logger = get_logger('unlearning_analysis')
 setup_loggers(modules_info=['unlearning'])
@@ -42,6 +44,11 @@ _parser.add_argument("--delete-dataset", action="store_true", default=False,
                      help="Delete local dataset folder after computation. Default is to KEEP the dataset.")
 _parser.add_argument("--base-folder", default="assets",
                      help="Path to the assets folder (default: 'assets' in the current directory).")
+_parser.add_argument("--ledger-path", default="",
+                     help="Where to append the per-entity run ledger (debugging/traceability only, "
+                          "not a paper artifact). Default (empty): '{base_folder}/logs/pipeline_06_ledger.jsonl'.")
+_parser.add_argument("--no-ledger", action="store_true", default=False,
+                     help="Disable writing the run ledger for this invocation.")
 _args, _unknown = _parser.parse_known_args()
 
 # Load HF_TOKEN (needed for download; safe to skip if datasets are already local)
@@ -151,6 +158,14 @@ generate_dataset_seeds = _args.seeds if _args.seeds is not None else [42, 43, 44
 generate_dataset_limit_prompts: Optional[int] = _args.limit_prompts  # None means all
 base_folder: str = _args.base_folder
 
+# Per-entity run ledger (debugging/traceability only, not a paper artifact -- see
+# run_ledger.py). Defaults to living inside base_folder, which is already gitignored
+# wholesale, so it is never committed without needing its own ignore rule.
+_ledger: Optional[RunLedger] = None
+if not _args.no_ledger:
+    _ledger_path = _args.ledger_path or os.path.join(base_folder, "logs", "pipeline_06_ledger.jsonl")
+    _ledger = RunLedger(_ledger_path)
+
 logger.info(
     "Config: task=%s method=%s epochs=%d index_start=%d max_identities=%d",
     task, method, num_train_epochs, index_start, max_identities,
@@ -199,7 +214,15 @@ def evaluate_one(prompt, seed, plot: bool = False) -> dict:
     # TODO can this be batched?
 
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(
+        task=task,  # type: ignore[arg-type]
+        target=target_hf_name,
+        method=method,
+        num_train_epochs=num_train_epochs,
+        artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+        artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
+        base_folder=base_folder,
+    )
     out_off = Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, seed, prompt, base_folder=base_folder))  # type: ignore[arg-type]
     out_on = Image.open(ds_entity.file_path('on', seed, prompt))
 
@@ -246,7 +269,15 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
     evaluate_one() per seed.
     """
     target_hf_name = get_target_overwrite(task, method, target)[0]
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(
+        task=task,  # type: ignore[arg-type]
+        target=target_hf_name,
+        method=method,
+        num_train_epochs=num_train_epochs,
+        artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+        artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
+        base_folder=base_folder,
+    )
     imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt, base_folder=base_folder)) for s in seeds]  # type: ignore[arg-type]
     imgs_on = [Image.open(ds_entity.file_path('on', s, prompt)) for s in seeds]
 
@@ -293,6 +324,7 @@ if generate_dataset_limit_prompts is not None:
 
 for index in range(index_start, index_start + max_identities):
     target = metadata_filtered[index]['name']
+    _entity_context = f'InterferencePerPair for {task}/{method}/{num_train_epochs}/index={index}'
 
     # Build GeneratedDataset for this entity.
     # compute() handles the full local -> HF -> scratch cascade, correctly using
@@ -305,9 +337,19 @@ for index in range(index_start, index_start + max_identities):
     # on resume runs where those entities are already done.
     if not replace_if_exists and os.path.exists(get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder=base_folder)):
         logger.info(f'Skipping measuring scores for "{target}" since already exists')
+        if _ledger is not None:
+            _ledger.record(_entity_context, status='skipped')
         continue
 
-    ds_entity = GeneratedDataset(task=task, target=target_hf_name, method=method, num_train_epochs=num_train_epochs, base_folder=base_folder)  # type: ignore[arg-type]
+    ds_entity = GeneratedDataset(
+        task=task,  # type: ignore[arg-type]
+        target=target_hf_name,
+        method=method,
+        num_train_epochs=num_train_epochs,
+        artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+        artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
+        base_folder=base_folder,
+    )
     try:
         ds_entity.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
     except FileNotFoundError as exc:
@@ -318,6 +360,11 @@ for index in range(index_start, index_start + max_identities):
             "Cannot compute entity dataset for '%s' (index %d): %s. Skipping.",
             target, index, exc,
         )
+        if _ledger is not None:
+            _ledger.record(
+                _entity_context, status='failed',
+                exception_type=type(exc).__name__, message=str(exc),
+            )
         continue
 
     dataset_folder = ds_entity.folder_path
@@ -329,22 +376,47 @@ for index in range(index_start, index_start + max_identities):
             "Dataset for emitter '%s' has no on_* images — incomplete or missing. Skipping entity %d.",
             target, index,
         )
+        if _ledger is not None:
+            _ledger.record(_entity_context, status='skipped')
         continue
 
     # Measuring caused interferences.
     # At this point we know the interference file does not exist (early-skip above
     # handles the case where it does).
-    print(f'Measuring interferences caused by {index} {target}')
-    interference_per_pair = {}  # interferences caused by the current EMITER (given by `index`) to each RECEIVER (the keys of interference_per_pair)
-    for i, m in enumerate(metadata_filtered[:len(eval_prompts)]):
-        p = eval_prompts[i]
-        print("Prompt: ", p)
-        # evaluate_all_seeds batches BRISQUE across all seeds in one GPU pass
-        interference_per_pair[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
-    print('-' * 50 + '\n' + '-' * 50)
-    save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs, base_folder=base_folder)
+    # The whole per-entity measurement is wrapped so one entity's failure (e.g. a
+    # corrupted image, a metric raising on unexpected input) logs and moves on to the
+    # next entity instead of aborting every remaining entity in this run -- the same
+    # isolate-and-continue pattern already used above for a missing trained model and
+    # for an incomplete dataset.
+    try:
+        print(f'Measuring interferences caused by {index} {target}')
+        interference_per_pair = {}  # interferences caused by the current EMITER (given by `index`) to each RECEIVER (the keys of interference_per_pair)
+        for i, m in enumerate(metadata_filtered[:len(eval_prompts)]):
+            p = eval_prompts[i]
+            print("Prompt: ", p)
+            # evaluate_all_seeds batches BRISQUE across all seeds in one GPU pass
+            interference_per_pair[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
+        print('-' * 50 + '\n' + '-' * 50)
+        save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs, base_folder=base_folder)
+    except Exception as _exc:
+        logger.warning(
+            "Measuring interferences failed for '%s' (index %d): %s. Skipping.",
+            target, index, _exc, exc_info=True,
+        )
+        if _ledger is not None:
+            _ledger.record(
+                _entity_context, status='failed',
+                exception_type=type(_exc).__name__, message=str(_exc),
+            )
+        continue
+    if _ledger is not None:
+        _ledger.record(_entity_context, status='ok')
 
     # Clean up local dataset to save disk space (only if --delete-dataset was passed)
     if _args.delete_dataset and os.path.exists(dataset_folder):
         shutil.rmtree(dataset_folder)
         logger.info("Deleted local dataset folder: %s", dataset_folder)
+
+if _ledger is not None:
+    logger.info("Run ledger: %d records written to %s", _ledger.count, _ledger.path)
+    _ledger.close()

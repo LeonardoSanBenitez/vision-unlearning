@@ -42,7 +42,7 @@ logger = get_logger('I_care')
 def _interference_per_pair_filename(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
-    method: Literal['munba', 'uce', 'distil'],
+    method: type_unlearning_algorithm,
     num_train_epochs: int,
     model: type_model = 'sd1.4',
 ) -> str:
@@ -52,7 +52,7 @@ def _interference_per_pair_filename(
 def get_interference_per_pair_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
-    method: Literal['munba', 'uce', 'distil'],
+    method: type_unlearning_algorithm,
     num_train_epochs: int,
     base_folder: str = 'assets',
     model: type_model = 'sd1.4',
@@ -63,7 +63,7 @@ def get_interference_per_pair_path(
 def get_interference_per_pair(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
-    method: Literal['munba', 'uce', 'distil'],
+    method: type_unlearning_algorithm,
     num_train_epochs: int,
     max_identities: int = 100,
     base_folder: str = 'assets',
@@ -82,7 +82,7 @@ def get_interference_per_pair(
 def exists_interference_per_pair(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
-    method: Literal['munba', 'uce', 'distil'],
+    method: type_unlearning_algorithm,
     num_train_epochs: int,
     base_folder: str = 'assets',
     model: type_model = 'sd1.4',
@@ -97,7 +97,7 @@ def save_interference_per_pair(
     interference_per_pair: Dict[str, Dict[str, float]],
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
-    method: Literal['munba', 'uce', 'distil'],
+    method: type_unlearning_algorithm,
     num_train_epochs: int,
     base_folder: str = 'assets',
     model: type_model = 'sd1.4',
@@ -111,7 +111,7 @@ def save_interference_per_pair(
 def get_interference_per_pair_inverse(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
-    method: Literal['munba', 'uce', 'distil'],
+    method: type_unlearning_algorithm,
     num_train_epochs: int,
     index_start: int = 0,
     max_identities: int = 100,

@@ -21,9 +21,10 @@ os.environ['WANDB_DISABLED'] = "true"
 assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non-empty"
 #!huggingface-cli login --token ${HF_TOKEN}
 
-from unlearner_lora_distillation import UnlearnerLoraDistillation  # FADE  # noqa: E402
+from vision_unlearning.unlearner import Unlearner, UnlearnerSpare  # noqa: E402
 from vision_unlearning.unlearner import UnlearnerLoraDirect  # Munba  # noqa: E402
 from vision_unlearning.unlearner import UCE, ConceptType  # noqa: E402
+from vision_unlearning.unlearner import SalUn  # noqa: E402
 
 
 from vision_unlearning.utils.parameter_attribution import ParameterAttributionMethodSaliency  # noqa: E402
@@ -31,6 +32,7 @@ from vision_unlearning.utils.logger import get_logger, setup_loggers  # noqa: E4
 from vision_unlearning.datasets import UnlearnDatasetImagenette  # noqa: E402
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple, GradientWeightingMethodMunba  # noqa: E402
 from vision_unlearning.benchmarks.I_care import check_eval_results  # noqa: E402
+from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY  # noqa: E402
 from vision_unlearning.datasets.testbed import (  # noqa: E402
     get_target_overwrite,
     get_unlearned_model_folder,
@@ -260,6 +262,24 @@ for index in range(index_start, index_start + max_identities):
             "device": device,
             "save_entire_model": False,
         })
+    elif method == 'salun':
+        # SalUn takes the benchmark's existing splits and nothing else: the forget images, the
+        # retain images, and the concept the forget side is pushed towards. No data is generated
+        # for it. The substitute concept comes from get_target_overwrite rather than a literal,
+        # so it cannot drift away from the phrase the images are generated and evaluated with.
+        hyperparameters.update({
+            "pretrained_model_name_or_path": model_base_name,
+            "dataset_forget_name": dataset_forget_name,
+            "dataset_retain_name": dataset_retain_name,
+            "overwriting_concept": target_overwrite,
+            "train_method": "xattn",
+            "num_train_epochs": num_train_epochs,
+            "resolution": 512,
+            "random_flip": True,
+            "dataloader_num_workers": 0,  # workers must pickle the transform; a nested function cannot be
+            "per_device_train_batch_size": 1,
+            "device": device,
+        })
     else:
         hyperparameters.update({
             "model_name_or_path": model_base_name,
@@ -296,19 +316,16 @@ for index in range(index_start, index_start + max_identities):
         if free_memory > 20e9:
             hyperparameters.update({
                 "per_device_train_batch_size": 4,
-                "train_batch_size": 4,
                 "gradient_accumulation_steps": 1,
             })
         elif free_memory > 14e9:
             hyperparameters.update({
                 "per_device_train_batch_size": 2,
-                "train_batch_size": 2,
                 "gradient_accumulation_steps": 2,
             })
         else:
             hyperparameters.update({
                 "per_device_train_batch_size": 2,  # 1,
-                "train_batch_size": 2,  # 1,
                 "gradient_accumulation_steps": 2,  # 4,
             })
 
@@ -322,10 +339,15 @@ for index in range(index_start, index_start + max_identities):
         logger.error('Too little GPU, diverting power from life support...')
         batch_size_inference = 25
 
+    unlearner: Unlearner
     if method == 'distil':
         hyperparameters['overwritting_concept'] = target_overwrite
+        # The forget side is conditioned on the same phrase the images are generated and evaluated
+        # with, rather than on the bare underscored name stored in the dataset's captions, so that
+        # the intervention is fitted at the point in text-embedding space that is later queried.
+        hyperparameters['forget_concept'] = target_preprocessed
         hyperparameters['gradient_weighting_method'] = GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0)
-        unlearner = UnlearnerLoraDistillation(**hyperparameters)
+        unlearner = UnlearnerSpare(**hyperparameters)
     elif method == 'munba':
         hyperparameters['gradient_weighting_method'] = GradientWeightingMethodMunba()
         if task=='scenes':
@@ -344,11 +366,16 @@ for index in range(index_start, index_start + max_identities):
                 "lamb": 0.1,
             })
         unlearner = UCE(**hyperparameters)
+    elif method == 'salun':
+        unlearner = SalUn(**hyperparameters)
     else:
         raise NotImplementedError()
 
 
-    if replace_if_exists or not exists_unlearned_model(task, method, num_train_epochs, target, base_folder=base_folder):
+    artifact_filename = ALGORITHM_REGISTRY[method].artifact_filename
+    if replace_if_exists or not exists_unlearned_model(
+        task, method, num_train_epochs, target, artifact_filename, base_folder=base_folder
+    ):
         logger.info(f"Overwritting the entity '{target}' by '{target_overwrite}'")
         logger.info(hyperparameters)
         eval_results = unlearner.train()
@@ -411,6 +438,8 @@ for index in range(index_start, index_start + max_identities):
             target=target_preprocessed,
             method=method,
             num_train_epochs=num_train_epochs,
+            artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
+            artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
             base_folder=base_folder,
         )
         generated_dataset_output_path = ds_entity.folder_path

@@ -1,7 +1,6 @@
 name: Lite Tier Check
 
-# Enforces the lite/heavy dependency boundary documented in CONTRIBUTING.md Section 6 and
-# PLAN-TASK-2026-07-01-TestTooling.md. This job installs ONLY the pinned lite dependency
+# Enforces the lite/heavy dependency boundary. This job installs ONLY the pinned lite dependency
 # set (requirements-test-lite.txt) -- no torch, no diffusers, no jax -- and runs mypy,
 # pycodestyle, and the lite pytest selection against it.
 #

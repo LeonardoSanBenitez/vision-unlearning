@@ -27,7 +27,7 @@ import argparse
 import json
 import os
 from collections import defaultdict
-from typing import Dict, List, Literal, cast
+from typing import Dict, List, Literal, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -44,6 +44,7 @@ from vision_unlearning.benchmarks.I_care import (
     number_of_interfered_worse_than_threshold,
     average_metric,
 )
+from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
 from vision_unlearning.datasets.testbed import (
     get_metadata_filtered,
     get_target_overwrite,
@@ -157,8 +158,16 @@ def compute_for_task(
     max_identities: int,
     embedding_assets_folder: str,
     base_folder: str,
+    ledger: Optional[RunLedger] = None,
 ) -> None:
-    """Aggregate per-pair interference data for one task into interference_per_entity_{task}.json."""
+    """Aggregate per-pair interference data for one task into interference_per_entity_{task}.json.
+
+    Per-entity computation errors are caught and logged (the entity's row keeps whatever
+    columns were already written and simply lacks this (method, epochs) combination's
+    metrics) rather than aborting the whole task -- consistent with the existing
+    "per-pair file missing" skip a few lines below, which already leaves some rows
+    without every (method, epochs) combination's columns as a normal, expected outcome.
+    """
     logger.info('Starting pipeline_07 for task=%s, methods=%s, epochs=%s',
                 task, methods, num_train_epochs_list)
 
@@ -190,186 +199,206 @@ def compute_for_task(
                     'SKIP task=%s index=%d method=%s epochs=%d — per-pair file missing',
                     task, index, method, num_train_epochs,
                 )
+                if ledger is not None:
+                    ledger.record(
+                        f'InterferencePerEntity for {task}/{method}/{num_train_epochs}/index={index}',
+                        status='skipped',
+                    )
                 continue
-            logger.info(
-                'Summarizing task=%s index=%d method=%s epochs=%d',
-                task, index, method, num_train_epochs,
-            )
-            interference_per_pair = get_interference_per_pair(
-                task, index, method, num_train_epochs, base_folder=base_folder,
-            )
-
-            assert index < len(metadata_filtered)
-            target = metadata_filtered[index]['name']
-            assert isinstance(target, str)
-
-            interference_per_pair_inverse = get_interference_per_pair_inverse(
-                task, index, method, num_train_epochs, base_folder=base_folder,
-            )
-
-            # ── Base Mp metrics (brisque_diff, clip_diff, rmse, ssim) ───────────
-            entity_statistics: dict = {}
-
-            entity_statistics['emitter_worst_interfered_brisque_diff (↓)'] = metric_of_worst_interfered(interference_per_pair, 'brisque_diff', True)
-            entity_statistics['emitter_worst_interfered_clip_diff (↑)'] = metric_of_worst_interfered(interference_per_pair, 'clip_diff', False)
-            entity_statistics['emitter_worst_interfered_rmse (↓)'] = metric_of_worst_interfered(interference_per_pair, 'rmse', True)
-            entity_statistics['emitter_worst_interfered_ssim (↑)'] = metric_of_worst_interfered(interference_per_pair, 'ssim', False)
-
-            entity_statistics['emitter_number_of_interfered_worse_than_target_brisque_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'brisque_diff', True, target)
-            entity_statistics['emitter_number_of_interfered_worse_than_target_clip_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'clip_diff', False, target)
-            entity_statistics['emitter_number_of_interfered_worse_than_target_rmse (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'rmse', True, target)
-            entity_statistics['emitter_number_of_interfered_worse_than_target_ssim (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'ssim', False, target)
-
-            entity_statistics['emitter_number_of_interfered_worse_than_zero_clip_diff (↓)'] = number_of_interfered_worse_than_threshold(interference_per_pair, 'clip_diff', False, 0.)
-
-            entity_statistics['emitter_average_brisque_diff (↓)'] = average_metric(interference_per_pair, 'brisque_diff')
-            entity_statistics['emitter_average_clip_diff (↑)'] = average_metric(interference_per_pair, 'clip_diff')
-            entity_statistics['emitter_average_rmse (↓)'] = average_metric(interference_per_pair, 'rmse')
-            entity_statistics['emitter_average_ssim (↑)'] = average_metric(interference_per_pair, 'ssim')
-
-            entity_statistics['receiver_worst_interfered_brisque_diff (↓)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'brisque_diff', True)
-            entity_statistics['receiver_worst_interfered_clip_diff (↑)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'clip_diff', False)
-            entity_statistics['receiver_worst_interfered_rmse (↓)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'rmse', True)
-            entity_statistics['receiver_worst_interfered_ssim (↑)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'ssim', False)
-
-            entity_statistics['receiver_number_of_interfered_worse_than_target_brisque_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'brisque_diff', True, target)
-            entity_statistics['receiver_number_of_interfered_worse_than_target_clip_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'clip_diff', False, target)
-            entity_statistics['receiver_number_of_interfered_worse_than_target_rmse (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'rmse', True, target)
-            entity_statistics['receiver_number_of_interfered_worse_than_target_ssim (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'ssim', False, target)
-
-            entity_statistics['receiver_number_of_interfered_worse_than_zero_clip_diff (↓)'] = number_of_interfered_worse_than_threshold(interference_per_pair_inverse, 'clip_diff', False, 0.)
-
-            entity_statistics['receiver_average_brisque_diff (↓)'] = average_metric(interference_per_pair_inverse, 'brisque_diff')
-            entity_statistics['receiver_average_clip_diff (↑)'] = average_metric(interference_per_pair_inverse, 'clip_diff')
-            entity_statistics['receiver_average_rmse (↓)'] = average_metric(interference_per_pair_inverse, 'rmse')
-            entity_statistics['receiver_average_ssim (↑)'] = average_metric(interference_per_pair_inverse, 'ssim')
-
-            entity_statistics['emitter_minus_receiver_worst_interfered_brisque_diff (↓)'] = entity_statistics['emitter_worst_interfered_brisque_diff (↓)'] - entity_statistics['receiver_worst_interfered_brisque_diff (↓)']
-            entity_statistics['emitter_minus_receiver_worst_interfered_clip_diff (↓)'] = entity_statistics['emitter_worst_interfered_clip_diff (↑)'] - entity_statistics['receiver_worst_interfered_clip_diff (↑)']
-            entity_statistics['emitter_minus_receiver_worst_interfered_rmse (↓)'] = entity_statistics['emitter_worst_interfered_rmse (↓)'] - entity_statistics['receiver_worst_interfered_rmse (↓)']
-            entity_statistics['emitter_minus_receiver_worst_interfered_ssim (↓)'] = entity_statistics['emitter_worst_interfered_ssim (↑)'] - entity_statistics['receiver_worst_interfered_ssim (↑)']
-
-            entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_brisque_diff (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_brisque_diff (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_brisque_diff (↓)']
-            entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_clip_diff (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_clip_diff (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_clip_diff (↓)']
-            entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_rmse (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_rmse (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_rmse (↓)']
-            entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_ssim (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_ssim (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_ssim (↓)']
-
-            entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_zero_clip_diff (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_zero_clip_diff (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_zero_clip_diff (↓)']
-
-            entity_statistics['emitter_minus_receiver_average_brisque_diff (↓)'] = entity_statistics['emitter_average_brisque_diff (↓)'] - entity_statistics['receiver_average_brisque_diff (↓)']
-            entity_statistics['emitter_minus_receiver_average_clip_diff (↑)'] = entity_statistics['emitter_average_clip_diff (↑)'] - entity_statistics['receiver_average_clip_diff (↑)']
-            entity_statistics['emitter_minus_receiver_average_rmse (↓)'] = entity_statistics['emitter_average_rmse (↓)'] - entity_statistics['receiver_average_rmse (↓)']
-            entity_statistics['emitter_minus_receiver_average_ssim (↑)'] = entity_statistics['emitter_average_ssim (↑)'] - entity_statistics['receiver_average_ssim (↑)']
-
-            for stat_name, stat_value in entity_statistics.items():
-                interference_per_entity[index][
-                    f'metric_{method}_{num_train_epochs}_{stat_name}'
-                ] = stat_value
-
-            # ── dino_diff Mp → Me aggregations ───────────────────────────────────
-            _sample_pair = next(iter(interference_per_pair.values()), {})
-            _has_dino_diff = "dino_diff" in _sample_pair
-
-            def _safe_metric_of_worst_dino(ipp: dict, is_worst_biggest: bool) -> float:
-                if not _has_dino_diff:
-                    return float('nan')
-                try:
-                    return metric_of_worst_interfered(ipp, 'dino_diff', is_worst_biggest)
-                except (KeyError, ValueError):
-                    return float('nan')
-
-            def _safe_number_worse_than_target_dino(ipp: dict, is_worst_biggest: bool) -> int:
-                if not _has_dino_diff:
-                    return 0
-                try:
-                    return number_of_interfered_worse_than_target(ipp, 'dino_diff', is_worst_biggest, target)
-                except (KeyError, ValueError):
-                    return 0
-
-            def _safe_average_dino(ipp: dict) -> float:
-                if not _has_dino_diff:
-                    return float('nan')
-                try:
-                    return average_metric(ipp, 'dino_diff')
-                except (KeyError, ValueError):
-                    return float('nan')
-
-            # dino_diff: lower = more interference (is_worst_biggest=False, like ssim)
-            entity_statistics['emitter_worst_interfered_dino_diff (↑)'] = \
-                _safe_metric_of_worst_dino(interference_per_pair, False)
-            entity_statistics['emitter_number_of_interfered_worse_than_target_dino_diff (↓)'] = \
-                _safe_number_worse_than_target_dino(interference_per_pair, False)
-            entity_statistics['emitter_average_dino_diff (↑)'] = \
-                _safe_average_dino(interference_per_pair)
-
-            entity_statistics['receiver_worst_interfered_dino_diff (↑)'] = \
-                _safe_metric_of_worst_dino(interference_per_pair_inverse, False)
-            entity_statistics['receiver_number_of_interfered_worse_than_target_dino_diff (↓)'] = \
-                _safe_number_worse_than_target_dino(interference_per_pair_inverse, False)
-            entity_statistics['receiver_average_dino_diff (↑)'] = \
-                _safe_average_dino(interference_per_pair_inverse)
-
-            entity_statistics['emitter_minus_receiver_worst_interfered_dino_diff (↑)'] = (
-                entity_statistics['emitter_worst_interfered_dino_diff (↑)']
-                - entity_statistics['receiver_worst_interfered_dino_diff (↑)']
-            )
-            entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_dino_diff (↓)'] = (
-                entity_statistics['emitter_number_of_interfered_worse_than_target_dino_diff (↓)']
-                - entity_statistics['receiver_number_of_interfered_worse_than_target_dino_diff (↓)']
-            )
-            entity_statistics['emitter_minus_receiver_average_dino_diff (↑)'] = (
-                entity_statistics['emitter_average_dino_diff (↑)']
-                - entity_statistics['receiver_average_dino_diff (↑)']
-            )
-
-            for stat_name, stat_value in {
-                k: v for k, v in entity_statistics.items()
-                if 'dino_diff' in k
-            }.items():
-                interference_per_entity[index][
-                    f'metric_{method}_{num_train_epochs}_{stat_name}'
-                ] = stat_value
-
-            # ── Embedding specificity ratio ────────────────────────────────────────
-            target_hf_name = get_target_overwrite(task, method, target)[0]
-            target_emb_path = os.path.join(
-                embedding_assets_folder,
-                f'embeddings_{task}_{target_hf_name}_{method}_{num_train_epochs:03d}.json',
-            )
-            ratio = _compute_specificity_ratio(
-                target_hf_name=target_hf_name,
-                task=task,
-                target_emb_path=target_emb_path,
-                baseline_mean=baseline_mean,
-            )
-
-            interference_per_entity[index][
-                f'metric_{method}_{num_train_epochs}_embedding_specificity_ratio (↑)'
-            ] = ratio
-
-            # ── Forget / Retain CLIP delta ────────────────────────────────────────
-            if target in interference_per_pair:
-                forget_clip_diff_val = float(interference_per_pair[target].get('clip_diff', float('nan')))
-            else:
-                forget_clip_diff_val = float('nan')
-                logger.warning(
-                    'forget_clip_diff: target %r absent from interference_per_pair.',
-                    target,
+            _entity_context = f'InterferencePerEntity for {task}/{method}/{num_train_epochs}/index={index}'
+            try:
+                logger.info(
+                    'Summarizing task=%s index=%d method=%s epochs=%d',
+                    task, index, method, num_train_epochs,
+                )
+                interference_per_pair = get_interference_per_pair(
+                    task, index, method, num_train_epochs, base_folder=base_folder,
                 )
 
-            retain_diffs = [
-                v.get('clip_diff', float('nan'))
-                for k, v in interference_per_pair.items()
-                if k != target
-            ]
-            retain_average_clip_diff_val = float(np.mean(retain_diffs)) if retain_diffs else float('nan')
+                assert index < len(metadata_filtered)
+                target = metadata_filtered[index]['name']
+                assert isinstance(target, str)
 
-            interference_per_entity[index][
-                f'metric_{method}_{num_train_epochs}_forget_clip_diff (↓)'
-            ] = forget_clip_diff_val
-            interference_per_entity[index][
-                f'metric_{method}_{num_train_epochs}_retain_average_clip_diff (↑)'
-            ] = retain_average_clip_diff_val
+                interference_per_pair_inverse = get_interference_per_pair_inverse(
+                    task, index, method, num_train_epochs, base_folder=base_folder,
+                )
+
+                # ── Base Mp metrics (brisque_diff, clip_diff, rmse, ssim) ───────────
+                entity_statistics: dict = {}
+
+                entity_statistics['emitter_worst_interfered_brisque_diff (↓)'] = metric_of_worst_interfered(interference_per_pair, 'brisque_diff', True)
+                entity_statistics['emitter_worst_interfered_clip_diff (↑)'] = metric_of_worst_interfered(interference_per_pair, 'clip_diff', False)
+                entity_statistics['emitter_worst_interfered_rmse (↓)'] = metric_of_worst_interfered(interference_per_pair, 'rmse', True)
+                entity_statistics['emitter_worst_interfered_ssim (↑)'] = metric_of_worst_interfered(interference_per_pair, 'ssim', False)
+
+                entity_statistics['emitter_number_of_interfered_worse_than_target_brisque_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'brisque_diff', True, target)
+                entity_statistics['emitter_number_of_interfered_worse_than_target_clip_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'clip_diff', False, target)
+                entity_statistics['emitter_number_of_interfered_worse_than_target_rmse (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'rmse', True, target)
+                entity_statistics['emitter_number_of_interfered_worse_than_target_ssim (↓)'] = number_of_interfered_worse_than_target(interference_per_pair, 'ssim', False, target)
+
+                entity_statistics['emitter_number_of_interfered_worse_than_zero_clip_diff (↓)'] = number_of_interfered_worse_than_threshold(interference_per_pair, 'clip_diff', False, 0.)
+
+                entity_statistics['emitter_average_brisque_diff (↓)'] = average_metric(interference_per_pair, 'brisque_diff')
+                entity_statistics['emitter_average_clip_diff (↑)'] = average_metric(interference_per_pair, 'clip_diff')
+                entity_statistics['emitter_average_rmse (↓)'] = average_metric(interference_per_pair, 'rmse')
+                entity_statistics['emitter_average_ssim (↑)'] = average_metric(interference_per_pair, 'ssim')
+
+                entity_statistics['receiver_worst_interfered_brisque_diff (↓)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'brisque_diff', True)
+                entity_statistics['receiver_worst_interfered_clip_diff (↑)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'clip_diff', False)
+                entity_statistics['receiver_worst_interfered_rmse (↓)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'rmse', True)
+                entity_statistics['receiver_worst_interfered_ssim (↑)'] = metric_of_worst_interfered(interference_per_pair_inverse, 'ssim', False)
+
+                entity_statistics['receiver_number_of_interfered_worse_than_target_brisque_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'brisque_diff', True, target)
+                entity_statistics['receiver_number_of_interfered_worse_than_target_clip_diff (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'clip_diff', False, target)
+                entity_statistics['receiver_number_of_interfered_worse_than_target_rmse (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'rmse', True, target)
+                entity_statistics['receiver_number_of_interfered_worse_than_target_ssim (↓)'] = number_of_interfered_worse_than_target(interference_per_pair_inverse, 'ssim', False, target)
+
+                entity_statistics['receiver_number_of_interfered_worse_than_zero_clip_diff (↓)'] = number_of_interfered_worse_than_threshold(interference_per_pair_inverse, 'clip_diff', False, 0.)
+
+                entity_statistics['receiver_average_brisque_diff (↓)'] = average_metric(interference_per_pair_inverse, 'brisque_diff')
+                entity_statistics['receiver_average_clip_diff (↑)'] = average_metric(interference_per_pair_inverse, 'clip_diff')
+                entity_statistics['receiver_average_rmse (↓)'] = average_metric(interference_per_pair_inverse, 'rmse')
+                entity_statistics['receiver_average_ssim (↑)'] = average_metric(interference_per_pair_inverse, 'ssim')
+
+                entity_statistics['emitter_minus_receiver_worst_interfered_brisque_diff (↓)'] = entity_statistics['emitter_worst_interfered_brisque_diff (↓)'] - entity_statistics['receiver_worst_interfered_brisque_diff (↓)']
+                entity_statistics['emitter_minus_receiver_worst_interfered_clip_diff (↓)'] = entity_statistics['emitter_worst_interfered_clip_diff (↑)'] - entity_statistics['receiver_worst_interfered_clip_diff (↑)']
+                entity_statistics['emitter_minus_receiver_worst_interfered_rmse (↓)'] = entity_statistics['emitter_worst_interfered_rmse (↓)'] - entity_statistics['receiver_worst_interfered_rmse (↓)']
+                entity_statistics['emitter_minus_receiver_worst_interfered_ssim (↓)'] = entity_statistics['emitter_worst_interfered_ssim (↑)'] - entity_statistics['receiver_worst_interfered_ssim (↑)']
+
+                entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_brisque_diff (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_brisque_diff (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_brisque_diff (↓)']
+                entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_clip_diff (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_clip_diff (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_clip_diff (↓)']
+                entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_rmse (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_rmse (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_rmse (↓)']
+                entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_ssim (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_target_ssim (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_target_ssim (↓)']
+
+                entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_zero_clip_diff (↓)'] = entity_statistics['emitter_number_of_interfered_worse_than_zero_clip_diff (↓)'] - entity_statistics['receiver_number_of_interfered_worse_than_zero_clip_diff (↓)']
+
+                entity_statistics['emitter_minus_receiver_average_brisque_diff (↓)'] = entity_statistics['emitter_average_brisque_diff (↓)'] - entity_statistics['receiver_average_brisque_diff (↓)']
+                entity_statistics['emitter_minus_receiver_average_clip_diff (↑)'] = entity_statistics['emitter_average_clip_diff (↑)'] - entity_statistics['receiver_average_clip_diff (↑)']
+                entity_statistics['emitter_minus_receiver_average_rmse (↓)'] = entity_statistics['emitter_average_rmse (↓)'] - entity_statistics['receiver_average_rmse (↓)']
+                entity_statistics['emitter_minus_receiver_average_ssim (↑)'] = entity_statistics['emitter_average_ssim (↑)'] - entity_statistics['receiver_average_ssim (↑)']
+
+                for stat_name, stat_value in entity_statistics.items():
+                    interference_per_entity[index][
+                        f'metric_{method}_{num_train_epochs}_{stat_name}'
+                    ] = stat_value
+
+                # ── dino_diff Mp → Me aggregations ───────────────────────────────────
+                _sample_pair = next(iter(interference_per_pair.values()), {})
+                _has_dino_diff = "dino_diff" in _sample_pair
+
+                def _safe_metric_of_worst_dino(ipp: dict, is_worst_biggest: bool) -> float:
+                    if not _has_dino_diff:
+                        return float('nan')
+                    try:
+                        return metric_of_worst_interfered(ipp, 'dino_diff', is_worst_biggest)
+                    except (KeyError, ValueError):
+                        return float('nan')
+
+                def _safe_number_worse_than_target_dino(ipp: dict, is_worst_biggest: bool) -> int:
+                    if not _has_dino_diff:
+                        return 0
+                    try:
+                        return number_of_interfered_worse_than_target(ipp, 'dino_diff', is_worst_biggest, target)
+                    except (KeyError, ValueError):
+                        return 0
+
+                def _safe_average_dino(ipp: dict) -> float:
+                    if not _has_dino_diff:
+                        return float('nan')
+                    try:
+                        return average_metric(ipp, 'dino_diff')
+                    except (KeyError, ValueError):
+                        return float('nan')
+
+                # dino_diff: lower = more interference (is_worst_biggest=False, like ssim)
+                entity_statistics['emitter_worst_interfered_dino_diff (↑)'] = \
+                    _safe_metric_of_worst_dino(interference_per_pair, False)
+                entity_statistics['emitter_number_of_interfered_worse_than_target_dino_diff (↓)'] = \
+                    _safe_number_worse_than_target_dino(interference_per_pair, False)
+                entity_statistics['emitter_average_dino_diff (↑)'] = \
+                    _safe_average_dino(interference_per_pair)
+
+                entity_statistics['receiver_worst_interfered_dino_diff (↑)'] = \
+                    _safe_metric_of_worst_dino(interference_per_pair_inverse, False)
+                entity_statistics['receiver_number_of_interfered_worse_than_target_dino_diff (↓)'] = \
+                    _safe_number_worse_than_target_dino(interference_per_pair_inverse, False)
+                entity_statistics['receiver_average_dino_diff (↑)'] = \
+                    _safe_average_dino(interference_per_pair_inverse)
+
+                entity_statistics['emitter_minus_receiver_worst_interfered_dino_diff (↑)'] = (
+                    entity_statistics['emitter_worst_interfered_dino_diff (↑)']
+                    - entity_statistics['receiver_worst_interfered_dino_diff (↑)']
+                )
+                entity_statistics['emitter_minus_receiver_number_of_interfered_worse_than_target_dino_diff (↓)'] = (
+                    entity_statistics['emitter_number_of_interfered_worse_than_target_dino_diff (↓)']
+                    - entity_statistics['receiver_number_of_interfered_worse_than_target_dino_diff (↓)']
+                )
+                entity_statistics['emitter_minus_receiver_average_dino_diff (↑)'] = (
+                    entity_statistics['emitter_average_dino_diff (↑)']
+                    - entity_statistics['receiver_average_dino_diff (↑)']
+                )
+
+                for stat_name, stat_value in {
+                    k: v for k, v in entity_statistics.items()
+                    if 'dino_diff' in k
+                }.items():
+                    interference_per_entity[index][
+                        f'metric_{method}_{num_train_epochs}_{stat_name}'
+                    ] = stat_value
+
+                # ── Embedding specificity ratio ────────────────────────────────────────
+                target_hf_name = get_target_overwrite(task, method, target)[0]
+                target_emb_path = os.path.join(
+                    embedding_assets_folder,
+                    f'embeddings_{task}_{target_hf_name}_{method}_{num_train_epochs:03d}.json',
+                )
+                ratio = _compute_specificity_ratio(
+                    target_hf_name=target_hf_name,
+                    task=task,
+                    target_emb_path=target_emb_path,
+                    baseline_mean=baseline_mean,
+                )
+
+                interference_per_entity[index][
+                    f'metric_{method}_{num_train_epochs}_embedding_specificity_ratio (↑)'
+                ] = ratio
+
+                # ── Forget / Retain CLIP delta ────────────────────────────────────────
+                if target in interference_per_pair:
+                    forget_clip_diff_val = float(interference_per_pair[target].get('clip_diff', float('nan')))
+                else:
+                    forget_clip_diff_val = float('nan')
+                    logger.warning(
+                        'forget_clip_diff: target %r absent from interference_per_pair.',
+                        target,
+                    )
+
+                retain_diffs = [
+                    v.get('clip_diff', float('nan'))
+                    for k, v in interference_per_pair.items()
+                    if k != target
+                ]
+                retain_average_clip_diff_val = float(np.mean(retain_diffs)) if retain_diffs else float('nan')
+
+                interference_per_entity[index][
+                    f'metric_{method}_{num_train_epochs}_forget_clip_diff (↓)'
+                ] = forget_clip_diff_val
+                interference_per_entity[index][
+                    f'metric_{method}_{num_train_epochs}_retain_average_clip_diff (↑)'
+                ] = retain_average_clip_diff_val
+            except Exception as exc:
+                logger.warning(
+                    'InterferencePerEntity failed for task=%s index=%d method=%s epochs=%d: %s',
+                    task, index, method, num_train_epochs, exc, exc_info=True,
+                )
+                if ledger is not None:
+                    ledger.record(
+                        _entity_context, status='failed',
+                        exception_type=type(exc).__name__, message=str(exc),
+                    )
+                continue
+            if ledger is not None:
+                ledger.record(_entity_context, status='ok')
 
     save_interference_per_entity(task, interference_per_entity, base_folder=base_folder)
     logger.info('Saved interference_per_entity_%s.json', task)
@@ -422,6 +451,21 @@ def main() -> None:
         default='assets',
         help='Root assets folder relative to CWD (default: assets).',
     )
+    parser.add_argument(
+        '--ledger-path',
+        default='',
+        metavar='PATH',
+        help=(
+            'Where to append the per-entity run ledger (debugging/traceability only, '
+            "not a paper artifact). Default (empty): '{base_folder}/logs/pipeline_07_ledger.jsonl'."
+        ),
+    )
+    parser.add_argument(
+        '--no-ledger',
+        action='store_true',
+        default=False,
+        help='Disable writing the run ledger for this invocation.',
+    )
     args = parser.parse_args()
 
     if len(args.methods) != len(args.epochs):
@@ -432,15 +476,26 @@ def main() -> None:
 
     embedding_assets_folder = os.path.join(args.base_folder, 'datasets')
 
-    compute_for_task(
-        task=cast(Literal['scenes', 'objects', 'breeds', 'people'], args.task),
-        methods=cast(List[Literal['munba', 'uce', 'distil']], args.methods),
-        num_train_epochs_list=args.epochs,
-        index_start=args.index_start,
-        max_identities=args.max_identities,
-        embedding_assets_folder=embedding_assets_folder,
-        base_folder=args.base_folder,
-    )
+    ledger: Optional[RunLedger] = None
+    if not args.no_ledger:
+        ledger_path = args.ledger_path or os.path.join(args.base_folder, 'logs', 'pipeline_07_ledger.jsonl')
+        ledger = RunLedger(ledger_path)
+
+    try:
+        compute_for_task(
+            task=cast(Literal['scenes', 'objects', 'breeds', 'people'], args.task),
+            methods=cast(List[Literal['munba', 'uce', 'distil']], args.methods),
+            num_train_epochs_list=args.epochs,
+            index_start=args.index_start,
+            max_identities=args.max_identities,
+            embedding_assets_folder=embedding_assets_folder,
+            base_folder=args.base_folder,
+            ledger=ledger,
+        )
+    finally:
+        if ledger is not None:
+            logger.info('Run ledger: %d records written to %s', ledger.count, ledger.path)
+            ledger.close()
 
 
 if __name__ == '__main__':

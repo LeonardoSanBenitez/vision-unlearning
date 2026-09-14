@@ -5,13 +5,13 @@ sys.path.append('..')
 sys.path.append('../../vision-unlearning')
 
 from generate_unlearned_models import generate_images
-from vision_unlearning.unlearner import UnlearnerLoraDistillation
+from vision_unlearning.unlearner import UnlearnerSpare
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         prog='test_sample_img_UC',
-        description='Generate image answer set for unlearned models with FADE for UnlearnCanvaEval')
+        description='Generate image answer set for unlearned models with SPARE for UnlearnCanvaEval')
     parser.add_argument('--model_base_path', type=str, default="assets/data/sd", required=False, help="Name or path to trained model that should be modified.")
     parser.add_argument('--batch_size', type=int, default=20, required=False, help="Batch size for running batch image generation.")
     parser.add_argument('--save_base_path', type=str, default="assets/UC_test", required=False, help="Folder to save unlearned models.")

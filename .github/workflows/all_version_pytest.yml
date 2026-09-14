@@ -20,7 +20,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        # 3.11 rather than 3.12. The library cannot be installed on 3.12 at all:
+        # image-similarity-measures (0.3.6, the latest release, unmaintained since 2023)
+        # pins scikit-image >=0.20.0,<0.21.0, and no scikit-image in that range ships a
+        # cp312 wheel -- 0.20.0 predates Python 3.12, so pip is forced to build it from
+        # source, where it fails compiling pythran headers that need a newer C++ standard
+        # than that release's build sets. This job spent eight consecutive runs proving
+        # that, which is a slow way to be told a dependency does not support 3.12.
+        # Restoring 3.12 means replacing image-similarity-measures; see pyproject.toml.
+        python-version: ["3.10", "3.11"]
 
     steps:
       - uses: actions/checkout@v4
@@ -55,13 +63,28 @@ jobs:
       - name: Install package (editable mode)
         run: poetry run pip install -e .
 
+      # The merge gate. Deterministic tests only: a test marked `network` depends on a
+      # third-party download at call time and can fail for reasons unrelated to the code
+      # under test, and a test marked `gpu` needs a real card, which this runner does not
+      # have -- without the marker those are collected and skipped one by one, reporting a
+      # green run whose skip count nobody reads.
       - name: Run tests with coverage
         run: |
           echo "------------ Pytest + Coverage on Python ${{ matrix.python-version }} -------------"
-          poetry run pytest --cov=vision_unlearning \
+          poetry run pytest -m "not network and not gpu" --cov=vision_unlearning \
             --cov-report=xml:coverage-${{ matrix.python-version }}.xml \
             --cov-report=json:coverage-${{ matrix.python-version }}.json \
             --junitxml=reports/tests-results-${{ matrix.python-version }}.xml
+
+      # Reported, never blocking. A single red run here is a transient outage in someone
+      # else's release endpoint; a run of them across several days is a real defect and is
+      # what should be acted on.
+      - name: Run network-dependent tests (reported, not a gate)
+        continue-on-error: true
+        run: |
+          echo "--------- Network-dependent tests on Python ${{ matrix.python-version }} ---------"
+          poetry run pytest -m network \
+            --junitxml=reports/tests-results-network-${{ matrix.python-version }}.xml
 
       # Only create and push the badge on Python 3.10
       - name: Create Coverage Badge (only on Py3.10)
