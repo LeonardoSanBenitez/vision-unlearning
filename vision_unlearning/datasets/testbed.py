@@ -8,6 +8,7 @@ from pydantic import BaseModel, model_validator, PrivateAttr
 
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.artifact import Artifact, ArtifactNotAvailableError, SingleFileArtifact
+from vision_unlearning.datasets.entity_names import canonical_entity, substitute_concept
 
 
 logger = get_logger('testbed')
@@ -40,19 +41,16 @@ def get_target_preprocessed(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     target: str,
 ) -> str:
-    target_preprocessed: str
-    # TODO THIS SHOULD FOLLOW THE RULES CURRENTLY CODEDE AT get_target_overwrite!!!!!!!!!!
-    if task == 'people':
-        target_preprocessed = target  # TODO
-    elif task == 'breeds':
-        target_preprocessed = target  # TODO
-    elif task == 'scenes':
-        article = 'an' if (target[0].lower() in 'aeiou') else 'a'
-        target_preprocessed = f"{article} {target} scene"
-    else:
-        raise NotImplementedError()
+    """Return the canonical form of an entity name.
 
-    return target_preprocessed
+    Kept at this path because it is part of the published interface. The rule itself lives in
+    ``vision_unlearning.datasets.entity_names.canonical_entity``, which is where a new caller
+    should go: it is the single definition, it is idempotent, and it is covered by
+    ``tests/test_entity_names.py``.
+    """
+    if task == 'objects':
+        raise NotImplementedError()
+    return canonical_entity(task, target)
 
 
 def get_target_overwrite(
@@ -60,41 +58,18 @@ def get_target_overwrite(
     method: _type_method,
     target: str,
 ) -> Tuple[str, str]:
-    '''
-    @return preprocessed target, target_overwrite
-    '''
-    # TODO THIS SHOULD USE  get_target_preprocessed FOR THE TARGET!!!!
-    if task == 'people':
-        # target does NOT need to have an article,for example: picture of brad pitt
+    """Return the canonical form of an entity name, and the concept it is unlearned towards.
 
-        # target_race = metadata_filtered[index]['race'].replace('indian_middleEastern_latinoHispanic', 'middle eastern') # enum: white, asian, black, indian_middleEastern_latinoHispanic
-        # target_gender = 'male' if metadata_filtered[index]['gender']=='M' else 'female'  # Enum[M, F]
-        # article = 'an' if (target_race[0].lower() in 'aeiou') else 'a'
-        # target_overwrite = f"{article} {target_race} {target_gender}"  # For munba this is only the retain concept for final evaluation, there is no overwriting
-        target_overwrite = 'a child'
-    elif task == 'breeds':
-        # target does needs to have an article,for example: picture of a poodle
-        target_overwrite = 'a cat'
-        article = 'an' if (target[0].lower() in 'aeiou') else 'a'
-        #target = re.sub(r'\bdog\b', '', target, flags=re.IGNORECASE)
-        target = f"{article} {target}"
-    elif task == 'scenes':
-        # target does needs to have an article,for example: picture of a phone_booth
-        target_overwrite = 'the moon'
-        article = 'an' if (target[0].lower() in 'aeiou') else 'a'
-        target = f"{article} {target} scene"
-
-    else:
+    ``method`` is accepted and not used: the substitute concept is a property of the task
+    (``a child``, ``a cat``, ``the moon``) and never varied by unlearning method. The parameter
+    predates this module's split and is kept because the signature is published; new callers
+    should use ``entity_names.canonical_entity`` and ``entity_names.substitute_concept``, which
+    do not carry it. ``tests/test_entity_names.py`` asserts the returned form is identical for
+    every method over all 300 entities, so the parameter cannot quietly start mattering.
+    """
+    if task == 'objects':
         raise NotImplementedError()
-
-    target = target.replace('_', ' ')
-    target = re.sub(r'\s+', ' ', target).strip()
-
-    assert isinstance(target_overwrite, str)
-    assert isinstance(target, str)
-    assert len(target) >= 3
-
-    return target, target_overwrite
+    return canonical_entity(task, target), substitute_concept(task)
 
 
 ##########################################

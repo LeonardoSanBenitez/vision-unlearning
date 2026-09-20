@@ -23,7 +23,7 @@ _NEAR_ZERO = 5.0  # |clip_diff| below this at both seeds counts as "barely moved
 def main() -> int:
     import numpy as np
 
-    from vision_unlearning.benchmarks.I_care.result_templates import _short_entity_display
+    from vision_unlearning.datasets.entity_names import display_entity
 
     parser = argparse.ArgumentParser(description="Cross-seed reproducibility of the every-epoch grids.")
     parser.add_argument("--tasks", nargs="+", default=["breeds", "people", "scenes"])
@@ -77,7 +77,7 @@ def main() -> int:
             "target": hf_name_of[target_name],
             "target_clip_diff": {str(first): round(last(first, names.index(target_name)), 2),
                                  str(second): round(last(second, names.index(target_name)), 2)},
-            "receivers_that_moved": [_short_entity_display(hf_name_of[names[e]]) for e in moved],
+            "receivers_that_moved": [display_entity(hf_name_of[names[e]]) for e in moved],
             "rank_agreement_over_all_receivers": round(rank_agreement(receivers), 3),
             "rank_agreement_over_receivers_that_moved": round(rank_agreement(moved), 3),
             "receivers_near_zero_at_both_seeds": len(still),

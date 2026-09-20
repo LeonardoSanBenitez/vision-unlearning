@@ -1094,7 +1094,7 @@ class TestInterferenceBySimilarityRankPlot:
         fig, ax = rt.plot(rt._compute_from_scratch(), return_fig=True)
         legend = ax.get_legend()
         labels = {t.get_text() for t in legend.get_texts()}
-        # most-interfered Bob, Dora ; least-interfered Cleo, Evan (names passed through _short_entity_display)
+        # most-interfered Bob, Dora ; least-interfered Cleo, Evan (names passed through display_entity)
         assert {"Bob", "Dora", "Cleo", "Evan"} <= labels
         plt.close(fig)
 

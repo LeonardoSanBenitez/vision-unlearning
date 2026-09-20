@@ -33,7 +33,7 @@ def main() -> int:
     import matplotlib.pyplot as plt
     from PIL import Image
 
-    from vision_unlearning.benchmarks.I_care.result_templates import _short_entity_display
+    from vision_unlearning.datasets.entity_names import display_entity
 
     parser = argparse.ArgumentParser(description="Forgetting vs collateral change at two learning rates.")
     parser.add_argument("--suffix-a", default="", help="run suffix of the first grid (canonical run)")
@@ -90,7 +90,7 @@ def main() -> int:
     }
     (_OUT / "learning_rate_collateral.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
-    labels = [_short_entity_display(n) for n in names]
+    labels = [display_entity(n) for n in names]
     x = np.arange(len(names))
     width = 0.38
     fig, axes = plt.subplots(2, 1, figsize=(13, 8), sharex=True)

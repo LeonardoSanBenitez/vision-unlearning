@@ -53,9 +53,8 @@ def main() -> int:
     from PIL import Image
 
     from vision_unlearning.metrics import MetricImageImage, MetricImageTextSimilarity
-    from vision_unlearning.benchmarks.I_care.result_templates import (
-        _display_unlearning_algorithm, _short_entity_display,
-    )
+    from vision_unlearning.benchmarks.I_care.result_templates import _display_unlearning_algorithm
+    from vision_unlearning.datasets.entity_names import display_entity
     from select_entities import _GROUP_STYLE
 
     parser = argparse.ArgumentParser(description="rmse and ssim alongside clip_diff, over the epoch axis.")
@@ -120,7 +119,7 @@ def main() -> int:
     fig, axes = plt.subplots(3, 1, figsize=(12, 13), sharex=True)
     for entity in display_order:
         name = names[entity]
-        label = _short_entity_display(hf_name_of[name], max_chars=34)
+        label = display_entity(hf_name_of[name], max_chars=34)
         if name == target_name:
             style: Dict[str, Any] = {"color": "black", "linewidth": 2.6, "linestyle": "-", "zorder": 5}
             label = f"{label} (target)"

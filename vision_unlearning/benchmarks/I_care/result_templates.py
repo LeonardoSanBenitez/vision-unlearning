@@ -94,26 +94,9 @@ from vision_unlearning.benchmarks.I_care.utils import (
     InsufficientSamplesError,
 )
 from vision_unlearning.benchmarks.I_care.similarity import Similarity
+from vision_unlearning.datasets.entity_names import display_entity
 
 logger = get_logger('I_care')
-
-_ARTICLE_RE = re.compile(r'^[Aa]n? ')
-
-
-def _short_entity_display(raw_name: str, max_chars: int = 24) -> str:
-    """Remove leading article ('a ', 'an ') and truncate to *max_chars* for plot column titles.
-
-    Examples::
-
-        _short_entity_display('a bouvier des flandres dog')  # 'bouvier des flandres dog'
-        _short_entity_display('An ice skating rink')         # 'ice skating rink'
-        _short_entity_display('George W. Bush')              # 'George W. Bush'
-    """
-    name = _ARTICLE_RE.sub('', raw_name)
-    if len(name) > max_chars:
-        name = name[:max_chars - 1] + '…'
-    return name
-
 
 # Backend (software) unlearning-algorithm name -> display name used in plots. The mapping is the
 # inverse of GUI_TO_BACKEND['unlearning_algorithm'] (the same software<->display mapping forgety uses,
@@ -648,7 +631,7 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
         for ent, colour in entity_color.items():
             xi, yi = name_to_xy[ent]
             ax.scatter([xi], [yi], color=colour, s=28, zorder=5, edgecolor='black', linewidth=0.4)
-            label_text = _short_entity_display(
+            label_text = display_entity(
                 get_target_overwrite(meta['task'], meta['unlearning_algorithm'], ent)[0],
                 max_chars=20,
             )
@@ -669,7 +652,7 @@ class ResultTemplateMetricSimilarityAlignmentOne(ResultTemplate):
             if ent in entity_color:
                 continue
             xi, yi = name_to_xy[ent]
-            label_text = _short_entity_display(
+            label_text = display_entity(
                 get_target_overwrite(meta['task'], meta['unlearning_algorithm'], ent)[0],
                 max_chars=20,
             )
@@ -882,7 +865,7 @@ class ResultTemplateInterferenceBySimilarityRank(ResultTemplate):
         for group, colour in ((labeled_most, 'crimson'), (labeled_least, 'seagreen')):
             for ent in group:
                 pos = name_to_pos[ent]
-                label = _short_entity_display(
+                label = display_entity(
                     get_target_overwrite(meta['task'], meta['unlearning_algorithm'], ent)[0],
                     max_chars=24,
                 )
@@ -3470,7 +3453,7 @@ class ResultTemplateVisualSummaryBase(ResultTemplate):
                 if row == 0:
                     raw_name = get_target_overwrite(task, unlearning_algorithm, name)[0]
                     ax.set_title(
-                        f'{_short_entity_display(raw_name)}\n{col_values[name]:.2f}',
+                        f'{display_entity(raw_name)}\n{col_values[name]:.2f}',
                         rotation=0, fontsize=8, pad=2, loc='center',
                     )
 

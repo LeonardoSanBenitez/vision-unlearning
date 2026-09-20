@@ -473,7 +473,7 @@ def render_scatter(selection: Dict[str, Any], out_path: str) -> None:
 
     # Every selected entity is named on the figure. The values are not written next to the names: the
     # position of a point already gives both of them, and repeating them as text only crowds the plot.
-    from vision_unlearning.benchmarks.I_care.result_templates import _short_entity_display
+    from vision_unlearning.datasets.entity_names import display_entity
     similarity_of = {point["name"]: point["clip_similarity"] for point in scatter["all_receivers"]}
     annotations = [(target["hf_name"], scatter["target_self_similarity"], target["self_clip_diff"])]
     annotations += [(receiver["hf_name"], similarity_of[receiver["name"]], receiver["clip_diff"])
@@ -484,7 +484,7 @@ def render_scatter(selection: Dict[str, Any], out_path: str) -> None:
         # of their point; otherwise consecutive labels alternate sides, which keeps two entities of similar
         # similarity and interference - the common case, since the pairs are chosen to be alike - apart.
         to_the_left = x > right_edge - 8 or position % 2 == 1
-        ax.annotate(_short_entity_display(label, max_chars=30), (x, y), textcoords="offset points",
+        ax.annotate(display_entity(label, max_chars=30), (x, y), textcoords="offset points",
                     xytext=(-8 if to_the_left else 8, 6), fontsize=7,
                     ha="right" if to_the_left else "left")
 

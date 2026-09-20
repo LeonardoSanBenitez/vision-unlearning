@@ -181,9 +181,8 @@ def main() -> int:
     from vision_unlearning.metrics import MetricImageTextSimilarity
     from vision_unlearning.datasets.testbed import get_target_overwrite
     from vision_unlearning.utils.logger import get_logger, setup_loggers
-    from vision_unlearning.benchmarks.I_care.result_templates import (
-        _display_unlearning_algorithm, _short_entity_display,
-    )
+    from vision_unlearning.benchmarks.I_care.result_templates import _display_unlearning_algorithm
+    from vision_unlearning.datasets.entity_names import display_entity
 
     logger = get_logger("epoch_grid")
     setup_loggers(modules_info=["unlearning"])
@@ -334,7 +333,7 @@ def main() -> int:
         out_png = _OUT / f"epoch_grid{suffix}_seed{seed}.png"
         render_grid(
             cell=cell, clip_diff=clip_diff, row_labels=rows,
-            column_labels=[_short_entity_display(hf_name_of[name]) for name, _ in entities],
+            column_labels=[display_entity(hf_name_of[name]) for name, _ in entities],
             display_order=display_order, out_png=out_png,
             title=(f"Method: {_display_unlearning_algorithm(_METHOD).upper()} | "
                    f"Overwrite '{target_pre}' to '{target_over}' | "

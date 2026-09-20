@@ -82,9 +82,8 @@ def main() -> int:
     import matplotlib.pyplot as plt
     from PIL import Image
 
-    from vision_unlearning.benchmarks.I_care.result_templates import (
-        _display_unlearning_algorithm, _short_entity_display,
-    )
+    from vision_unlearning.benchmarks.I_care.result_templates import _display_unlearning_algorithm
+    from vision_unlearning.datasets.entity_names import display_entity
 
     parser = argparse.ArgumentParser(description="Per-epoch spatial difference maps for one every-epoch run.")
     parser.add_argument("--task", choices=["breeds", "people", "scenes"], required=True)
@@ -154,7 +153,7 @@ def main() -> int:
             if column == 0:
                 ax.set_ylabel(f"epoch {epochs[row]}", fontsize=8, rotation=0, ha="right", va="center")
     for column, entity in enumerate(display_order):
-        label = _short_entity_display(hf_name_of[names[entity]])
+        label = display_entity(hf_name_of[names[entity]])
         axes[0][column].set_title(
             (f"{label} (target)" if column == 0 else label)
             + f"\nchange={statistics[f'{epochs[0]},{entity}']['mean_absolute_change']:.1f}, "

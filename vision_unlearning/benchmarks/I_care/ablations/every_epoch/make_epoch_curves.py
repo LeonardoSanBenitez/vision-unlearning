@@ -33,9 +33,8 @@ def main() -> int:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from vision_unlearning.benchmarks.I_care.result_templates import (
-        _display_unlearning_algorithm, _short_entity_display,
-    )
+    from vision_unlearning.benchmarks.I_care.result_templates import _display_unlearning_algorithm
+    from vision_unlearning.datasets.entity_names import display_entity
     from select_entities import _GROUP_STYLE
 
     parser = argparse.ArgumentParser(description="clip_diff trajectories for one every-epoch run.")
@@ -71,7 +70,7 @@ def main() -> int:
     fig, ax = plt.subplots(figsize=(12, 8.5))
     for index in ordered:
         name = names[index]
-        label = _short_entity_display(hf_name_of[name], max_chars=34)
+        label = display_entity(hf_name_of[name], max_chars=34)
         if name == target_name:
             style: Dict[str, Any] = dict(_TARGET_STYLE)
             label = f"{label} (target)"
