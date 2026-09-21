@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -10,7 +9,6 @@ from pathlib import Path
 from typing import List, Optional
 
 from vision_unlearning.benchmarks.u_care import configuration as cfg
-from vision_unlearning.benchmarks.u_care.upload_assets import upload_file_asset
 
 
 def build_uce_command(
@@ -121,9 +119,6 @@ def main() -> None:
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--working-directory")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--upload-to-hf", action="store_true")
-    parser.add_argument("--hf-token", default=None)
-    parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
 
     state_dict_path = run_uce(
@@ -138,16 +133,6 @@ def main() -> None:
     if not args.dry_run and args.expected_model_folder:
         state_dict_path = materialize_expected_model_path(
             str(state_dict_path), args.expected_model_folder
-        )
-    if args.upload_to_hf:
-        token = args.hf_token or os.getenv("HF_TOKEN")
-        if not token:
-            parser.error("--upload-to-hf requires --hf-token or HF_TOKEN")
-        upload_file_asset(
-            state_dict_path,
-            f"models/uce/{args.emitter}/unet_state_dict.pth",
-            repo_id=args.hf_repo_id,
-            token=token,
         )
     print(f"UCE output: {state_dict_path}")
 

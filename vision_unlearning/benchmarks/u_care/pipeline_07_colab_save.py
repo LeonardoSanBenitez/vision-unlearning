@@ -3,13 +3,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional
 
 from vision_unlearning.benchmarks.u_care import configuration as cfg
 from vision_unlearning.benchmarks.u_care.metadata import EntityMetadata, InterferencePerEntity, InterferencePerPair
-from vision_unlearning.benchmarks.u_care.upload_assets import upload_file_asset
 
 
 PAIR_METRICS = ("accuracy", "accuracy_diff", "target_probability", "target_probability_diff")
@@ -73,9 +71,6 @@ def build_per_entity_rows(
 def compute_from_artifacts(
     method: cfg.type_unlearning_algorithm,
     base_folder: str = "assets",
-    upload_to_hf: bool = False,
-    hf_token: Optional[str] = None,
-    hf_repo_id: str = cfg.U_CARE_REMOTE_REPOSITORY_NAME,
 ) -> List[Dict[str, object]]:
     """Read available per-pair artifacts and write the per-entity artifact."""
     metadata = EntityMetadata(base_folder=base_folder).compute()
@@ -91,15 +86,6 @@ def compute_from_artifacts(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(rows, handle, indent=2)
-    if upload_to_hf:
-        if not hf_token:
-            raise ValueError("upload_to_hf requires hf_token or HF_TOKEN")
-        upload_file_asset(
-            path,
-            f"interference_per_entity{cfg.model_segment('sd_style50')}.json",
-            repo_id=hf_repo_id,
-            token=hf_token,
-        )
     print(f"Wrote {len(rows)} emitter records to {path}")
     return rows
 
@@ -108,17 +94,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--method", choices=list(cfg.ALGORITHM_REGISTRY), required=True)
     parser.add_argument("--base-folder", default="assets")
-    parser.add_argument("--upload-to-hf", action="store_true")
-    parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
-    parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
-    compute_from_artifacts(
-        args.method,
-        args.base_folder,
-        upload_to_hf=args.upload_to_hf,
-        hf_token=args.hf_token,
-        hf_repo_id=args.hf_repo_id,
-    )
+    compute_from_artifacts(args.method, args.base_folder)
 
 
 if __name__ == "__main__":

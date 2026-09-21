@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -14,7 +13,6 @@ from tqdm import tqdm
 
 from vision_unlearning.benchmarks.u_care import configuration as cfg
 from vision_unlearning.benchmarks.u_care.generated_dataset import GeneratedDataset
-from vision_unlearning.benchmarks.u_care.upload_assets import upload_folder_asset
 
 
 def _extract_state_dict(artifact: object) -> dict[str, torch.Tensor]:
@@ -200,7 +198,7 @@ def generate_answer_set(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", required=True)
-    parser.add_argument("--output-folder", default=None)
+    parser.add_argument("--output-folder", default="assets/datasets/generated_baseline_sd_style50")
     parser.add_argument("--seed", type=int, nargs="+", default=[188])
     parser.add_argument(
         "--style",
@@ -221,54 +219,17 @@ def main() -> None:
         default="off",
         help="Filename prefix: 'off' for baseline, 'on' for unlearned.",
     )
-    parser.add_argument("--emitter", choices=cfg.UNLEARNABLE_ENTITIES)
-    parser.add_argument("--method", choices=list(cfg.ALGORITHM_REGISTRY))
-    parser.add_argument("--upload-to-hf", action="store_true")
-    parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
-    parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
-
-    if args.unet_state_dict is not None and (args.emitter is None or args.method is None):
-        parser.error("--unet-state-dict requires --emitter and --method")
-    if args.unet_state_dict is None and (args.emitter is not None or args.method is not None):
-        parser.error("--emitter and --method are only valid with --unet-state-dict")
-    if args.emitter is not None and args.style not in (None, args.emitter):
-        parser.error("--style must match --emitter for an unlearned answer set")
-
-    style = args.style or args.emitter
-    if args.output_folder is None:
-        output_folder = (
-            "assets/datasets/generated_baseline_sd_style50"
-            if args.emitter is None
-            else f"assets/datasets/generated_{args.emitter}_{args.method}_sd_style50"
-        )
-    else:
-        output_folder = args.output_folder
-
     generate_answer_set(
         model_path=args.model_path,
-        output_folder=output_folder,
+        output_folder=args.output_folder,
         seeds=args.seed,
         device=args.device,
-        style=style,
+        style=args.style,
         overwrite=args.overwrite,
         unet_state_dict_path=args.unet_state_dict,
         prefix=args.prefix,
     )
-    if args.upload_to_hf:
-        if not args.hf_token:
-            parser.error("--upload-to-hf requires --hf-token or HF_TOKEN")
-        remote_folder = (
-            "datasets/generated_baseline_sd_style50"
-            if args.emitter is None
-            else f"datasets/generated_{args.emitter}_{args.method}_sd_style50"
-        )
-        upload_folder_asset(
-            Path(output_folder),
-            remote_folder,
-            repo_id=args.hf_repo_id,
-            token=args.hf_token,
-        )
 
 
 if __name__ == "__main__":

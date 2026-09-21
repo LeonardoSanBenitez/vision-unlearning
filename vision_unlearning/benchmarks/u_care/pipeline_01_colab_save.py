@@ -16,10 +16,6 @@ from PIL import Image
 
 from vision_unlearning.benchmarks.u_care import configuration as cfg
 from vision_unlearning.metrics.image import MetricImageClassifier
-from vision_unlearning.benchmarks.u_care.upload_assets import (
-    upload_file_asset,
-    upload_folder_asset,
-)
 
 
 def _repo_root() -> Path:
@@ -187,14 +183,10 @@ if __name__ == "__main__":
     parser.add_argument("--object-checkpoint", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--upload-to-hf", action="store_true")
-    parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
-    parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
 
-    metadata_path: Optional[Path] = None
     if args.write_metadata:
-        metadata_path = build_metadata()
+        build_metadata()
     if args.run_classifier_check:
         run_classifier_sanity_check(
             reference_dir=args.reference_dir,
@@ -203,27 +195,6 @@ if __name__ == "__main__":
             output_dir=args.output_dir,
             device=args.device,
         )
-
-    if args.upload_to_hf:
-        if not args.hf_token:
-            parser.error("--upload-to-hf requires --hf-token or HF_TOKEN")
-        reference_dir = args.reference_dir or _assets_root() / "datasets" / "reference"
-        if reference_dir.exists():
-            upload_folder_asset(
-                reference_dir,
-                "datasets/reference",
-                repo_id=args.hf_repo_id,
-                token=args.hf_token,
-            )
-        if metadata_path is None:
-            metadata_path = _assets_root() / "metadata_filtered.json"
-        if metadata_path.exists():
-            upload_file_asset(
-                metadata_path,
-                "metadata_filtered.json",
-                repo_id=args.hf_repo_id,
-                token=args.hf_token,
-            )
 
     if not args.write_metadata and not args.run_classifier_check:
         print("No action requested. Use --write-metadata and/or --run-classifier-check.")

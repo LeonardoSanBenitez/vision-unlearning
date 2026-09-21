@@ -83,6 +83,31 @@ The main u-care artifacts are:
 
 The storage behavior is implemented through the shared artifact base class so that the package remains interoperable with the rest of the library.
 
+## Uploading completed image assets
+
+The Hugging Face dataset repository is `LeonardoBenitez/u-care`. The local `assets/`
+tree mirrors its remote paths. Reference images are uploaded to
+`datasets/reference/`; baseline images use `datasets/generated_baseline_sd_style50/`;
+and each unlearned answer set uses its existing
+`datasets/generated_{emitter}_{method}_sd_style50/` directory name.
+
+Preview the upload without network access:
+
+```powershell
+python -m vision_unlearning.benchmarks.u_care.upload_assets --dry-run
+```
+
+After setting `HF_TOKEN`, upload the discovered reference, baseline, and generated
+answer-set folders:
+
+```powershell
+python -m vision_unlearning.benchmarks.u_care.upload_assets
+```
+
+Full unlearned model checkpoints under `assets/models/` are intentionally excluded;
+the benchmark plan treats them as reproducible intermediate artifacts. Use
+`--generated-folder` repeatedly when publishing only selected answer sets.
+
 ## Implementation notes
 
 The package is intentionally split into the same layers as I-CARE:

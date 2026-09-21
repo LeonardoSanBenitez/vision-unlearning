@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
@@ -11,7 +10,6 @@ from PIL import Image
 
 from vision_unlearning.benchmarks.u_care import configuration as cfg
 from vision_unlearning.benchmarks.u_care.metadata import BaselineAccuracy
-from vision_unlearning.benchmarks.u_care.upload_assets import upload_file_asset
 
 if TYPE_CHECKING:
     from vision_unlearning.metrics.image import MetricImageClassifier
@@ -120,9 +118,6 @@ def main() -> None:
     parser.add_argument("--emitter")
     parser.add_argument("--method", choices=list(cfg.ALGORITHM_REGISTRY))
     parser.add_argument("--baseline-path")
-    parser.add_argument("--upload-to-hf", action="store_true")
-    parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
-    parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
 
     style_classifier = MetricImageClassifier(
@@ -158,20 +153,6 @@ def main() -> None:
             f"{args.method}{cfg.model_segment('sd_style50')}.json"
         )
     write_json(result, output_path)
-    if args.upload_to_hf:
-        if not args.hf_token:
-            parser.error("--upload-to-hf requires --hf-token or HF_TOKEN")
-        remote_path = (
-            "datasets/accuracies_original.json"
-            if args.emitter is None and args.method is None
-            else output_path
-        )
-        upload_file_asset(
-            Path(output_path),
-            remote_path,
-            repo_id=args.hf_repo_id,
-            token=args.hf_token,
-        )
     print(f"Wrote {len(result)} receiver records to {output_path}")
 
 
