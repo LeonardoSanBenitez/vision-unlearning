@@ -55,9 +55,13 @@ def collect_assets(
     assets: List[Asset] = []
     references = references_folder or base_folder / "datasets" / "reference"
     if not references.exists():
-        legacy_references = base_folder / "references"
-        if legacy_references.exists():
-            references = legacy_references
+        for legacy_references in (
+            base_folder / "datasets" / "reference_51",
+            base_folder / "references",
+        ):
+            if legacy_references.exists():
+                references = legacy_references
+                break
     if references.exists():
         assets.append((references, "datasets/reference"))
 
@@ -65,8 +69,15 @@ def collect_assets(
         generated_folders = sorted(
             path
             for parent in (base_folder / "datasets", base_folder)
-            for path in parent.glob("generated_*")
+            for path in parent.iterdir()
             if path.is_dir()
+            and (
+                path.name.startswith("generated_")
+                or re.fullmatch(
+                    r".+_(ca|ediff|esd|fmn|salun|seot|shs|spm|uce)_sd_style_?50",
+                    path.name,
+                )
+            )
         )
     for folder in generated_folders:
         if folder.is_dir() and (
@@ -101,11 +112,15 @@ def upload_assets(
     repo_id: str = U_CARE_REMOTE_REPOSITORY_NAME,
     token: Optional[str] = None,
     dry_run: bool = False,
+    create_repo: bool = False,
 ) -> None:
     """Upload each selected folder while preserving its canonical remote path."""
     if not dry_run and not token:
         raise ValueError("HF_TOKEN or an explicit token is required for uploads.")
     api = None if dry_run else HfApi(token=token)
+    if api is not None and create_repo:
+        api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True)
+        print(f"Dataset repository is ready: {repo_id}")
     for local_folder, remote_folder in validate_assets(assets):
         count = _file_count(local_folder)
         print(f"{('Would upload' if dry_run else 'Uploading')} {count} files: "
@@ -162,6 +177,11 @@ def main() -> None:
     )
     parser.add_argument("--repo-id", default=U_CARE_REMOTE_REPOSITORY_NAME)
     parser.add_argument("--token", default=os.getenv("HF_TOKEN"))
+    parser.add_argument(
+        "--create-repo",
+        action="store_true",
+        help="Create the dataset repository if it does not exist.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -170,7 +190,13 @@ def main() -> None:
         references_folder=args.references_folder,
         generated_folders=args.generated_folder,
     )
-    upload_assets(assets, repo_id=args.repo_id, token=args.token, dry_run=args.dry_run)
+    upload_assets(
+        assets,
+        repo_id=args.repo_id,
+        token=args.token,
+        dry_run=args.dry_run,
+        create_repo=args.create_repo,
+    )
 
 
 if __name__ == "__main__":
