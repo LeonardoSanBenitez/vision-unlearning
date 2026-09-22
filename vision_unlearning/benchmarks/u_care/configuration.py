@@ -86,7 +86,7 @@ def entity_domain(entity: str) -> type_domain:
 
 
 ANSWER_SET_SEEDS: List[int] = [188, 288, 588, 688, 888]
-U_CARE_REMOTE_REPOSITORY_NAME = "LeonardoBenitez/u-care"
+U_CARE_REMOTE_REPOSITORY_NAME = "vision-unlearning/u-care"
 
 
 def model_segment(model: type_model) -> str:
