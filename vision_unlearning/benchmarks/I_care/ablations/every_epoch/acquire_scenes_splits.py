@@ -81,6 +81,7 @@ def _copy_as_symlink_substitute(src: str, dst: str) -> None:
 
 
 def main() -> int:
+    from vision_unlearning.benchmarks.I_care.split_captions import caption_fn_for
     from vision_unlearning.datasets import split_dataset_sun
     from vision_unlearning.utils.logger import get_logger, setup_loggers
 
@@ -163,6 +164,7 @@ def main() -> int:
             str(sun_dir), str(forget_dir), str(retain_dir), target,
             forget_max_img=smallest_entity, retain_max_img_per_class=smallest_entity,
             restrict_labels=restrict_labels,
+            caption_fn=caption_fn_for('scenes'),
         )
         logger.info("split built in %.0fs", time.time() - t1)
     finally:

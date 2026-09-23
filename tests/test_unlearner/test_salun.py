@@ -542,3 +542,87 @@ def test_the_context_records_the_global_cut_the_subset_came_from() -> None:
     assert context['global_elements'] == sum(int(t.numel()) for t in magnitudes.values())
     assert context['materialised_elements'] == magnitudes[name].numel()
     assert context['global_kept'] > context['materialised_kept']
+
+
+########################################
+# What strings actually reach the tokenizer
+########################################
+class _RecordingTokenizer:
+    """Records every list of captions it is asked to tokenize, in order."""
+
+    model_max_length = 77
+
+    def __init__(self) -> None:
+        self.seen: list = []
+
+    def __call__(self, captions: Any, **_kwargs: Any) -> Any:
+        from types import SimpleNamespace
+
+        self.seen.append(list(captions))
+        return SimpleNamespace(
+            input_ids=torch.zeros((len(captions), self.model_max_length), dtype=torch.long),
+        )
+
+
+def _examples(captions: Any) -> Dict[str, Any]:
+    from PIL import Image
+
+    return {
+        'text': list(captions),
+        'image': [Image.new('RGB', (8, 8)) for _ in captions],
+    }
+
+
+def _transform(_image: Any) -> torch.Tensor:
+    return torch.zeros(3, 8, 8)
+
+
+def test_the_forget_side_conditions_on_the_stored_caption_and_distils_onto_the_substitute() -> None:
+    """SalUn never templates anything: it conditions on the caption as stored and distils onto
+    `An image of <substitute>`. Both sides are therefore the same template with a different
+    concept only because the caption on disk is already the prompted form -- which is the whole
+    point of storing it that way, and what this records."""
+    from vision_unlearning.benchmarks.I_care.split_captions import expected_caption
+    from vision_unlearning.utils.training import preprocess_train
+
+    stored = expected_caption('people', 'Mark_Philippoussis_0005.jpg')
+    tokenizer = _RecordingTokenizer()
+
+    preprocess_train(
+        _examples([stored, stored]), tokenizer, 'text', 'image', _transform,
+        concept_overwrite='a child',
+    )
+
+    assert tokenizer.seen == [
+        ['An image of Mark Philippoussis', 'An image of Mark Philippoussis'],
+        ['An image of a child', 'An image of a child'],
+    ]
+
+
+def test_the_retain_side_conditions_on_the_stored_caption_and_nothing_else() -> None:
+    from vision_unlearning.benchmarks.I_care.split_captions import expected_caption
+    from vision_unlearning.utils.training import preprocess_train
+
+    stored = expected_caption('people', 'Adrien_Brody_0005.jpg')
+    tokenizer = _RecordingTokenizer()
+
+    examples = preprocess_train(_examples([stored]), tokenizer, 'text', 'image', _transform)
+
+    assert tokenizer.seen == [['An image of Adrien Brody']]
+    assert 'forget_ids' not in examples
+
+
+def test_a_bare_class_name_on_disk_would_be_conditioned_on_verbatim() -> None:
+    """The failure this guards against, stated as a test: nothing downstream repairs a caption, so
+    a split built without the rule trains the model on `Mark_Philippoussis` while the substitute
+    side, the generated corpus and every evaluation prompt speak in whole sentences."""
+    from vision_unlearning.utils.training import preprocess_train
+
+    tokenizer = _RecordingTokenizer()
+
+    preprocess_train(
+        _examples(['Mark_Philippoussis']), tokenizer, 'text', 'image', _transform,
+        concept_overwrite='a child',
+    )
+
+    assert tokenizer.seen == [['Mark_Philippoussis'], ['An image of a child']]

@@ -33,6 +33,9 @@ _HEAVY_TEST_FILES = [
     "test_unlearner/test_lora_trainer.py",
     "test_unlearner/test_gpu_unlearning.py",
     "test_device.py",
+    # No torch of its own, but it drives the dataset split builders, and
+    # vision_unlearning.datasets.others imports datasets/base.py for a logger, which imports torch.
+    "test_split_builders.py",
 ]
 
 if importlib.util.find_spec("torch") is None:

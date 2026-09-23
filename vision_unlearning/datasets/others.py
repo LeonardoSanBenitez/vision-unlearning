@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from collections import Counter, defaultdict
-from typing import Optional, List, Dict, Tuple
+from typing import Callable, Optional, List, Dict, Tuple
 import re
 import unicodedata
 import urllib.request
@@ -30,17 +30,27 @@ from vision_unlearning.datasets.base import logger
 ################################
 # General utilities
 ################################
-def create_metadata_jsonl(folder: Path):
+def create_metadata_jsonl(folder: Path, caption_fn: Optional[Callable[[str], str]] = None) -> None:
     """
     Create metadata.jsonl for all .jpg images in `folder`.
-    Each line: {"file_name": "<filename>", "text": "<class_name>"}
+    Each line: {"file_name": "<filename>", "text": "<caption>"}
+
+    The caption is derived from the image filename, whose last underscore-separated part is an
+    index or a uuid. By default the caption IS that class name; pass `caption_fn` to turn it into
+    whatever string the images should be captioned with -- a benchmark that conditions a model on
+    these captions needs them to be the same strings it prompts with, and only the caller knows
+    what those are.
+
+    @param folder: directory of .jpg images; metadata.jsonl is written into it.
+    @param caption_fn: maps the class name taken from the filename to the caption to store.
     """
     out_file = folder / "metadata.jsonl"
     with open(out_file, "w", encoding="utf-8") as f:
         for img_path in sorted(folder.glob("*.jpg")):
             name = img_path.name
             class_name = "_".join(name.split("_")[:-1])  # remove last part (e.g., 0001.jpg)
-            record = {"file_name": name, "text": class_name}
+            caption = caption_fn(class_name) if caption_fn is not None else class_name
+            record = {"file_name": name, "text": caption}
             f.write(json.dumps(record) + "\n")
     print(f"Created {out_file}")
 
@@ -164,12 +174,13 @@ def count_classes_dataset_lfw():
     return sorted_counts
 
 
-def download_dataset_lfw(dataset_forget_name: str, dataset_retain_name: str, target: str, forget_max_img: int = 0, retain_max_img_per_class: int = 0, restrict_labels: Optional[List[str]] = None) -> Dict[str, int]:
+def download_dataset_lfw(dataset_forget_name: str, dataset_retain_name: str, target: str, forget_max_img: int = 0, retain_max_img_per_class: int = 0, restrict_labels: Optional[List[str]] = None, caption_fn: Optional[Callable[[str], str]] = None) -> Dict[str, int]:
     '''
     Downloads and already splits (TODO: separate that into two functions)
     @param forget_max_img: if >0, no more than this number of images will be saved for the forget set
     @param retain_max_img_per_class: if >0, will stratify the retain set such that no more images of one class are saved
     @param restrict_labels: if not none, save only those entities
+    @param caption_fn: maps a class name to the caption stored for it; see create_metadata_jsonl
     @return how many classes of each entity were saved
     '''
     ds = load_dataset("bitmind/lfw", split="train")
@@ -199,8 +210,8 @@ def download_dataset_lfw(dataset_forget_name: str, dataset_retain_name: str, tar
             img.save(os.path.join(dataset_retain_name, filename), format="JPEG")
 
     # Create metadata (class as the caption)
-    create_metadata_jsonl(Path(dataset_forget_name))
-    create_metadata_jsonl(Path(dataset_retain_name))
+    create_metadata_jsonl(Path(dataset_forget_name), caption_fn)
+    create_metadata_jsonl(Path(dataset_retain_name), caption_fn)
 
     return class_to_number
 
@@ -234,12 +245,13 @@ def count_classes_dataset_taras_breeds(dataset_base_path: str) -> List[Tuple[str
     return sorted_counts
 
 
-def split_dataset_taras_breeds(downloaded_folder: str, dataset_forget_name: str, dataset_retain_name: str, target: str, forget_max_img: int = 0, retain_max_img_per_class: int = 0, restrict_labels: Optional[List[str]] = None) -> Dict[str, int]:
+def split_dataset_taras_breeds(downloaded_folder: str, dataset_forget_name: str, dataset_retain_name: str, target: str, forget_max_img: int = 0, retain_max_img_per_class: int = 0, restrict_labels: Optional[List[str]] = None, caption_fn: Optional[Callable[[str], str]] = None) -> Dict[str, int]:
     '''
     Given an already downloaded Taras Dog Breeds dataset at `downloaded_folder` (one folder per class), split images into forget and retain sets.
     @param forget_max_img: if >0, no more than this number of images will be saved for the forget set
     @param retain_max_img_per_class: if >0, will stratify the retain set such that no more images of one class are saved
     @param restrict_labels: if not none, save only those entities
+    @param caption_fn: maps a class name to the caption stored for it; see create_metadata_jsonl
     @return how many classes of each entity were saved
     '''
     os.makedirs(dataset_forget_name, exist_ok=True)
@@ -278,8 +290,8 @@ def split_dataset_taras_breeds(downloaded_folder: str, dataset_forget_name: str,
                 # print(f"Saving the {class_to_number[label]}th image of class {label}")
 
     # Create metadata (class as the caption)
-    create_metadata_jsonl(Path(dataset_forget_name))
-    create_metadata_jsonl(Path(dataset_retain_name))
+    create_metadata_jsonl(Path(dataset_forget_name), caption_fn)
+    create_metadata_jsonl(Path(dataset_retain_name), caption_fn)
 
     return class_to_number
 
@@ -354,12 +366,13 @@ def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> 
 # }
 # ```
 ################################
-def split_dataset_sun(downloaded_folder: str, dataset_forget_name: str, dataset_retain_name: str, target: str, forget_max_img: int = 0, retain_max_img_per_class: int = 0, restrict_labels: Optional[List[str]] = None) -> Dict[str, int]:
+def split_dataset_sun(downloaded_folder: str, dataset_forget_name: str, dataset_retain_name: str, target: str, forget_max_img: int = 0, retain_max_img_per_class: int = 0, restrict_labels: Optional[List[str]] = None, caption_fn: Optional[Callable[[str], str]] = None) -> Dict[str, int]:
     '''
     Given an already downloaded SUN dataset at `downloaded_folder` (one folder per class), split images into forget and retain sets.
     @param forget_max_img: if >0, no more than this number of images will be saved for the forget set
     @param retain_max_img_per_class: if >0, will stratify the retain set such that no more images of one class are saved
     @param restrict_labels: if not none, save only those entities
+    @param caption_fn: maps a class name to the caption stored for it; see create_metadata_jsonl
     @return how many classes of each entity were saved
     '''
     os.makedirs(dataset_forget_name, exist_ok=True)
@@ -399,8 +412,8 @@ def split_dataset_sun(downloaded_folder: str, dataset_forget_name: str, dataset_
         # print(f"Saving the {class_to_number[label]}th image of class {label}")
 
     # Create metadata (class as the caption)
-    create_metadata_jsonl(Path(dataset_forget_name))
-    create_metadata_jsonl(Path(dataset_retain_name))
+    create_metadata_jsonl(Path(dataset_forget_name), caption_fn)
+    create_metadata_jsonl(Path(dataset_retain_name), caption_fn)
 
     return class_to_number
 

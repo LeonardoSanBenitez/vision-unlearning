@@ -21,6 +21,7 @@ _ICARE_DIR = _THIS.parents[2]
 
 
 def main() -> int:
+    from vision_unlearning.benchmarks.I_care.split_captions import caption_fn_for
     from vision_unlearning.datasets import download_dataset_lfw
     from vision_unlearning.utils.logger import get_logger, setup_loggers
 
@@ -60,6 +61,7 @@ def main() -> int:
         forget_max_img=smallest_entity,
         retain_max_img_per_class=smallest_entity,
         restrict_labels=restrict_labels,
+        caption_fn=caption_fn_for('people'),
     )
 
     forget_files = [p for p in forget_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg")]

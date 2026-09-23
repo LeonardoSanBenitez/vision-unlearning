@@ -41,6 +41,7 @@ def _copy_as_symlink_substitute(src: str, dst: str) -> None:
 
 
 def main() -> int:
+    from vision_unlearning.benchmarks.I_care.split_captions import caption_fn_for
     from vision_unlearning.datasets import (
         count_classes_dataset_taras_breeds,
         download_dataset_taras_breeds,
@@ -124,6 +125,7 @@ def main() -> int:
             forget_max_img=smallest_entity,
             retain_max_img_per_class=smallest_entity,
             restrict_labels=restrict_labels,
+            caption_fn=caption_fn_for('breeds'),
         )
         logger.info("Split built in %.1fs", time.time() - t1)
     finally:
