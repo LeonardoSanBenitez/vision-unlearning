@@ -139,8 +139,13 @@ class TestNeitherPipelineBuildsItsOwn:
 
     @pytest.mark.parametrize('relative', _PIPELINES)
     def test_the_pipeline_imports_the_builder(self, relative: str) -> None:
+        """Directly, or through the session configuration, which is where one of them gets its
+        whole hyperparameter dictionary from and which builds these lists itself."""
         source = (_repo_root() / relative).read_text(encoding='utf-8')
-        assert 'from vision_unlearning.benchmarks.I_care.prompts import' in source
+        assert (
+            'from vision_unlearning.benchmarks.I_care.prompts import' in source
+            or 'from vision_unlearning.benchmarks.I_care.session_config import' in source
+        )
 
     @pytest.mark.parametrize('relative', _PIPELINES)
     def test_the_pipeline_assigns_no_prompt_list_of_its_own(self, relative: str) -> None:

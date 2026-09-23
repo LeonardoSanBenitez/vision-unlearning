@@ -21,7 +21,10 @@ os.environ['WANDB_DISABLED'] = "true"
 assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non-empty"
 #!huggingface-cli login --token ${HF_TOKEN}
 
-from vision_unlearning.benchmarks.I_care.prompts import evaluation_prompts  # noqa: E402
+from vision_unlearning.benchmarks.I_care.session_config import (  # noqa: E402
+    assert_split_captions_ready,
+    session_hyperparameters,
+)
 from vision_unlearning.unlearner import Unlearner, UnlearnerSpare  # noqa: E402
 from vision_unlearning.unlearner import UnlearnerLoraDirect  # Munba  # noqa: E402
 from vision_unlearning.unlearner import UCE, ConceptType  # noqa: E402
@@ -181,13 +184,6 @@ for index in range(index_start, index_start + max_identities):
 
     target_preprocessed, target_overwrite = get_target_overwrite(task, method, target)  # TODO: should this be done right after defining the target?
 
-    # Evaluation set
-    # Just for calculating basic metrics and debugging
-    example_prompts_forget, example_prompts_retain = evaluation_prompts(task, target)
-    validation_prompt = example_prompts_forget[0]
-    assert type(validation_prompt) == str
-    assert type(example_prompts_forget) == list
-    assert type(example_prompts_retain) == list
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -199,78 +195,22 @@ for index in range(index_start, index_start + max_identities):
     ###########################################
     # Hyperparameters
     ###########################################
-    hyperparameters: Dict[str, Any] = {
-        "output_dir": output_dir,
-        "hub_model_id": hub_model_id,
-        "final_eval_prompts_forget": example_prompts_forget,
-        "final_eval_prompts_retain": example_prompts_retain,
-    }
-    if method == 'uce':
-        # TODO: these hyperparams are good for scenes
-        # At least for UCE and for people, I know they have to be changed (I think i ran with erase 0.7, preserve 0.5, l0.5... we can see in the saved models)
-        hyperparameters.update({
-            "pretrained_model_name_or_path": model_base_name,
-            "erase_scale": 30,
-            "preserve_scale": 0.01,
-            "lamb": 0.01,
-            "edit_concepts": target_preprocessed,  # example: cat
-            "guide_concepts": task,  # Optional. Example: animals. Default: same as edit_concepts
-            "preserve_concepts": task,  # TODO: this isnt good... Example: lion; tiger; leopard
-            "expand_prompts": False,
-            "device": device,
-            "save_entire_model": False,
-        })
-    elif method == 'salun':
-        # SalUn takes the benchmark's existing splits and nothing else: the forget images, the
-        # retain images, and the concept the forget side is pushed towards. No data is generated
-        # for it. The substitute concept comes from get_target_overwrite rather than a literal,
-        # so it cannot drift away from the phrase the images are generated and evaluated with.
-        hyperparameters.update({
-            "pretrained_model_name_or_path": model_base_name,
-            "dataset_forget_name": dataset_forget_name,
-            "dataset_retain_name": dataset_retain_name,
-            "overwriting_concept": target_overwrite,
-            "train_method": "xattn",
-            "num_train_epochs": num_train_epochs,
-            "resolution": 512,
-            "random_flip": True,
-            "dataloader_num_workers": 0,  # workers must pickle the transform; a nested function cannot be
-            "per_device_train_batch_size": 1,
-            "device": device,
-        })
-    else:
-        hyperparameters.update({
-            "model_name_or_path": model_base_name,
-            "dataset_forget_name": dataset_forget_name,
-            "dataset_retain_name": dataset_retain_name,
-
-            "validation_prompt": validation_prompt,
-
-
-            "dataloader_num_workers": 2,
-            "resolution": 512,
-            "num_validation_images": 1,
-
-            "mixed_precision": "no",
-            "learning_rate": 6e-4,
-            "max_grad_norm": 5.0,
-            
-            "num_train_epochs": num_train_epochs,
-            "validation_epochs": num_train_epochs + 1,  # No intermediate validation
-            "checkpointing_steps": 10000,
-            "lr_scheduler_type": "constant",
-            "lr_warmup_steps": 0,
-            "save_strategy": "epoch",
-            "save_total_limit": 2,
-            "random_flip": True,
-            
-            "lora_r": 16,
-            "target_modules": ["to_k", "to_q", "to_v", "to_out.0"],
-            "lora_alpha": 4,
-            "lora_dropout": 0.2,
-            
-            "seed": 42,
-        })
+    assert_split_captions_ready(task, method, dataset_forget_name, dataset_retain_name)
+    hyperparameters: Dict[str, Any] = session_hyperparameters(
+        task,
+        method,
+        target,
+        output_dir=output_dir,
+        dataset_forget_name=dataset_forget_name,
+        dataset_retain_name=dataset_retain_name,
+        model_base_name=model_base_name,
+        device=device,
+        num_train_epochs=num_train_epochs,
+        hub_model_id=hub_model_id,
+    )
+    if method in ('distil', 'munba'):
+        # How much fits on this card: a property of the machine, not of the session, which is why
+        # it is the one piece of the configuration that did not move out of this file.
         if free_memory > 20e9:
             hyperparameters.update({
                 "per_device_train_batch_size": 4,
@@ -299,30 +239,12 @@ for index in range(index_start, index_start + max_identities):
 
     unlearner: Unlearner
     if method == 'distil':
-        hyperparameters['overwritting_concept'] = target_overwrite
-        # The forget side is conditioned on the same phrase the images are generated and evaluated
-        # with, rather than on the bare underscored name stored in the dataset's captions, so that
-        # the intervention is fitted at the point in text-embedding space that is later queried.
-        hyperparameters['forget_concept'] = target_preprocessed
         hyperparameters['gradient_weighting_method'] = GradientWeightingMethodSimple(forget_weight=0.3, retain_weight=1.0)
         unlearner = UnlearnerSpare(**hyperparameters)
     elif method == 'munba':
         hyperparameters['gradient_weighting_method'] = GradientWeightingMethodMunba()
-        if task=='scenes':
-            hyperparameters.update({
-                "learning_rate": 1.5e-4,
-                "max_grad_norm": 1.0,
-                "lora_r": 4,
-            })
-
         unlearner=UnlearnerLoraDirect(**hyperparameters)
     elif method == 'uce':
-        if task=='breeds':
-            hyperparameters.update({
-                "erase_scale": 230,
-                "preserve_scale": 1.2,
-                "lamb": 0.1,
-            })
         unlearner = UCE(**hyperparameters)
     elif method == 'salun':
         unlearner = SalUn(**hyperparameters)
