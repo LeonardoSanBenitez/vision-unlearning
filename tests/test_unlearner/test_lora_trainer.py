@@ -294,13 +294,16 @@ def test_the_forget_side_falls_back_to_the_caption_column_only_when_told_to() ->
         "with no forget concept configured the trainer must fall back to the dataset's captions"
     )
 
-    pipeline_source = (
+    # The benchmark decides this in its session configuration, which is a pure function and is
+    # asserted value by value in tests/test_session_config.py. This is the shape guard: the field
+    # must still be set there, from the naming rule rather than from whatever the dataset stores.
+    session_config_source = (
         pathlib.Path(__file__).resolve().parents[2]
-        / "vision_unlearning" / "benchmarks" / "I_care" / "pipeline_03_unlearn_model.py"
+        / "vision_unlearning" / "benchmarks" / "I_care" / "session_config.py"
     ).read_text(encoding="utf-8")
-    assert "hyperparameters['forget_concept']" in pipeline_source, (
-        "the benchmark dispatch no longer passes forget_concept, so distillation runs would silently "
-        "return to conditioning the forget side on bare metadata names"
+    assert "settings['forget_concept'] = canonical_entity(task, entity)" in session_config_source, (
+        "the benchmark's session configuration no longer sets forget_concept, so distillation runs "
+        "would silently return to conditioning the forget side on bare metadata names"
     )
 
 

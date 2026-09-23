@@ -278,13 +278,22 @@ def test_the_substitute_concept_is_read_from_the_accessor_not_written_as_a_liter
     against a literal that happened to be spelled the same way today. What must be true is that the
     two pipelines read the concept from the accessor and hand *that* to the unlearner.
     """
-    for script in ("pipeline_03_unlearn_model.py", "pipeline_04_generate_dataset.py"):
+    wiring = {
+        # One pipeline still builds its own dictionary and reads the concept from the accessor.
+        "pipeline_04_generate_dataset.py": ('"overwriting_concept": target_overwrite', "get_target_overwrite("),
+        # The other's session configuration was extracted into its own module, which reads the
+        # concept from the naming rule directly rather than through the accessor that wraps it.
+        # What that module returns is asserted field by field in tests/test_session_config.py, which
+        # is stronger than this check; this one only guards the shape.
+        "session_config.py": ("'overwriting_concept': substitute_concept(task)", "substitute_concept("),
+    }
+    for script, (expected_wiring, expected_source) in wiring.items():
         source = _source_of(os.path.join("vision_unlearning", "benchmarks", "I_care", script))
-        assert "get_target_overwrite(" in source, (
-            f"{script} does not call get_target_overwrite; the concept must not be spelled out locally"
+        assert expected_source in source, (
+            f"{script} does not read the concept from a single rule; it must not be spelled out locally"
         )
-        assert '"overwriting_concept": target_overwrite' in source, (
-            f"{script} does not pass the accessor's result as the overwriting concept"
+        assert expected_wiring in source, (
+            f"{script} does not pass that rule's result as the overwriting concept"
         )
         for literal in ('"overwriting_concept": "', "'overwriting_concept': '"):
             assert literal not in source, (
@@ -299,7 +308,8 @@ def test_the_forget_and_retain_splits_are_the_benchmark_s_own() -> None:
     Its two dataset arguments must be the same variables every other data-driven method is given, so
     that adding it created no new corpus and no new generation step.
     """
-    source = _source_of(os.path.join("vision_unlearning", "benchmarks", "I_care", "pipeline_03_unlearn_model.py"))
-    salun_block = source.split("elif method == 'salun':", 1)[1].split("    else:", 1)[0]
-    assert '"dataset_forget_name": dataset_forget_name' in salun_block
-    assert '"dataset_retain_name": dataset_retain_name' in salun_block
+    source = _source_of(os.path.join("vision_unlearning", "benchmarks", "I_care", "session_config.py"))
+    salun_block = source.split("def _salun(", 1)[1].split("
+def ", 1)[0]
+    assert "'dataset_forget_name': dataset_forget_name" in salun_block
+    assert "'dataset_retain_name': dataset_retain_name" in salun_block
