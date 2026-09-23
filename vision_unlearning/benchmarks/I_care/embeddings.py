@@ -24,7 +24,9 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, cast
+
+from vision_unlearning.datasets.entity_names import canonical_entity, type_entity_task
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +128,7 @@ def embed_forgetting_session(
         metadata_filtered: Metadata list used to map prompt index → entity name.
                            metadata_filtered[i]['name'] corresponds to prompts[i].
         lora_state: 'on' for unlearned model images, 'off' for baseline images.
-        task: Task name, passed to get_target_preprocessed().
+        task: Task name, passed to canonical_entity().
         embed_image_fn: Injectable embedding function (image_path → [float]).
                         Required — there is no default. Pass embed_image_with_dino
                         (partially applied) or a test stub.
@@ -135,7 +137,7 @@ def embed_forgetting_session(
         List of records:
         [
             {
-                'prompted_entity': str,   # entity name (preprocessed)
+                'prompted_entity': str,   # entity in its canonical form, as the prompt asks for it
                 'seed': int,
                 'prompt': str,
                 'embedding': List[float], # 384-dim CLS embedding
@@ -143,10 +145,7 @@ def embed_forgetting_session(
             ...
         ]
     """
-    from vision_unlearning.datasets.testbed import (
-        get_target_preprocessed,
-        get_generated_dataset_file,
-    )
+    from vision_unlearning.datasets.testbed import get_generated_dataset_file
 
     if embed_image_fn is None:
         raise ValueError(
@@ -157,7 +156,7 @@ def embed_forgetting_session(
     records: List[Dict[str, Any]] = []
     for seed in seeds:
         for i, prompt in enumerate(prompts):
-            prompted_entity = get_target_preprocessed(task, metadata_filtered[i]["name"])  # type: ignore[arg-type]
+            prompted_entity = canonical_entity(cast(type_entity_task, task), metadata_filtered[i]["name"])
             filename = get_generated_dataset_file(lora_state, seed, prompt)
             image_path = os.path.join(dataset_folder, filename)
             if not os.path.exists(image_path):
@@ -199,7 +198,7 @@ def embed_forgetting_session_batched(
         prompts: Full prompt strings.
         metadata_filtered: Metadata list: metadata_filtered[i]['name'] → prompts[i].
         lora_state: 'on' for unlearned model, 'off' for baseline.
-        task: Task name, passed to get_target_preprocessed().
+        task: Task name, passed to canonical_entity().
         model: DINOv2 model (from load_dino_model()), on device, in eval mode.
         transform: torchvision transform pipeline (from load_dino_model()).
         device: Torch device string ('cuda' or 'cpu').
@@ -212,16 +211,13 @@ def embed_forgetting_session_batched(
     import torch
     from PIL import Image
 
-    from vision_unlearning.datasets.testbed import (
-        get_target_preprocessed,
-        get_generated_dataset_file,
-    )
+    from vision_unlearning.datasets.testbed import get_generated_dataset_file
 
     # Collect all (image_path, metadata) tuples
     items: List[Dict[str, Any]] = []
     for seed in seeds:
         for i, prompt in enumerate(prompts):
-            prompted_entity = get_target_preprocessed(task, metadata_filtered[i]["name"])  # type: ignore[arg-type]
+            prompted_entity = canonical_entity(cast(type_entity_task, task), metadata_filtered[i]["name"])
             filename = get_generated_dataset_file(lora_state, seed, prompt)
             image_path = os.path.join(dataset_folder, filename)
             if not os.path.exists(image_path):

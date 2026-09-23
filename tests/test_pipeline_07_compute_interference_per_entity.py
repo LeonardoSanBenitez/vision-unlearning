@@ -3,6 +3,7 @@ import json
 import os
 from typing import Any, Dict, List
 
+import numpy as np
 import pytest
 
 from vision_unlearning.benchmarks.I_care import pipeline_07_compute_interference_per_entity as p07
@@ -164,3 +165,66 @@ class TestPerEntityErrorIsolation:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestTheJoinKeyIsThePrompt:
+    """Adversarial fixtures for the ``prompted_entity`` join (ticket 2026-07-16).
+
+    Writer and reader agree on the wrong key today, so no recomputation over the real corpus can
+    tell the right join from the wrong one: the values come out the same either way. These fixtures
+    are built so that the two keys give *different* answers, which is the only way to observe which
+    one is in use.
+    """
+
+    @staticmethod
+    def _file_with_disagreeing_entities() -> Dict[str, Any]:
+        """Two records of the same prompt whose recorded entity disagrees."""
+        return {
+            "embeddings": [
+                {"prompted_entity": "an an abbey scene scene", "seed": 42,
+                 "prompt": "An image of an abbey scene", "embedding": [1.0, 0.0]},
+                {"prompted_entity": "an abbey scene", "seed": 43,
+                 "prompt": "An image of an abbey scene", "embedding": [0.0, 1.0]},
+            ],
+        }
+
+    def test_records_sharing_a_prompt_form_one_bucket(self) -> None:
+        per_entity = p07._mean_embeddings_per_entity(self._file_with_disagreeing_entities())
+
+        assert list(per_entity.keys()) == ["An image of an abbey scene"]
+        mean = per_entity["An image of an abbey scene"]
+        assert pytest.approx(float(mean[0]), abs=1e-12) == 2 ** -0.5
+        assert pytest.approx(float(mean[1]), abs=1e-12) == 2 ** -0.5
+
+    def test_a_record_without_a_prompt_is_refused(self) -> None:
+        payload = {"embeddings": [{"prompted_entity": "an abbey scene", "seed": 42, "embedding": [1.0, 0.0]}]}
+        with pytest.raises(KeyError):
+            p07._mean_embeddings_per_entity(payload)
+
+    def test_specificity_ratio_ignores_the_recorded_entity(self, tmp_path: Any) -> None:
+        """Hand-computed: d_self = 1 - (1,0) dot (0,1) = 1; d_other = 1 - (1,0) dot (0.6,0.8) = 0.4;
+        ratio = 2.5. Every ``prompted_entity`` below is nonsense, and none of it may matter."""
+        target_path = os.path.join(str(tmp_path), "embeddings_scenes_target.json")
+        with open(target_path, "w", encoding="utf-8") as fh:
+            json.dump({
+                "embeddings": [
+                    {"prompted_entity": "@@@", "seed": 42,
+                     "prompt": "An image of an abbey scene", "embedding": [1.0, 0.0]},
+                    {"prompted_entity": "", "seed": 42,
+                     "prompt": "An image of a badlands scene", "embedding": [1.0, 0.0]},
+                ],
+            }, fh)
+
+        baseline_mean = {
+            "An image of an abbey scene": np.array([0.0, 1.0]),
+            "An image of a badlands scene": np.array([0.6, 0.8]),
+        }
+
+        ratio = p07._compute_specificity_ratio(
+            target_hf_name="abbey",
+            task="scenes",
+            target_emb_path=target_path,
+            baseline_mean=baseline_mean,
+        )
+
+        assert pytest.approx(ratio, rel=1e-12) == 2.5

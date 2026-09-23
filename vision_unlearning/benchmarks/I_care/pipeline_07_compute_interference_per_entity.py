@@ -45,10 +45,10 @@ from vision_unlearning.benchmarks.I_care import (
     average_metric,
 )
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
+from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task
 from vision_unlearning.datasets.testbed import (
     get_metadata_filtered,
     get_target_overwrite,
-    get_target_preprocessed,
 )
 
 
@@ -57,24 +57,29 @@ setup_loggers(modules_info=['unlearning'])
 
 
 def _mean_embeddings_per_entity(embedding_data: dict) -> dict:
-    """Return {prompted_entity: L2-normalised mean embedding vector} from a JSON embedding file.
+    """Return {prompt: L2-normalised mean embedding vector} from a JSON embedding file.
 
     Expects the embedding file format:
         {'prompted_entity': 'X', 'prompt': 'An image of X', 'embedding': [...]}
 
+    The bucket key is the **prompt**, never ``prompted_entity``: the prompt is the string the
+    images were generated with, it is the join key the rest of the benchmark already uses
+    (CONTRIBUTING_ICARE.md section 6), and it is the only one that is right regardless of how the
+    entity name happened to be spelled when the file was written.
+
     Raises
     ------
     KeyError
-        If any record is missing the 'prompted_entity' field.
+        If any record is missing the 'prompt' field.
     """
     buckets: Dict[str, List[list]] = defaultdict(list)
     for i, entry in enumerate(embedding_data['embeddings']):
-        if 'prompted_entity' not in entry:
+        if 'prompt' not in entry:
             raise KeyError(
-                f"Embedding record {i} is missing 'prompted_entity'. "
+                f"Embedding record {i} is missing 'prompt'. "
                 "Regenerate it with the current pipeline_05 before re-running pipeline_07."
             )
-        buckets[entry['prompted_entity']].append(entry['embedding'])
+        buckets[entry['prompt']].append(entry['embedding'])
     result = {}
     for entity, vecs in buckets.items():
         arr = np.array(vecs)
@@ -120,7 +125,7 @@ def _compute_specificity_ratio(
     with open(target_emb_path) as _f:
         per_entity = _mean_embeddings_per_entity(json.load(_f))
 
-    self_key = get_target_preprocessed(task, target_hf_name)
+    self_key = generation_prompt(cast(type_entity_task, task), target_hf_name)
 
     if self_key not in per_entity or self_key not in baseline_mean:
         logger.warning(
