@@ -309,7 +309,6 @@ def test_the_forget_and_retain_splits_are_the_benchmark_s_own() -> None:
     that adding it created no new corpus and no new generation step.
     """
     source = _source_of(os.path.join("vision_unlearning", "benchmarks", "I_care", "session_config.py"))
-    salun_block = source.split("def _salun(", 1)[1].split("
-def ", 1)[0]
+    salun_block = source.split("def _salun(", 1)[1].split("def _lora(", 1)[0]
     assert "'dataset_forget_name': dataset_forget_name" in salun_block
     assert "'dataset_retain_name': dataset_retain_name" in salun_block
