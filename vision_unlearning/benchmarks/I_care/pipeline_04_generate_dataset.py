@@ -37,6 +37,7 @@ import dotenv
 import torch
 
 from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
+from vision_unlearning.benchmarks.I_care.prompts import evaluation_prompts
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
 
 
@@ -283,36 +284,8 @@ def run_normal(
         target_preprocessed, target_overwrite = get_target_overwrite(task, method, target)
 
         # Evaluation prompts for optional progress checks
-        if task in ("people", "breeds"):
-            validation_prompt = f"An image of {target_preprocessed}"
-            example_prompts_forget = [
-                f"An image of {target_preprocessed}",
-                f"Photograph of {target_preprocessed.replace('_', ' ')}; high definition",
-                f"An picture of {target_preprocessed} in the rain",
-                f"An picture of {target_preprocessed} running",
-            ]
-            example_prompts_retain = [
-                f"An image of {target_overwrite}",
-                f"Photograph of {target_overwrite}; high definition",
-                f"An picture of {target_overwrite} in the rain",
-                f"An picture of {target_overwrite} running",
-            ]
-        elif task == "scenes":
-            validation_prompt = f"An image of {target_preprocessed}"
-            example_prompts_forget = [
-                f"An image of {target_preprocessed}",
-                f"Photograph of {target_preprocessed.replace('_', ' ')}; high definition",
-                f"An picture of {target_preprocessed} full of people",
-                f"An picture of {target_preprocessed} during the night",
-            ]
-            example_prompts_retain = [
-                f"An image of {target_overwrite}",
-                f"Photograph of {target_overwrite}; high definition",
-                f"An picture of {target_overwrite} full of people",
-                f"An picture of {target_overwrite} during the night",
-            ]
-        else:
-            raise NotImplementedError(f"Unknown task: {task}")
+        example_prompts_forget, example_prompts_retain = evaluation_prompts(task, target)
+        validation_prompt = example_prompts_forget[0]
 
         # GPU memory info
         gc.collect()

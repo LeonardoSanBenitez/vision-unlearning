@@ -21,6 +21,7 @@ os.environ['WANDB_DISABLED'] = "true"
 assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non-empty"
 #!huggingface-cli login --token ${HF_TOKEN}
 
+from vision_unlearning.benchmarks.I_care.prompts import evaluation_prompts  # noqa: E402
 from vision_unlearning.unlearner import Unlearner, UnlearnerSpare  # noqa: E402
 from vision_unlearning.unlearner import UnlearnerLoraDirect  # Munba  # noqa: E402
 from vision_unlearning.unlearner import UCE, ConceptType  # noqa: E402
@@ -182,51 +183,8 @@ for index in range(index_start, index_start + max_identities):
 
     # Evaluation set
     # Just for calculating basic metrics and debugging
-    if (task == 'people'):
-        validation_prompt = f'An image of {target_preprocessed}'
-        example_prompts_forget = [
-            f'An image of {target_preprocessed}',
-            f'Photograph of {target_preprocessed.replace("_", " ")}; high definition',
-            f'An picture of {target_preprocessed} in the rain',
-            f'An picture of {target_preprocessed} running',
-        ]
-        example_prompts_retain = [
-            f'An image of {target_overwrite}',
-            f'Photograph of {target_overwrite}; high definition',
-            f'An picture of {target_overwrite} in the rain',
-            f'An picture of {target_overwrite} running',
-        ]
-    elif task == 'scenes':
-        validation_prompt = f'An image of {target_preprocessed}'
-        example_prompts_forget = [
-            f'An image of {target_preprocessed}',
-            f'Photograph of {target_preprocessed.replace("_", " ")}; high definition',
-            f'An picture of {target_preprocessed} full of people',
-            f'An picture of {target_preprocessed} during the night',
-        ]
-        example_prompts_retain = [
-            f'An image of {target_overwrite}',
-            f'Photograph of {target_overwrite}; high definition',
-            f'An picture of {target_overwrite} full of people',
-            f'An picture of {target_overwrite} during the night',
-        ]
-    elif task == 'breeds':
-        validation_prompt = f'An image of {target_preprocessed}'
-        target_preprocessed_next, _ = get_target_overwrite(task, method, metadata_filtered[(index + 1) % 100]['name'])
-        example_prompts_forget = [
-            f'An image of {target_preprocessed}',
-            f'Photograph of {target_preprocessed.replace("_", " ")}; high definition',
-            f'An picture of {target_preprocessed} in the rain',
-            f'An picture of {target_preprocessed} running',
-        ]
-        example_prompts_retain = [
-            f'An image of {target_preprocessed_next}',
-            f'Photograph of {target_preprocessed_next}; high definition',
-            f'An picture of {target_preprocessed_next} in the rain',
-            f'An picture of {target_preprocessed_next} running',
-        ]
-    else:
-        raise NotImplementedError()
+    example_prompts_forget, example_prompts_retain = evaluation_prompts(task, target)
+    validation_prompt = example_prompts_forget[0]
     assert type(validation_prompt) == str
     assert type(example_prompts_forget) == list
     assert type(example_prompts_retain) == list
@@ -286,7 +244,7 @@ for index in range(index_start, index_start + max_identities):
             "dataset_forget_name": dataset_forget_name,
             "dataset_retain_name": dataset_retain_name,
 
-            "validation_prompt": f"An image of {target_preprocessed}",
+            "validation_prompt": validation_prompt,
 
 
             "dataloader_num_workers": 2,
