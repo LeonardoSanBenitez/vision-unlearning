@@ -164,6 +164,46 @@ def upload_file_asset(
         token=token,
     )
 
+def upload_path_asset(
+    path: Path,
+    remote_root: str,
+    repo_id: str = U_CARE_REMOTE_REPOSITORY_NAME,
+    token: Optional[str] = None,
+    dry_run: bool = False,
+) -> None:
+    """
+    Upload a single file into the specified remote directory.
+
+    Example:
+        assets/results/summary.json
+            ->
+        experiment_v2/summary.json
+    """
+
+    if not path.is_file():
+        raise FileNotFoundError(f"File not found: {path}")
+
+    remote_path = f"{remote_root}/{path.name}"
+
+    if dry_run:
+        print(f"Would upload {path} -> {repo_id}:{remote_path}")
+        return
+
+    if not token:
+        raise ValueError("HF_TOKEN or an explicit token is required.")
+
+    HfApi(token=token).upload_file(
+        path_or_fileobj=str(path),
+        path_in_repo=remote_path,
+        repo_id=repo_id,
+        repo_type="dataset",
+        token=token,
+    )
+
+    print(f"Uploaded {path} -> {repo_id}:{remote_path}")
+
+
+
 def upload_root_directory(
     root_folder: Path,
     repo_id: str = U_CARE_REMOTE_REPOSITORY_NAME,
@@ -262,12 +302,20 @@ def main() -> None:
     "--upload-root",
     type=Path,
     help="Upload every immediate subdirectory under this folder into a newly created directory in the HF dataset repository.",
-)
+    )
+
+    parser.add_argument(
+        "--upload-path",
+        type=Path,
+        help="Upload a single file into the specified remote directory.",
+    )
 
     parser.add_argument(
         "--remote-root",
         help="Optional name for the created directory in the HF repository. Defaults to the local folder name.",
     )
+
+    
     args = parser.parse_args()
 
     # assets = collect_assets(
@@ -282,6 +330,19 @@ def main() -> None:
     #     dry_run=args.dry_run,
     #     create_repo=args.create_repo,
     # )
+
+    if args.upload_path:
+        if not args.remote_root:
+            parser.error("--remote-root is required with --upload-path")
+
+        upload_path_asset(
+            path=args.upload_path,
+            remote_root=args.remote_root,
+            repo_id=args.repo_id,
+            token=args.token,
+            dry_run=args.dry_run,
+        )
+        return
 
     if args.upload_root:
         upload_root_directory(
