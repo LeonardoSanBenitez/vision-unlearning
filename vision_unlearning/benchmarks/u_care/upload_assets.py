@@ -10,7 +10,7 @@ import os
 import re
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
-
+import tempfile
 from huggingface_hub import HfApi
 
 from vision_unlearning.benchmarks.u_care.configuration import (
@@ -164,6 +164,81 @@ def upload_file_asset(
         token=token,
     )
 
+def upload_root_directory(
+    root_folder: Path,
+    repo_id: str = U_CARE_REMOTE_REPOSITORY_NAME,
+    token: Optional[str] = None,
+    remote_root: Optional[str] = None,
+    dry_run: bool = False,
+) -> None:
+    """
+    Create a top-level directory in the HF dataset repo and upload every
+    immediate subdirectory inside `root_folder` into it.
+
+    Example:
+        assets/datasets/
+            reference/
+            generated_x/
+
+    becomes
+
+        datasets/
+            .gitkeep
+            reference/
+            generated_x/
+    """
+
+    if not root_folder.is_dir():
+        raise FileNotFoundError(f"Directory not found: {root_folder}")
+
+    remote_root = remote_root or root_folder.name
+
+    subfolders = sorted(p for p in root_folder.iterdir() if p.is_dir())
+
+    if not subfolders:
+        raise ValueError(f"No subdirectories found in {root_folder}")
+
+    if dry_run:
+        print(f"Would create remote directory: {repo_id}:{remote_root}")
+        for folder in subfolders:
+            print(f"Would upload {folder} -> {repo_id}:{remote_root}/{folder.name}")
+        return
+
+    if not token:
+        raise ValueError("HF_TOKEN or an explicit token is required.")
+
+    api = HfApi(token=token)
+
+    # Create the directory by uploading a tiny placeholder file.
+    with tempfile.NamedTemporaryFile("w", delete=False) as tmp:
+        tmp.write("")
+        placeholder = tmp.name
+
+    api.upload_file(
+        path_or_fileobj=placeholder,
+        path_in_repo=f"{remote_root}/.gitkeep",
+        repo_id=repo_id,
+        repo_type="dataset",
+        token=token,
+    )
+
+    os.remove(placeholder)
+
+    for folder in subfolders:
+        count = _file_count(folder)
+        print(
+            f"Uploading {count} files: "
+            f"{folder} -> {repo_id}:{remote_root}/{folder.name}"
+        )
+
+        api.upload_folder(
+            folder_path=str(folder),
+            path_in_repo=f"{remote_root}/{folder.name}",
+            repo_id=repo_id,
+            repo_type="dataset",
+            token=token,
+        )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -183,20 +258,53 @@ def main() -> None:
         help="Create the dataset repository if it does not exist.",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+    "--upload-root",
+    type=Path,
+    help="Upload every immediate subdirectory under this folder into a newly created directory in the HF dataset repository.",
+)
+
+    parser.add_argument(
+        "--remote-root",
+        help="Optional name for the created directory in the HF repository. Defaults to the local folder name.",
+    )
     args = parser.parse_args()
 
-    assets = collect_assets(
-        base_folder=args.base_folder,
-        references_folder=args.references_folder,
-        generated_folders=args.generated_folder,
-    )
-    upload_assets(
-        assets,
-        repo_id=args.repo_id,
-        token=args.token,
-        dry_run=args.dry_run,
-        create_repo=args.create_repo,
-    )
+    # assets = collect_assets(
+    #     base_folder=args.base_folder,
+    #     references_folder=args.references_folder,
+    #     generated_folders=args.generated_folder,
+    # )
+    # upload_assets(
+    #     assets,
+    #     repo_id=args.repo_id,
+    #     token=args.token,
+    #     dry_run=args.dry_run,
+    #     create_repo=args.create_repo,
+    # )
+
+    if args.upload_root:
+        upload_root_directory(
+            root_folder=args.upload_root,
+            repo_id=args.repo_id,
+            token=args.token,
+            remote_root=args.remote_root,
+            dry_run=args.dry_run,
+        )
+    else:
+        assets = collect_assets(
+            base_folder=args.base_folder,
+            references_folder=args.references_folder,
+            generated_folders=args.generated_folder,
+        )
+
+        upload_assets(
+            assets,
+            repo_id=args.repo_id,
+            token=args.token,
+            dry_run=args.dry_run,
+            create_repo=args.create_repo,
+        )
 
 
 if __name__ == "__main__":
