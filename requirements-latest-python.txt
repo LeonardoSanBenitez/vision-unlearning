@@ -1,8 +1,8 @@
 # --- Core Deep Learning & CUDA (Upgraded for 3.14 compatibility) ---
 --extra-index-url https://download.pytorch.org/whl/cu128
 torch>=2.14.0
-torchaudio>=2.14.0
-torchvision>=0.29.0
+torchaudio>=2.11.0
+torchvision>=0.22.0
 triton>=3.5.0
 torchmetrics>=1.4.0
 
