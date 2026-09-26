@@ -319,8 +319,9 @@ def group_embeddings_by_prompt(
     sensitive to vector magnitude — and re-keys by the entity name recovered from the
     canonical prompt template).
 
-    Uses ``prompt`` (not ``prompted_entity``) as the canonical key, per
-    ICARE guidelines (prompted_entity has inconsistent formatting across tasks).
+    Uses ``prompt`` (not ``prompted_entity``) as the key, per CONTRIBUTING_ICARE section 6.
+    ``prompt`` is the string the image was generated with, so it is what ties a record to its
+    image; ``prompted_entity`` is a column derived from it by ``canonical_entity``.
 
     Args:
         embedding_file: Parsed JSON dict with an ``"embeddings"`` list of records.

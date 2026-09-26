@@ -4069,12 +4069,11 @@ class ResultTemplateEmbeddingUnlearningProfile(ResultTemplate):
     def _mean_embeddings(raw: dict) -> "Dict[str, np.ndarray]":
         """Mean embedding per entity, grouping records by their ``prompt`` field.
 
-        Per CONTRIBUTING_ICARE §6, records are grouped by the clean ``prompt`` field and
-        never by ``prompted_entity`` (whose formatting is inconsistent across tasks). The
-        entity key is recovered from the canonical prompt template ``"An image of {entity}"``,
-        so it is the same overwrite/HF entity form returned by ``_resolve_hf_entity`` and used
-        downstream — for well-formed data this yields the same partition as before, while
-        being robust to inconsistent ``prompted_entity`` strings.
+        Per CONTRIBUTING_ICARE §6, records are grouped by the ``prompt`` field and never by
+        ``prompted_entity``: ``prompt`` is the string the image was generated with, so it is
+        the only key that ties a record to its image. The entity key is recovered from the
+        canonical prompt template ``"An image of {entity}"``, so it is the same canonical
+        entity form returned by ``_resolve_hf_entity`` and used downstream.
 
         Reuses ``embeddings.group_embeddings_by_prompt`` for the grouping core (the same
         core used by ``compute_mean_embeddings_by_prompt``), keeping the un-normalised mean

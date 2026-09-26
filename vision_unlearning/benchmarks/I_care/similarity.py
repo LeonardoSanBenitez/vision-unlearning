@@ -1057,11 +1057,11 @@ class Similarity(SingleFileArtifact):
             ).compute()
 
             # Build forward mapping: metadata_name -> expected prompt string.
-            # The embedding file's 'prompt' field is "An image of {get_target_overwrite(...)[0]}"
-            # and is consistent across tasks.  We key by prompt rather than 'prompted_entity'
-            # because 'prompted_entity' has inconsistent formatting across tasks, whereas
-            # 'prompt' is clean.  get_target_overwrite's `method` parameter is ignored by the
-            # transform, so any method value produces the same result.
+            # The embedding file's 'prompt' field is the string the image was generated with,
+            # which is what ties a record to its image, so it is the key here rather than
+            # 'prompted_entity' (a column derived from it).  get_target_overwrite's `method`
+            # parameter is ignored by the transform, so any method value produces the same
+            # result; entity_names.generation_prompt is the direct way to build this string.
             ent_list = [e['name'] for e in metadata_filtered]
             meta_to_prompt: Dict[str, str] = {
                 name: f"An image of {get_target_overwrite(self.task, 'distil', name)[0]}"
