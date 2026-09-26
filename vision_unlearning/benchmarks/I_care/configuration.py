@@ -838,21 +838,37 @@ GENERATE_DATASET_SEEDS: List[int] = [42, 43, 44, 45]
 # be configurable and then I chagned my mind. Sometimes it can be infered (like in `choose_metric_column_interference_per_entity`),
 # Also, in the actual slurm scripts they are hardcoded all over
 # But sometimes I use this hardcoded mapping:
+#
+# Read it as a record of what each session WAS trained with, not as a knob: `pipeline_03` sets its own
+# `num_train_epochs`, and what this table feeds is the epoch segment of every artifact filename
+# (`embeddings_people_George W Bush_distil_400.json`). A method absent from it therefore has no path at
+# all rather than a default one, which is why `test_configuration.py` asserts every task x method pair
+# is present: `salun` was added to the library after the first campaign and was missing here for a while,
+# so every artifact lookup for it raised `KeyError` instead of returning a name.
+#
+# salun = 50 everywhere. Measured for `people` only: the forget effect saturates between 50 and 100
+# epochs over three entities, and 400 scores below the same entity's 100 (see the SalUn strength-dial
+# study). `breeds` and `scenes` inherit that figure without their own measurement, which is a weaker
+# basis than the other three rows have -- changing it later renames every salun artifact, so the first
+# salun sessions on each task are the place to confirm it.
 unlearning_algorithm_to_epochs = {
     'breeds': {
         'distil': 100,
         'munba': 50,
         'uce': 0,
+        'salun': 50,
     },
     'scenes': {
         'distil': 100,
         'munba': 100,
         'uce': 0,
+        'salun': 50,
     },
     'people': {
         'distil': 400,
         'munba': 200,
         'uce': 0,
+        'salun': 50,
     },
 }
 

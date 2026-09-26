@@ -42,6 +42,28 @@ class TestRegistryCompletenessAgainstLiterals:
     def test_unlearning_algorithm_display_order_matches_registry_keys(self) -> None:
         assert set(config._UNLEARNING_ALGORITHM_DISPLAY_ORDER) == set(config.ALGORITHM_REGISTRY.keys())
 
+    def test_epoch_table_covers_every_task_and_method(self) -> None:
+        """Every task x method pair needs an epoch count, because it is part of the artifact name.
+
+        A method missing from `unlearning_algorithm_to_epochs` does not fall back to a default; it
+        raises `KeyError` in every path helper that builds a filename from it, so the method is
+        trainable and its results are unnameable. `salun` sat in that state from the day it was
+        added to the library, and nothing failed at import time to say so.
+        """
+        methods = set(get_args(config.type_unlearning_algorithm))
+        tasks = set(get_args(config.type_task))
+        assert set(config.unlearning_algorithm_to_epochs) == tasks
+        for task in tasks:
+            assert set(config.unlearning_algorithm_to_epochs[task]) == methods, (
+                f'task {task!r} is missing an epoch count for '
+                f'{sorted(methods - set(config.unlearning_algorithm_to_epochs[task]))}'
+            )
+
+    def test_epoch_counts_are_non_negative_integers(self) -> None:
+        for task, per_method in config.unlearning_algorithm_to_epochs.items():
+            for method, epochs in per_method.items():
+                assert isinstance(epochs, int) and epochs >= 0, f'{task}/{method} = {epochs!r}'
+
 
 class TestDerivedValuesMatchRegistries:
     """`domain_*` / `*_to_direction` / `GUI_TO_BACKEND` are derived -- spot-check the derivation
