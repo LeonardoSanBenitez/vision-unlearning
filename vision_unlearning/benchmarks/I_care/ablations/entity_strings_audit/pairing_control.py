@@ -214,6 +214,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f'VERDICT: {result.verdict}')
 
     if args.output:
+        # The ablation's assets/ is gitignored, so a fresh checkout does not have it. Create it
+        # rather than losing a measurement that has already been paid for in card time.
+        os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
         with open(args.output, 'w', encoding='utf-8', newline='\n') as handle:
             json.dump(result.to_json(), handle, indent=2)
         print(f'wrote {args.output}')
