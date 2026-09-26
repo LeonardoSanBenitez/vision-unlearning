@@ -80,7 +80,7 @@ UNPAIRED_AT_OR_ABOVE = 0.75
 #: The correlation bands, which DO decide. Derived from the same calibration: over 92 known-paired
 #: measurements the median receiver correlation runs 0.4675 to 0.8570, and over the matching
 #: known-unpaired ones (the same entity at a different seed) it runs -0.0971 to 0.0947. The
-#: published corpus, whose passes are known not to share noise, reads 0.0385. Both bands sit well
+#: published corpus, whose passes are known not to share noise, reads 0.0408. Both bands sit well
 #: inside the empty gap between those two populations.
 PAIRED_CORRELATION_AT_OR_ABOVE = 0.30
 UNPAIRED_CORRELATION_AT_OR_BELOW = 0.15
