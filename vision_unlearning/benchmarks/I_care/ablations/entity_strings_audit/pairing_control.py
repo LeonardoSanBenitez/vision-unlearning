@@ -127,8 +127,16 @@ def _mean_abs_diff(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean(np.abs(a - b)))
 
 
+def _prompts_with_verdict(path: str, verdict: str) -> List[str]:
+    """Return the receiver prompts that ``receiver_damage.py`` gave *verdict*."""
+    with open(path, encoding='utf-8') as handle:
+        payload = json.load(handle)
+    return [r['prompt'] for r in payload.get('receivers', []) if r.get('verdict') == verdict]
+
+
 def run(on_folder: str, off_folder: str, task: type_entity_task, target: str,
-        seed_for_sampling: int = 42, n_unrelated: int = 100) -> Result:
+        seed_for_sampling: int = 42, n_unrelated: int = 100,
+        restrict_to: Optional[Sequence[str]] = None) -> Result:
     result = Result()
     on_images = _index(on_folder)
     off_images = _index(off_folder)
@@ -145,7 +153,17 @@ def run(on_folder: str, off_folder: str, task: type_entity_task, target: str,
     result.self_floor = _mean_abs_diff(first, first)
 
     # On versus off, over receivers only -- the target is expected to change and is reported apart.
+    #
+    # ``restrict_to`` exists because this control cannot, on its own, tell "the two passes drew
+    # different noise" from "the two passes drew the same noise and the unlearning wrecked the
+    # content". Both raise the distance. On a method that damages most of its receivers the second
+    # term dominates and the verdict is uninterpretable as a *pairing* statement. Restricting to the
+    # receivers an independent measurement calls undamaged removes that term, and only then does the
+    # ratio answer the question this control is named after.
+    allowed = set(restrict_to) if restrict_to is not None else None
     for key in shared:
+        if allowed is not None and key[1] != target_prompt and key[1] not in allowed:
+            continue
         value = _mean_abs_diff(_load(on_images[key]), _load(off_images[key]))
         if key[1] == target_prompt:
             result.target_on_off = value
@@ -191,12 +209,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--task', required=True, choices=['people', 'breeds', 'scenes'])
     parser.add_argument('--target', required=True, help='the entity this session unlearned')
     parser.add_argument('--output', default=None, help='write the numbers here as JSON')
+    parser.add_argument(
+        '--restrict-to-preserved', default=None, metavar='DAMAGE_JSON',
+        help="a receiver_damage.py result; only its 'preserved' receivers are compared. Use this "
+             'whenever the session damaged a large share of its receivers, because otherwise the '
+             'ratio measures the damage and not the pairing.',
+    )
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
-    result = run(args.on_folder, args.off_folder, args.task, args.target)
+    restrict_to = None
+    if args.restrict_to_preserved:
+        restrict_to = _prompts_with_verdict(args.restrict_to_preserved, 'preserved')
+        print(f'restricted to {len(restrict_to)} receivers called preserved by '
+              f'{args.restrict_to_preserved}')
+    result = run(args.on_folder, args.off_folder, args.task, args.target,
+                 restrict_to=restrict_to)
 
     print(f'on images                : {result.n_on}')
     print(f'off images               : {result.n_off}')
