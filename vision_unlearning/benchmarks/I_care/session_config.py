@@ -97,10 +97,19 @@ def _uce(task: type_task, entity: str, model_base_name: str, device: str) -> Dic
     It used to be the literal task name, i.e. the edit was aimed at the embedding of the word
     ``breeds``.
 
-    No preserve concepts are set. The preserve term used to be the literal task name as well, which
-    regularised the edit towards a word that means nothing here. Setting it to the retained entities
-    instead -- what the paper describes -- changes how strong the edit is and therefore needs
-    ``erase_scale`` re-tuned with it, which is the equalization task's job and not this one's.
+    ``preserve_concepts`` stays the literal task name, which is what it has always been. Dropping
+    it was tried and reversed (user decision, 2026-09-26): the preserve term is the mechanism that
+    is supposed to protect non-target concepts, and removing a protection because it looks poorly
+    chosen is not an improvement. It IS poorly chosen -- the original author's own comment on the
+    line read "TODO: this isnt good" -- because regularising towards the word ``people`` protects
+    nothing in particular. Setting it to the retained entities instead, which is what the paper
+    describes, changes how strong the edit is and needs ``erase_scale`` re-tuned with it; that is
+    the equalization task's job, and doing it here would make this session incomparable with the
+    published corpus for no measured gain.
+
+    Note for whoever picks that up: keeping the preserve term does NOT protect receivers in
+    practice. A session run with it destroyed an untouched receiver outright -- see
+    ``tickets/2026-07-16-TargetPreprocessedBug/REPORT_VALIDATION_02.md`` section 4.
     """
     settings: Dict[str, Any] = {
         'pretrained_model_name_or_path': model_base_name,
@@ -109,7 +118,7 @@ def _uce(task: type_task, entity: str, model_base_name: str, device: str) -> Dic
         'lamb': 0.01,
         'edit_concepts': canonical_entity(task, entity),
         'guide_concepts': substitute_concept(task),
-        'preserve_concepts': None,
+        'preserve_concepts': task,
         'expand_prompts': False,
         'device': device,
         'save_entire_model': False,

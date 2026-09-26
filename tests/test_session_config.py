@@ -3,13 +3,15 @@
 The expected dictionaries below were read field by field out of ``pipeline_03_unlearn_model.py`` as
 it stood before this configuration was extracted out of it, so this file is also the equivalence
 proof for the move: anything that differs from the old behaviour differs on purpose, and there are
-exactly three such differences, each marked where it appears.
+exactly two such differences, each marked where it appears.
 
 1. UCE's ``guide_concepts`` is the task's substitute concept instead of the literal task name, so
    the three methods push the entity towards the same thing.
-2. UCE sets no preserve concepts. The preserve term used to be the literal task name.
-3. Both prompt lists come from the one prompt builder, so the retain side is the substitute concept
+2. Both prompt lists come from the one prompt builder, so the retain side is the substitute concept
    for all three tasks.
+
+``preserve_concepts`` was briefly a third difference -- it was set to None -- and that was reversed
+on 2026-09-26. It is the literal task name again, exactly as before the extraction.
 
 The per-machine settings -- batch size and gradient accumulation, chosen from free video memory --
 are deliberately not here; they stay in the pipeline, because they describe where a run happens
@@ -61,13 +63,13 @@ class TestUce:
         assert config == {
             'output_dir': 'assets/models/out',
             'hub_model_id': None,
-            'final_eval_prompts_forget': forget,   # change 3
-            'final_eval_prompts_retain': retain,   # change 3
+            'final_eval_prompts_forget': forget,   # change 2
+            'final_eval_prompts_retain': retain,   # change 2
             'pretrained_model_name_or_path': _MODEL,
             **expected_scales,
             'edit_concepts': canonical_entity(task, entity),  # type: ignore[arg-type]
             'guide_concepts': substitute_concept(task),       # change 1
-            'preserve_concepts': None,                        # change 2
+            'preserve_concepts': task,
             'expand_prompts': False,
             'device': 'cuda',
             'save_entire_model': False,
@@ -81,9 +83,17 @@ class TestUce:
         assert config['guide_concepts'] == substitute_concept(task)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
-    def test_no_preserve_concept_is_set(self, task: str, entity: str) -> None:
+    def test_the_preserve_concept_is_kept(self, task: str, entity: str) -> None:
+        """Dropping it was tried and reversed; a protection is not removed for being badly chosen.
+
+        It is badly chosen -- regularising towards the word ``people`` protects nothing in
+        particular, and the original author said so on the line. Replacing it with the retained
+        entities is the paper's version and needs ``erase_scale`` re-tuned with it, which belongs to
+        equalization. Until then this asserts the historical value, so a session stays comparable
+        with the published corpus.
+        """
         config = _config(task, 'uce', entity, num_train_epochs=0)
-        assert config['preserve_concepts'] is None
+        assert config['preserve_concepts'] == task
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
     def test_the_three_methods_aim_at_the_same_substitute(self, task: str, entity: str) -> None:
