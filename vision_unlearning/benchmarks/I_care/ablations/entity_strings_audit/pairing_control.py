@@ -15,16 +15,24 @@ unlearning leaked onto it. If instead they differ by roughly as much as two *unr
 images do, they are not a pair at all: they were drawn from different initial noise, and every
 paired metric computed from them is measuring the noise draw.
 
-The three quantities, all mean absolute pixel difference on the 0-255 scale:
+**The verdict is taken from the pixel correlation, not from the distance.** It used to be the other
+way round, and the calibration in `pairing_band_calibration.py` is why it changed: measured on the
+every-epoch campaign grids, whose images are paired by construction, the distance statistic reads
+0.2275 to 0.6274 of the unrelated floor over 92 rows, so a real unlearning edit can never reach the
+0.25 that the old band called a pair. The correlation separates the same two populations completely
+-- 0.4675 to 0.8570 when the noise is shared against -0.0971 to 0.0947 when it is not -- because two
+images from one starting point keep their composition even when the subject has been replaced. The
+plan's decision D12 records the derivation.
 
+What is measured, per receiver, between its `on` image and its `off` image at the same seed:
+
+* **correlation** -- Pearson correlation over the pixels. At or above 0.30 is **paired**, at or
+  below 0.15 is **unpaired**, and between the two is **unresolved**, which stops the stage rather
+  than being rounded to the nearer verdict.
+* **mean absolute difference**, 0-255 scale, together with the **unrelated floor** (entity *i*'s
+  image against entity *j*'s, same pass, measured on these very images) and their ratio. Still
+  reported, because it describes how much the edit moved, and no longer binding.
 * **self floor** -- an image against itself. Exactly 0 by construction; a sanity check on the code.
-* **on-versus-off** -- the quantity under test, over the receiver set.
-* **unrelated floor** -- entity *i*'s image against entity *j*'s, same pass, measured on these very
-  images rather than taken from a previous study.
-
-The verdict thresholds come from the plan and are fixed before running: at or below 0.25x the
-unrelated floor is **paired**; at or above 0.75x is **unpaired**; between the two is **unresolved**
-and stops the stage rather than being rounded to the nearer verdict.
 
 Usage, from the repository root::
 
@@ -63,9 +71,19 @@ from vision_unlearning.datasets.entity_names import (  # noqa: E402
 #: ``{on|off}_{seed:02d}_{prompt}.png`` -- the shape `get_generated_dataset_file` writes.
 _IMAGE_NAME = re.compile(r'^(?P<state>on|off)_(?P<seed>\d{2})_(?P<prompt>.+)\.png$')
 
-#: Fixed here rather than chosen after seeing the numbers.
+#: The distance bands. Kept because the number is still reported, NOT because it still decides:
+#: `pairing_band_calibration.py` measured them against images that are paired by construction and
+#: found that a real unlearning edit cannot reach 0.25, so a reading between the two says nothing.
 PAIRED_AT_OR_BELOW = 0.25
 UNPAIRED_AT_OR_ABOVE = 0.75
+
+#: The correlation bands, which DO decide. Derived from the same calibration: over 92 known-paired
+#: measurements the median receiver correlation runs 0.4675 to 0.8570, and over the matching
+#: known-unpaired ones (the same entity at a different seed) it runs -0.0971 to 0.0947. The
+#: published corpus, whose passes are known not to share noise, reads 0.0385. Both bands sit well
+#: inside the empty gap between those two populations.
+PAIRED_CORRELATION_AT_OR_ABOVE = 0.30
+UNPAIRED_CORRELATION_AT_OR_BELOW = 0.15
 
 
 @dataclass
@@ -82,6 +100,11 @@ class Result:
     n_unrelated_pairs: int = 0
     target_on_off: Optional[float] = None
     ratio: float = 0.0
+    distance_verdict: str = 'not computed'
+    correlation_values: List[float] = field(default_factory=list)
+    correlation_median: float = 0.0
+    unrelated_correlation: float = 0.0
+    target_correlation: Optional[float] = None
     verdict: str = 'not computed'
 
     def to_json(self) -> Dict[str, object]:
@@ -99,6 +122,14 @@ class Result:
             'ratio_median_over_floor': round(self.ratio, 4),
             'paired_at_or_below': PAIRED_AT_OR_BELOW,
             'unpaired_at_or_above': UNPAIRED_AT_OR_ABOVE,
+            'distance_verdict_not_binding': self.distance_verdict,
+            'correlation_median': round(self.correlation_median, 4),
+            'unrelated_pair_correlation': round(self.unrelated_correlation, 4),
+            'target_correlation': (
+                None if self.target_correlation is None else round(self.target_correlation, 4)
+            ),
+            'paired_correlation_at_or_above': PAIRED_CORRELATION_AT_OR_ABOVE,
+            'unpaired_correlation_at_or_below': UNPAIRED_CORRELATION_AT_OR_BELOW,
             'verdict': self.verdict,
         }
 
@@ -125,6 +156,21 @@ def _mean_abs_diff(a: np.ndarray, b: np.ndarray) -> float:
     if a.shape != b.shape:
         raise SystemExit(f'ERROR: shape mismatch {a.shape} vs {b.shape}')
     return float(np.mean(np.abs(a - b)))
+
+
+def _correlation(a: np.ndarray, b: np.ndarray) -> float:
+    """Pearson correlation between two images' pixels, flattened over the colour channels.
+
+    This is the statistic the verdict is taken from. Two images that start from the same noise keep
+    the same composition even when the subject has been replaced, so their pixels co-vary; two
+    images from different draws do not, however close their average brightness happens to be.
+    """
+    if a.shape != b.shape:
+        raise SystemExit(f'ERROR: shape mismatch {a.shape} vs {b.shape}')
+    left, right = a.ravel(), b.ravel()
+    if left.std() == 0 or right.std() == 0:
+        return float('nan')
+    return float(np.corrcoef(left, right)[0, 1])
 
 
 def _prompts_with_verdict(path: str, verdict: str) -> List[str]:
@@ -164,13 +210,20 @@ def run(on_folder: str, off_folder: str, task: type_entity_task, target: str,
     for key in shared:
         if allowed is not None and key[1] != target_prompt and key[1] not in allowed:
             continue
-        value = _mean_abs_diff(_load(on_images[key]), _load(off_images[key]))
+        on_image, off_image = _load(on_images[key]), _load(off_images[key])
+        value = _mean_abs_diff(on_image, off_image)
+        correlation = _correlation(on_image, off_image)
         if key[1] == target_prompt:
             result.target_on_off = value
+            result.target_correlation = correlation
         else:
             result.on_off_values.append(value)
+            result.correlation_values.append(correlation)
     result.n_compared = len(result.on_off_values)
     result.on_off_median = float(np.median(result.on_off_values)) if result.on_off_values else 0.0
+    result.correlation_median = (
+        float(np.median(result.correlation_values)) if result.correlation_values else 0.0
+    )
 
     # The unrelated floor, measured on THESE images: different entities, same pass, same seed.
     rng = random.Random(seed_for_sampling)
@@ -178,26 +231,42 @@ def run(on_folder: str, off_folder: str, task: type_entity_task, target: str,
     for key in shared:
         by_seed.setdefault(key[0], []).append(key)
     unrelated: List[float] = []
+    unrelated_correlations: List[float] = []
     for _ in range(n_unrelated):
         seed = rng.choice(sorted(by_seed))
         keys = by_seed[seed]
         if len(keys) < 2:
             continue
         first_key, second_key = rng.sample(keys, 2)
-        unrelated.append(_mean_abs_diff(_load(off_images[first_key]), _load(off_images[second_key])))
+        first_image, second_image = _load(off_images[first_key]), _load(off_images[second_key])
+        unrelated.append(_mean_abs_diff(first_image, second_image))
+        unrelated_correlations.append(_correlation(first_image, second_image))
     result.n_unrelated_pairs = len(unrelated)
     result.unrelated_floor = float(np.median(unrelated)) if unrelated else 0.0
+    result.unrelated_correlation = (
+        float(np.median(unrelated_correlations)) if unrelated_correlations else 0.0
+    )
 
+    # The distance reading, kept as description. It is not the verdict: see the bands above.
     if result.unrelated_floor == 0.0:
-        result.verdict = 'undefined: the unrelated floor is zero'
+        result.distance_verdict = 'undefined: the unrelated floor is zero'
     else:
         result.ratio = result.on_off_median / result.unrelated_floor
         if result.ratio <= PAIRED_AT_OR_BELOW:
-            result.verdict = 'paired'
+            result.distance_verdict = 'paired'
         elif result.ratio >= UNPAIRED_AT_OR_ABOVE:
-            result.verdict = 'unpaired'
+            result.distance_verdict = 'unpaired'
         else:
-            result.verdict = 'unresolved'
+            result.distance_verdict = 'unresolved'
+
+    if not result.correlation_values:
+        result.verdict = 'undefined: nothing was compared'
+    elif result.correlation_median >= PAIRED_CORRELATION_AT_OR_ABOVE:
+        result.verdict = 'paired'
+    elif result.correlation_median <= UNPAIRED_CORRELATION_AT_OR_BELOW:
+        result.verdict = 'unpaired'
+    else:
+        result.verdict = 'unresolved'
     return result
 
 
@@ -238,9 +307,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if result.target_on_off is not None:
         print(f'target on vs off         : {result.target_on_off:.4f}  '
               f'(the entity that WAS unlearned; expected to be large)')
-    print(f'ratio median/floor       : {result.ratio:.4f}')
-    print(f'  paired at or below     : {PAIRED_AT_OR_BELOW}')
-    print(f'  unpaired at or above   : {UNPAIRED_AT_OR_ABOVE}')
+    print(f'ratio median/floor       : {result.ratio:.4f}  -> {result.distance_verdict} '
+          f'(reported, NOT the verdict; bands {PAIRED_AT_OR_BELOW}/{UNPAIRED_AT_OR_ABOVE})')
+    print(f'correlation, median      : {result.correlation_median:.4f}   <- the verdict is taken '
+          f'from this')
+    print(f'correlation, unrelated   : {result.unrelated_correlation:.4f} '
+          f'(two different entities, same pass)')
+    if result.target_correlation is not None:
+        print(f'correlation, the target  : {result.target_correlation:.4f}')
+    print(f'  paired at or above     : {PAIRED_CORRELATION_AT_OR_ABOVE}')
+    print(f'  unpaired at or below   : {UNPAIRED_CORRELATION_AT_OR_BELOW}')
     print(f'VERDICT: {result.verdict}')
 
     if args.output:
