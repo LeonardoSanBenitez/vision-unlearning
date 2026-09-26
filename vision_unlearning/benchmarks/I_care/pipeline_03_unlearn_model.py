@@ -9,7 +9,7 @@ import torch
 import gc
 import matplotlib.pyplot as plt
 from diffusers import AutoPipelineForText2Image
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, get_args
 import json
 import os
 
@@ -21,6 +21,7 @@ os.environ['WANDB_DISABLED'] = "true"
 assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non-empty"
 #!huggingface-cli login --token ${HF_TOKEN}
 
+from vision_unlearning.benchmarks.I_care.configuration import type_unlearning_algorithm  # noqa: E402
 from vision_unlearning.benchmarks.I_care.session_config import (  # noqa: E402
     assert_split_captions_ready,
     session_hyperparameters,
@@ -132,11 +133,11 @@ replace_if_exists: bool = False
 # For dog and UCE, ???
 # for scene and distil, 400 is good, but 100 is enough
 
-# Running now:
+# Defaults, overridable on the command line -- see the parser below.
 index_start: int = 0
 max_identities: int = 100
 task: Literal['scenes', 'objects', 'breeds', 'people'] = 'breeds'
-method: Literal['munba', 'uce', 'distil'] = 'uce'
+method: type_unlearning_algorithm = 'uce'
 num_train_epochs = 0
 replace_if_exists: bool = False
 
@@ -149,12 +150,39 @@ hub_model_id = None  # 'LeonardoBenitez/demo-vision-unlearning-' + 'fade' if met
 
 # No need to change anything from now on...
 
-# CLI: the assets folder can be overridden so the script runs from any directory.
+# CLI. Every value above can be set here, so a campaign never edits this file between runs.
+#
+# It matters that this parser is STRICT. It used to declare only --base-folder and read the
+# command line with `parse_known_args()`, discarding everything else -- while
+# `pipeline_11_run_all.sh`, the documented end-to-end reference, invoked this script nine times
+# with --task/--method/--num-train-epochs. All nine silently ran the defaults above instead, so
+# the script that records how the corpus was produced could not produce it, and said nothing.
+# A parser that ignores what it does not recognise turns a typo, a renamed flag and a
+# never-implemented flag into the same clean exit.
 _parser = argparse.ArgumentParser(description="Unlearn a model for a set of entities.")
 _parser.add_argument("--base-folder", default="assets",
                      help="Path to the assets folder (default: 'assets' in the current directory).")
-_args, _unknown = _parser.parse_known_args()
+_parser.add_argument("--task", default=task, choices=['scenes', 'breeds', 'people'],
+                     help=f"Which task's entities to unlearn (default: {task}).")
+_parser.add_argument("--method", default=method, choices=list(get_args(type_unlearning_algorithm)),
+                     help=f"Unlearning method (default: {method}).")
+_parser.add_argument("--num-train-epochs", type=int, default=num_train_epochs,
+                     help=f"Epochs, ignored by the closed-form methods (default: {num_train_epochs}).")
+_parser.add_argument("--index-start", type=int, default=index_start,
+                     help=f"First entity index in the task metadata (default: {index_start}).")
+_parser.add_argument("--max-identities", type=int, default=max_identities,
+                     help=f"How many entities to process from --index-start (default: {max_identities}).")
+_parser.add_argument("--replace-if-exists", action="store_true", default=replace_if_exists,
+                     help="Re-run a session whose artifact is already on disk.")
+_args = _parser.parse_args()
+
 base_folder: str = _args.base_folder
+task = _args.task
+method = _args.method
+num_train_epochs = _args.num_train_epochs
+index_start = _args.index_start
+max_identities = _args.max_identities
+replace_if_exists = _args.replace_if_exists
 
 # Basic params
 with open(os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json"), "r", encoding="utf-8") as f:
@@ -162,6 +190,10 @@ with open(os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json")
 
 model_base_name = "CompVis/stable-diffusion-v1-4"
 logger = get_logger('unlearning_main')
+logger.info(
+    'session: task=%s method=%s epochs=%s entities=[%s, %s)',
+    task, method, num_train_epochs, index_start, index_start + max_identities,
+)
 setup_loggers(modules_info=['unlearning'])
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 

@@ -26,7 +26,7 @@ import logging
 import os
 import shutil
 import sys
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, get_args
 
 from vision_unlearning.datasets.testbed import (
     get_target_preprocessed,
@@ -300,7 +300,10 @@ def build_manifest(
 # ---------------------------------------------------------------------------
 # Core embedding function (lives in vision_unlearning — imported here)
 # ---------------------------------------------------------------------------
-from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY  # noqa: E402
+from vision_unlearning.benchmarks.I_care.configuration import (  # noqa: E402
+    ALGORITHM_REGISTRY,
+    type_unlearning_algorithm,
+)
 from vision_unlearning.benchmarks.I_care.embeddings import embed_forgetting_session  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -532,7 +535,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--task", choices=["scenes", "objects", "breeds", "people"],
                         default="people")
-    parser.add_argument("--method", choices=["munba", "uce", "distil"], default="distil")
+    parser.add_argument("--method", choices=list(get_args(type_unlearning_algorithm)),
+                        default="distil")
     parser.add_argument("--max-identities", type=int, default=2,
                         help="Number of entities to process.")
     parser.add_argument("--index-start", type=int, default=0,

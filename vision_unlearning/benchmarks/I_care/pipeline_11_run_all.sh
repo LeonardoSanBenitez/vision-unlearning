@@ -48,15 +48,15 @@ python pipeline_04_generate_dataset.py --task people --method uce --num-train-ep
 python pipeline_04_generate_dataset.py --task people --method munba --num-train-epochs 200
 python pipeline_04_generate_dataset.py --task people --method distil --num-train-epochs 400
 
-python pipeline_05_compute_embeddings.py --embedding dino --task breeds --method uce --num-train-epochs 0
-python pipeline_05_compute_embeddings.py --embedding dino --task breeds --method munba --num-train-epochs 50
-python pipeline_05_compute_embeddings.py --embedding dino --task breeds --method distil --num-train-epochs 100
-python pipeline_05_compute_embeddings.py --embedding dino --task scenes --method uce --num-train-epochs 0
-python pipeline_05_compute_embeddings.py --embedding dino --task scenes --method munba --num-train-epochs 100
-python pipeline_05_compute_embeddings.py --embedding dino --task scenes --method distil --num-train-epochs 100
-python pipeline_05_compute_embeddings.py --embedding dino --task people --method uce --num-train-epochs 0
-python pipeline_05_compute_embeddings.py --embedding dino --task people --method munba --num-train-epochs 200
-python pipeline_05_compute_embeddings.py --embedding dino --task people --method distil --num-train-epochs 400
+python pipeline_05_compute_embeddings.py --task breeds --method uce --num-train-epochs 0
+python pipeline_05_compute_embeddings.py --task breeds --method munba --num-train-epochs 50
+python pipeline_05_compute_embeddings.py --task breeds --method distil --num-train-epochs 100
+python pipeline_05_compute_embeddings.py --task scenes --method uce --num-train-epochs 0
+python pipeline_05_compute_embeddings.py --task scenes --method munba --num-train-epochs 100
+python pipeline_05_compute_embeddings.py --task scenes --method distil --num-train-epochs 100
+python pipeline_05_compute_embeddings.py --task people --method uce --num-train-epochs 0
+python pipeline_05_compute_embeddings.py --task people --method munba --num-train-epochs 200
+python pipeline_05_compute_embeddings.py --task people --method distil --num-train-epochs 400
 
 python pipeline_06_compute_interference_per_pair.py --task breeds --method uce --num-train-epochs 0
 python pipeline_06_compute_interference_per_pair.py --task breeds --method munba --num-train-epochs 50

@@ -4,7 +4,7 @@ import argparse
 import os
 import shutil
 import sys
-from typing import Literal, Optional
+from typing import Literal, Optional, get_args
 
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -18,7 +18,10 @@ from vision_unlearning.datasets.testbed import (
     GeneratedDataset,
 )
 from vision_unlearning.benchmarks.I_care import get_interference_per_pair_path, save_interference_per_pair
-from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
+from vision_unlearning.benchmarks.I_care.configuration import (
+    ALGORITHM_REGISTRY,
+    type_unlearning_algorithm,
+)
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
 
 logger = get_logger('unlearning_analysis')
@@ -33,7 +36,7 @@ _parser = argparse.ArgumentParser(
     description="Compute caused interferences for a set of emitter entities."
 )
 _parser.add_argument("--task", choices=["scenes", "objects", "breeds", "people"], default=None)
-_parser.add_argument("--method", choices=["munba", "uce", "distil"], default=None)
+_parser.add_argument("--method", choices=list(get_args(type_unlearning_algorithm)), default=None)
 _parser.add_argument("--num-train-epochs", type=int, default=None)
 _parser.add_argument("--index-start", type=int, default=None)
 _parser.add_argument("--max-identities", type=int, default=None)
