@@ -174,6 +174,11 @@ _parser.add_argument("--max-identities", type=int, default=max_identities,
                      help=f"How many entities to process from --index-start (default: {max_identities}).")
 _parser.add_argument("--replace-if-exists", action="store_true", default=replace_if_exists,
                      help="Re-run a session whose artifact is already on disk.")
+_parser.add_argument("--batch-size-inference", type=int, default=None,
+                     help="Images generated per forward pass. Left unset, it is chosen from "
+                          "free video memory, which makes the images depend on the card and on "
+                          "what else was running -- see the note at the selection site. Set it "
+                          "for any run whose images must be comparable with another run's.")
 _args = _parser.parse_args()
 
 base_folder: str = _args.base_folder
@@ -183,6 +188,7 @@ num_train_epochs = _args.num_train_epochs
 index_start = _args.index_start
 max_identities = _args.max_identities
 replace_if_exists = _args.replace_if_exists
+batch_size_inference_override: Optional[int] = _args.batch_size_inference
 
 # Basic params
 with open(os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json"), "r", encoding="utf-8") as f:
@@ -259,7 +265,19 @@ for index in range(index_start, index_start + max_identities):
                 "gradient_accumulation_steps": 2,  # 4,
             })
 
-    if free_memory > 20e9:
+    # The generation batch size is NOT only a performance knob. `generate_dataset` draws one
+    # noise tensor per batch, so the batch size decides the initial noise of every image: the
+    # same prompt at the same seed in a batch of 8 and a batch of 50 gives different pictures.
+    # Choosing it from free memory therefore makes the output depend on which card the job
+    # landed on and on what else happened to be running -- which is how a shared baseline
+    # generated at one size and per-entity images generated at another came to be compared
+    # pair by pair. Any run whose images must be comparable with another run passes
+    # --batch-size-inference explicitly; the memory-derived values below remain the default so
+    # that nothing existing changes behaviour.
+    if batch_size_inference_override is not None:
+        logger.info('batch_size_inference pinned to %s by the caller', batch_size_inference_override)
+        batch_size_inference = batch_size_inference_override
+    elif free_memory > 20e9:
         logger.debug('Choosing hyperparams for free_memory>20e9')
         batch_size_inference = 50
     elif free_memory > 14e9:
