@@ -846,29 +846,35 @@ GENERATE_DATASET_SEEDS: List[int] = [42, 43, 44, 45]
 # is present: `salun` was added to the library after the first campaign and was missing here for a while,
 # so every artifact lookup for it raised `KeyError` instead of returning a name.
 #
-# salun = 50 everywhere. Measured for `people` only: the forget effect saturates between 50 and 100
-# epochs over three entities, and 400 scores below the same entity's 100 (see the SalUn strength-dial
-# study). `breeds` and `scenes` inherit that figure without their own measurement, which is a weaker
-# basis than the other three rows have -- changing it later renames every salun artifact, so the first
-# salun sessions on each task are the place to confirm it.
+# salun MIRRORS distil per task -- 100/100/400, not a number of its own. It is provisional and is the
+# uniform choice rather than the measured one: salun has never been run across the benchmark, so no
+# equalization result exists to fill it with, and matching SPARE keeps the two trained methods on the
+# same budget while the corpus is regenerated. The SalUn strength-dial study measured saturation
+# between 50 and 100 epochs for `people` only, over three entities, which is not a basis for a
+# per-task number for the other two.
+#
+# THE REAL NUMBER IS SET DURING EQUALIZATION, and every one of these rows is then re-decided, not just
+# salun's: the first equalization did not bring the methods to a common operating point, so epochs and
+# hyperparameters are redefined for all methods together. Until then, treat a salun epoch count as a
+# placeholder that happens to be SPARE's, and note that changing it renames every salun artifact.
 unlearning_algorithm_to_epochs = {
     'breeds': {
         'distil': 100,
         'munba': 50,
         'uce': 0,
-        'salun': 50,
+        'salun': 100,  # provisional: mirrors distil, re-decided during equalization
     },
     'scenes': {
         'distil': 100,
         'munba': 100,
         'uce': 0,
-        'salun': 50,
+        'salun': 100,  # provisional: mirrors distil, re-decided during equalization
     },
     'people': {
         'distil': 400,
         'munba': 200,
         'uce': 0,
-        'salun': 50,
+        'salun': 400,  # provisional: mirrors distil, re-decided during equalization
     },
 }
 
