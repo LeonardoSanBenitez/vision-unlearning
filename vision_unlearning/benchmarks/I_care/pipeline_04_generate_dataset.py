@@ -95,6 +95,17 @@ def _parse_args() -> argparse.Namespace:
         help="Seeds for image generation (default: 42 43 44 45).",
     )
     parser.add_argument(
+        "--batch-size-inference",
+        type=int,
+        default=None,
+        help="Images generated per forward pass, for BOTH the baseline and the per-entity "
+             "passes. generate_dataset draws one noise tensor per batch, so this decides the "
+             "initial noise of every image: a baseline built at one size and per-entity "
+             "images built at another are not paired, whatever the seeds say. Left unset the "
+             "historical behaviour applies -- baseline at 1, per-entity from free memory -- "
+             "which is exactly that mismatch.",
+    )
+    parser.add_argument(
         "--limit-prompts",
         type=int,
         default=None,
@@ -140,8 +151,15 @@ def run_baseline(
     upload_if_recomputed: bool,
     base_folder: str,
     ledger: Optional[RunLedger] = None,
+    batch_size_inference: Optional[int] = None,
 ) -> None:
-    """Generate method-agnostic baseline images (original SD, no LoRA)."""
+    """Generate method-agnostic baseline images (original SD, no LoRA).
+
+    ``batch_size_inference`` defaults to 1 only because that is what this pass has always
+    used. It is not a neutral default: the per-entity pass picks its own size from free
+    memory, so the two passes have been drawing different noise, and every paired metric
+    computed from them has been comparing images that do not share a starting point.
+    """
     from vision_unlearning.utils.logger import get_logger, setup_loggers
     from vision_unlearning.datasets.testbed import (
         GeneratedDataset,
@@ -172,7 +190,10 @@ def run_baseline(
 
     import time
     t0 = time.time()
-    result_folder = ds.compute(seeds=seeds, prompts=prompts, batch_size=1)
+    batch_size = 1 if batch_size_inference is None else batch_size_inference
+    logger.info("Baseline batch size: %s%s", batch_size,
+                "" if batch_size_inference is not None else " (historical default, not pinned)")
+    result_folder = ds.compute(seeds=seeds, prompts=prompts, batch_size=batch_size)
     elapsed = time.time() - t0
     n_images = len(seeds) * len(prompts)
     logger.info(
@@ -229,6 +250,7 @@ def run_normal(
     limit_prompts: Optional[int],
     base_folder: str,
     ledger: Optional[RunLedger] = None,
+    batch_size_inference_override: Optional[int] = None,
 ) -> None:
     """Unlearn the model and generate the per-entity evaluation dataset."""
     import pandas as pd
@@ -372,7 +394,10 @@ def run_normal(
                     "gradient_accumulation_steps": 2,
                 })
 
-        if free_memory > 20e9:
+        if batch_size_inference_override is not None:
+            batch_size_inference = batch_size_inference_override
+            logger.info("Per-entity batch size pinned to %s by the caller", batch_size_inference)
+        elif free_memory > 20e9:
             batch_size_inference = 50
         elif free_memory > 14e9:
             batch_size_inference = 25
@@ -590,6 +615,7 @@ def main() -> None:
                 replace_if_exists=args.replace_if_exists,
                 upload_if_recomputed=args.upload_if_recomputed,
                 base_folder=args.base_folder,
+                batch_size_inference=args.batch_size_inference,
                 ledger=ledger,
             )
         else:
@@ -608,6 +634,7 @@ def main() -> None:
                 seeds=args.seeds,
                 limit_prompts=args.limit_prompts,
                 base_folder=args.base_folder,
+                batch_size_inference_override=args.batch_size_inference,
                 ledger=ledger,
             )
     finally:
