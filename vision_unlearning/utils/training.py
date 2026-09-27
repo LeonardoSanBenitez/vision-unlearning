@@ -1,5 +1,5 @@
 import random
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import torch
 from diffusers.utils.torch_utils import is_compiled_module
@@ -130,6 +130,19 @@ def collate_fn(examples):
         # This happens when `preprocess_train` was called with a non-none `concept_overwrite`
         result["forget_ids"] = torch.stack([example["forget_ids"] for example in examples])
     return result
+
+
+def truncate_batch(batch: Dict[str, Any], length: int) -> None:
+    '''
+    Keep only the first `length` examples of a collated batch, in place.
+
+    Every entry a collate function produces describes the same examples in the same order --
+    images, their tokenized captions, an overwriting caption, the second tokenization and the
+    micro-conditioning of Stable Diffusion XL -- so all of them are cut together. Cutting a
+    hand-picked subset leaves the rest describing examples that are no longer in the batch.
+    '''
+    for key, value in batch.items():
+        batch[key] = value[:length]
 
 
 def launch_accelerated_training(unlearner: 'Unlearner'):  # type: ignore

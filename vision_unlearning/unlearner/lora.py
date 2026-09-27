@@ -40,7 +40,7 @@ from vision_unlearning.unlearner.base import Unlearner, logger
 from vision_unlearning.metrics import MetricImageTextSimilarity
 from vision_unlearning.evaluator import EvaluatorTextToImage, plot_gradient_conflict_hist, log_validation
 from vision_unlearning.utils.model_management import save_model_card
-from vision_unlearning.utils.training import unwrap_model, preprocess_train, collate_fn
+from vision_unlearning.utils.training import unwrap_model, preprocess_train, collate_fn, truncate_batch
 from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, GradientWeightingMethodSimple
 from vision_unlearning.utils import device as device_utils
 
@@ -864,11 +864,11 @@ class UnlearnerLora(Unlearner):
                 except StopIteration:
                     self._train_retain_iterator = iter(self._train_retain_dataloader)
                     batch_retain = next(self._train_retain_iterator)
+                # The two sets are rarely a multiple of the batch size apart, so the last batch of
+                # either is short; both are cut to the shorter one, every entry together.
                 min_length = min(len(batch_forget["pixel_values"]), len(batch_retain["pixel_values"]))
-                batch_forget["pixel_values"] = batch_forget["pixel_values"][:min_length]
-                batch_retain["pixel_values"] = batch_retain["pixel_values"][:min_length]
-                batch_forget["input_ids"] = batch_forget["input_ids"][:min_length]
-                batch_retain["input_ids"] = batch_retain["input_ids"][:min_length]
+                truncate_batch(batch_forget, min_length)
+                truncate_batch(batch_retain, min_length)
                 assert batch_forget["pixel_values"].shape == batch_retain["pixel_values"].shape
 
                 batch_forget["pixel_values"] = batch_forget["pixel_values"].to(self._accelerator.device)
@@ -878,18 +878,15 @@ class UnlearnerLora(Unlearner):
                 batch_retain["input_ids"] = batch_retain["input_ids"].to(self._accelerator.device)
 
                 if self._is_xl:
-                    # The same truncation and device placement for what Stable Diffusion XL adds to
-                    # a batch, so that the second half of the conditioning stays aligned with the
-                    # images it describes. As with input_ids above, the forget batch comes off a
-                    # prepared dataloader and is already on the device; the retain batch is not.
-                    # A dataloader that does not provide them is reported by _encode_conditioning,
-                    # which names the missing field and the trainer that owns the dataloader.
+                    # The same device placement for the second tokenization Stable Diffusion XL adds
+                    # to a batch; it was already cut with everything else above. As with input_ids,
+                    # the forget batch comes off a prepared dataloader and is already on the device;
+                    # the retain batch is not. A dataloader that does not provide it is reported by
+                    # _encode_conditioning, which names the missing field and the trainer that owns
+                    # the dataloader.
                     for batch in (batch_forget, batch_retain):
                         if "input_ids_2" in batch:
-                            batch["input_ids_2"] = batch["input_ids_2"][:min_length].to(self._accelerator.device)
-                        for key in ("original_sizes", "crop_top_lefts"):
-                            if key in batch:
-                                batch[key] = batch[key][:min_length]
+                            batch["input_ids_2"] = batch["input_ids_2"].to(self._accelerator.device)
 
                 with self._accelerator.accumulate(self._unet):
                     loss_forget, loss_retain = self._train_one_batch(batch_forget, batch_retain)

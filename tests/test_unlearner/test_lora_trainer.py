@@ -384,3 +384,45 @@ def test_the_loss_history_is_written_beside_the_adapter(tmp_path: pathlib.Path) 
     assert [row["step"] for row in written] == [1, 2]
     assert written[0]["loss_forget"] == 0.5
     assert written[1]["learning_rate"] == 6e-4
+
+
+def test_truncating_a_batch_cuts_every_per_example_entry() -> None:
+    """Every entry of a collated batch describes the same examples, so all of them are cut together.
+
+    The defect this guards: the forget/retain loop cut the images and the captions to the shorter of
+    the two batches but not the overwriting caption SPARE conditions its frozen prediction on. When
+    the retain set ran out on a batch of one, one image met four overwriting captions and the
+    denoiser failed on a shape mismatch after 866 of 900 steps. The mutation that must fail this
+    test is leaving any key out of the cut.
+    """
+    from vision_unlearning.utils.training import truncate_batch
+
+    batch: dict[str, Any] = {
+        "pixel_values": torch.zeros(4, 3, 8, 8),
+        "input_ids": torch.zeros(4, 77, dtype=torch.long),
+        "forget_ids": torch.zeros(4, 77, dtype=torch.long),
+        "input_ids_2": torch.zeros(4, 77, dtype=torch.long),
+        "forget_ids_2": torch.zeros(4, 77, dtype=torch.long),
+        "original_sizes": [(512, 512)] * 4,
+        "crop_top_lefts": [(0, 0)] * 4,
+    }
+
+    truncate_batch(batch, 1)
+
+    assert {key: len(value) for key, value in batch.items()} == {key: 1 for key in batch}
+
+
+def test_the_training_loop_cuts_batches_through_one_function() -> None:
+    """The forget/retain loop may not slice individual batch keys by hand.
+
+    A hand-written list of keys is what let the overwriting caption fall out of the cut; a key
+    added to a collate function later would fall out the same way. Read from the source rather than
+    by running the loop, which needs a full diffusion model.
+    """
+    source = (pathlib.Path(__file__).parents[2] / "vision_unlearning" / "unlearner" / "lora.py").read_text(encoding="utf-8")
+    start = source.index("    def _fit(self)")
+    end = source.index("\n    def ", start + 1)
+    fit = source[start:end]
+
+    assert "[:min_length]" not in fit, "UnlearnerLora._fit slices a batch key by hand"
+    assert fit.count("truncate_batch(") == 2, "UnlearnerLora._fit must cut both batches with truncate_batch"
