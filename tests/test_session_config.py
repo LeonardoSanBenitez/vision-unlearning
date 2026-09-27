@@ -83,6 +83,27 @@ class TestUce:
         assert config['guide_concepts'] == substitute_concept(task)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
+    def test_the_guide_concept_can_be_set_explicitly(self, task: str, entity: str) -> None:
+        """A control session sets the guide concept and changes nothing else.
+
+        The old configuration aimed the edit at the literal task name. Running it again beside the
+        current one, on the same entity and baseline, is what measures the guide change; the
+        override must reach `guide_concepts` and leave every other field exactly as the default.
+        """
+        default = _config(task, 'uce', entity, num_train_epochs=0)
+        control = _config(task, 'uce', entity, num_train_epochs=0, uce_guide_concepts=task)
+
+        assert control['guide_concepts'] == task
+        assert {k: v for k, v in control.items() if k != 'guide_concepts'} == \
+            {k: v for k, v in default.items() if k != 'guide_concepts'}
+
+    @pytest.mark.parametrize('method', ['salun', 'distil', 'munba'])
+    def test_the_guide_override_is_refused_for_other_methods(self, method: str) -> None:
+        """A UCE-only setting passed to another method is an error, not a silent no-op."""
+        with pytest.raises(ValueError, match='uce_guide_concepts'):
+            _config('breeds', method, 'bouvier des flandres dog', uce_guide_concepts='breeds')
+
+    @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
     def test_the_preserve_concept_is_kept(self, task: str, entity: str) -> None:
         """Dropping it was tried and reversed; a protection is not removed for being badly chosen.
 

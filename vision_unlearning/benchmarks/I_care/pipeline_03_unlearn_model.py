@@ -181,6 +181,11 @@ _parser.add_argument("--batch-size-inference", type=int, default=None,
                           "free video memory, which makes the images depend on the card and on "
                           "what else was running -- see the note at the selection site. Set it "
                           "for any run whose images must be comparable with another run's.")
+_parser.add_argument("--uce-guide-concepts", default=None,
+                     help="UCE only: the concept the edit pushes the entity towards. Left unset it is "
+                          "the task's substitute concept. Set to the task name ('people', 'breeds', "
+                          "'scenes') to reproduce the configuration used before that change, for a "
+                          "control session on the same entity. Refused for any other method.")
 _args = _parser.parse_args()
 
 base_folder: str = _args.base_folder
@@ -191,6 +196,7 @@ index_start = _args.index_start
 max_identities = _args.max_identities
 replace_if_exists = _args.replace_if_exists
 batch_size_inference_override: Optional[int] = _args.batch_size_inference
+uce_guide_concepts: Optional[str] = _args.uce_guide_concepts
 
 # Basic params
 with open(os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json"), "r", encoding="utf-8") as f:
@@ -247,7 +253,10 @@ for index in range(index_start, index_start + max_identities):
         device=device,
         num_train_epochs=num_train_epochs,
         hub_model_id=hub_model_id,
+        uce_guide_concepts=uce_guide_concepts,
     )
+    if uce_guide_concepts is not None:
+        logger.info('UCE guide concept set by the caller to %r (default: the substitute concept)', uce_guide_concepts)
     if method in ('distil', 'munba'):
         # How much fits on this card: a property of the machine, not of the session, which is why
         # it is the one piece of the configuration that did not move out of this file.

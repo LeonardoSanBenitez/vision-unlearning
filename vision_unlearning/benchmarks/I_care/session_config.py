@@ -48,6 +48,7 @@ def session_hyperparameters(
     device: str,
     num_train_epochs: int,
     hub_model_id: Optional[str] = None,
+    uce_guide_concepts: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return the hyperparameters of one unlearning session.
 
@@ -61,6 +62,9 @@ def session_hyperparameters(
     @param device: 'cuda' or 'cpu'.
     @param num_train_epochs: epochs, for the methods that train.
     @param hub_model_id: the model hub identifier, or None not to push.
+    @param uce_guide_concepts: UCE only. None keeps the default, the task's substitute concept;
+        a string replaces it, which is how a control session reproduces an earlier configuration
+        on the same entity. Refused for every other method.
     @raises NotImplementedError: the method has no configuration here.
     """
     forget_prompts, retain_prompts = evaluation_prompts(task, entity)
@@ -71,8 +75,10 @@ def session_hyperparameters(
         'final_eval_prompts_retain': retain_prompts,
     }
 
+    if uce_guide_concepts is not None and method != 'uce':
+        raise ValueError(f'uce_guide_concepts is a UCE setting; method {method!r} has no guide concept')
     if method == 'uce':
-        hyperparameters.update(_uce(task, entity, model_base_name, device))
+        hyperparameters.update(_uce(task, entity, model_base_name, device, uce_guide_concepts))
     elif method == 'salun':
         hyperparameters.update(_salun(
             task, model_base_name, device, num_train_epochs,
@@ -89,7 +95,9 @@ def session_hyperparameters(
     return hyperparameters
 
 
-def _uce(task: type_task, entity: str, model_base_name: str, device: str) -> Dict[str, Any]:
+def _uce(
+    task: type_task, entity: str, model_base_name: str, device: str, guide_concepts: Optional[str] = None,
+) -> Dict[str, Any]:
     """The closed-form edit.
 
     ``guide_concepts`` is the task's substitute concept -- the same phrase the other two methods
@@ -117,7 +125,7 @@ def _uce(task: type_task, entity: str, model_base_name: str, device: str) -> Dic
         'preserve_scale': 0.01,
         'lamb': 0.01,
         'edit_concepts': canonical_entity(task, entity),
-        'guide_concepts': substitute_concept(task),
+        'guide_concepts': substitute_concept(task) if guide_concepts is None else guide_concepts,
         'preserve_concepts': task,
         'expand_prompts': False,
         'device': device,
