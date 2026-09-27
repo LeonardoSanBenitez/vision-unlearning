@@ -426,3 +426,19 @@ def test_the_training_loop_cuts_batches_through_one_function() -> None:
 
     assert "[:min_length]" not in fit, "UnlearnerLora._fit slices a batch key by hand"
     assert fit.count("truncate_batch(") == 2, "UnlearnerLora._fit must cut both batches with truncate_batch"
+
+
+def test_every_adapter_load_names_its_file() -> None:
+    """Each `load_lora_weights` call in the trainer passes `weight_name`.
+
+    Without it, diffusers guesses the file name by listing the folder through the Hub client, and
+    under `HF_HUB_OFFLINE=1` that guess raises "When using the offline mode, you must specify a
+    `weight_name`" -- after the whole training run, in the final evaluation. The mutation that must
+    fail this test is dropping the argument from any one call.
+    """
+    source = (pathlib.Path(__file__).parents[2] / "vision_unlearning" / "unlearner" / "lora.py").read_text(encoding="utf-8")
+    calls = [line.strip() for line in source.splitlines() if ".load_lora_weights(" in line]
+
+    assert calls, "no adapter load found; the test no longer looks at the right file"
+    unnamed = [call for call in calls if "weight_name=" not in call]
+    assert not unnamed, f"adapter loads that leave the file name to a Hub lookup: {unnamed}"

@@ -1012,7 +1012,9 @@ class UnlearnerLora(Unlearner):
                     variant=self.variant,
                     torch_dtype=self._weight_dtype,
                 )
-                pipeline.load_lora_weights(self._output_dir_lora)  # load attention processors
+                # The file is named rather than guessed: guessing lists the folder through the Hub
+                # client, which raises under HF_HUB_OFFLINE=1 instead of reading the local folder.
+                pipeline.load_lora_weights(self._output_dir_lora, weight_name=self._lora_weight_name)  # load attention processors
                 self._images.update(log_validation(pipeline, self._accelerator, self._last_epoch, self.num_validation_images, self.validation_prompt, self.seed, is_final_validation=True))  # run inference
                 del pipeline
                 device_utils.empty_cache()
