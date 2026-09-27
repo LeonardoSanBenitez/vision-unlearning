@@ -15,6 +15,7 @@ from __future__ import annotations
 import inspect
 import io
 import os
+import re
 from typing import Any, Dict, List, Tuple
 
 import pytest
@@ -312,3 +313,32 @@ def test_the_forget_and_retain_splits_are_the_benchmark_s_own() -> None:
     salun_block = source.split("def _salun(", 1)[1].split("def _lora(", 1)[0]
     assert "'dataset_forget_name': dataset_forget_name" in salun_block
     assert "'dataset_retain_name': dataset_retain_name" in salun_block
+
+
+@pytest.mark.parametrize("method", _REGISTERED)
+def test_every_weight_editing_method_has_a_loader_for_its_artifact(method: str) -> None:
+    """A method that writes partial weights must have a loader that reads them back.
+
+    Without this, a method can be fully registered, train for an hour, save its weights, and then have
+    nothing able to rebuild a pipeline from them -- which is exactly how `salun` failed, in the stage
+    after the training it had just finished. `unlearner/loaders.py` keys its table by the artifact file
+    name, so the check is that the declared name is in that table.
+
+    Read from the source text rather than imported, for the same reason as the dispatch check above:
+    `vision_unlearning/unlearner/__init__.py` imports the LoRA trainer, so importing anything from
+    that package pulls in torch, which this tier does not have.
+    """
+    from vision_unlearning.datasets.testbed import ARTIFACT_KIND_LOADERS
+
+    specification = ALGORITHM_REGISTRY[method]  # type: ignore[index]
+    if ARTIFACT_KIND_LOADERS[specification.artifact_kind] != "partial_weights_loader":
+        pytest.skip(f"{method} does not write partial weights; its route is the adapter one")
+
+    source = _source_of(os.path.join("vision_unlearning", "unlearner", "loaders.py"))
+    table = re.search(r"_PARTIAL_WEIGHTS_LOADERS[^{]*\{(.*?)\}", source, re.S)
+    assert table is not None, "loaders.py no longer declares _PARTIAL_WEIGHTS_LOADERS"
+    known = re.findall(r"['\"]([^'\"]+\.safetensors)['\"]\s*:", table.group(1))
+    assert specification.artifact_filename in known, (
+        f"{method} writes {specification.artifact_filename!r} and no loader in "
+        f"vision_unlearning/unlearner/loaders.py reads it. Known: {', '.join(sorted(known))}."
+    )

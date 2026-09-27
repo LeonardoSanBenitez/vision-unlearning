@@ -39,12 +39,14 @@ from vision_unlearning.utils.gradient_weighting import GradientWeightingMethod, 
 from vision_unlearning.benchmarks.I_care import check_eval_results  # noqa: E402
 from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY  # noqa: E402
 from vision_unlearning.datasets.testbed import (  # noqa: E402
+    ARTIFACT_KIND_LOADERS,
     get_target_overwrite,
     get_unlearned_model_folder,
     exists_unlearned_model,
     exists_unlearned_dataset,
     GeneratedDataset,
 )
+from vision_unlearning.unlearner.loaders import get_partial_weights_loader  # noqa: E402
 from vision_unlearning.utils.data_generation import generate_dataset  # noqa: E402
 
 
@@ -379,11 +381,26 @@ for index in range(index_start, index_start + max_identities):
             # Only generate lora_state='on' (unlearned model) images here.
             # Baseline lora_state='off' images are generated once per task by
             # 0_generate_dataset_original.py and stored in the shared baseline folder.
+            # Which route rebuilds the unlearned model is a property of the ARTIFACT the method
+            # writes, declared once in ALGORITHM_REGISTRY, and not of the method's name. UCE and
+            # SalUn both write a file of modified denoiser tensors; keying the branch on the literal
+            # 'uce' sent SalUn down the adapter route, where it looked for a
+            # pytorch_lora_weights.safetensors that SalUn never writes and raised after the training
+            # had already finished. `pipeline_04_generate_dataset.py` and `datasets/testbed.py`
+            # both already choose the route this way; this script was the one site that did not.
+            artifact_kind = ALGORITHM_REGISTRY[method].artifact_kind
+            if artifact_kind not in ARTIFACT_KIND_LOADERS:
+                raise ValueError(
+                    f'No load route is declared for artifact kind {artifact_kind!r} (method '
+                    f'{method!r}). Known kinds: {", ".join(sorted(ARTIFACT_KIND_LOADERS))}. A new '
+                    'method must declare one rather than fall through to the adapter route.'
+                )
             model_pipeline: Optional[Any] = None
-            if method == 'uce':
-                model_generate_name: Optional[str] = None
-                lora_generate_name: Optional[str] = None
-                model_pipeline = UCE.get_pipeline_from_modified_weights(
+            model_generate_name: Optional[str] = None
+            lora_generate_name: Optional[str] = None
+            if ARTIFACT_KIND_LOADERS[artifact_kind] == 'partial_weights_loader':
+                load_pipeline = get_partial_weights_loader(ALGORITHM_REGISTRY[method].artifact_filename)
+                model_pipeline = load_pipeline(
                     pretrained_model_name_or_path=model_base_name,
                     device=device,
                     output_dir=output_dir,
@@ -391,7 +408,6 @@ for index in range(index_start, index_start + max_identities):
             else:
                 model_generate_name = model_base_name
                 lora_generate_name = output_dir
-                model_pipeline = None
 
             filenames = [f'on_{seed}_{prompt}.png' for seed in generate_dataset_seeds for prompt in prompts]
             generate_dataset(  # type: ignore[arg-type]
@@ -403,7 +419,7 @@ for index in range(index_start, index_start + max_identities):
                 seeds=generate_dataset_seeds,
                 filenames=filenames,
                 batch_size=batch_size_inference,
-                lora_requires_inversion=method == 'munba',
+                lora_requires_inversion=artifact_kind == 'lora_adapter_inverted',
             )
             del model_pipeline
             gc.collect()

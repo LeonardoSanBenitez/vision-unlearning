@@ -132,3 +132,46 @@ def test_method_choices_come_from_the_type_not_from_a_typed_list(script_name: st
         f'{script_name} restricts --method to a hand-typed list: {expression}. '
         f'Derive it from type_unlearning_algorithm so a new method is accepted everywhere at once.'
     )
+
+
+def _generation_section_of_pipeline_03() -> str:
+    """The part of `pipeline_03` that rebuilds the unlearned model and generates images.
+
+    Sliced rather than read whole because the method name is a legitimate discriminator elsewhere in
+    that file: the unlearner FACTORY must branch on it, since each method is a different class. It is
+    only the generation route that must not, and a check over the whole file could not tell the two
+    apart.
+    """
+    source = _read('vision_unlearning/benchmarks/I_care/pipeline_03_unlearn_model.py')
+    start = source.index('if perform_dataset_generation:')
+    end = source.index('del model_pipeline', start)
+    return source[start:end]
+
+
+def test_the_generation_route_is_chosen_from_the_declared_artifact_kind() -> None:
+    """The route that rebuilds an unlearned model follows the artifact, not the method's name.
+
+    `ALGORITHM_REGISTRY` declares what each method writes: `distil` and `munba` write a low-rank
+    adapter, `uce` and `salun` write a file of modified denoiser tensors. This script chose the route
+    with `if method == 'uce'`, so `salun` fell through to the adapter route and looked for a
+    `pytorch_lora_weights.safetensors` it never writes -- after the training had finished, which is
+    the expensive place to find out. `pipeline_04_generate_dataset.py` and `datasets/testbed.py`
+    already dispatch on `artifact_kind`; the mutation this test must catch is going back to a
+    comparison against a method name here.
+    """
+    section = _generation_section_of_pipeline_03()
+
+    assert 'ARTIFACT_KIND_LOADERS' in section, (
+        'pipeline_03 does not consult ARTIFACT_KIND_LOADERS when choosing how to rebuild the '
+        'unlearned model, so a method whose artifact kind is unhandled falls through silently.'
+    )
+    assert 'get_partial_weights_loader' in section, (
+        'pipeline_03 does not use get_partial_weights_loader, so it can only load whichever '
+        "weight-editing method's loader it names directly."
+    )
+    named = re.findall(r"method\s*==\s*['\"]([a-z_]+)['\"]", section)
+    assert not named, (
+        f'pipeline_03 chooses the generation route by comparing the method to {named}. '
+        'Derive it from ALGORITHM_REGISTRY[method].artifact_kind so a method added later is routed '
+        'by what it writes.'
+    )
