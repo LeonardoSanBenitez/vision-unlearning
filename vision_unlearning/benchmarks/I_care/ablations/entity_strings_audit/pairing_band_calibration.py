@@ -116,6 +116,21 @@ def mean_abs(left: np.ndarray, right: np.ndarray) -> float:
     return float(np.abs(left - right).mean())
 
 
+def correlation(left: np.ndarray, right: np.ndarray) -> float:
+    """Pearson correlation between two images' pixel values, flattened over colour channels.
+
+    A second, structural view of the same question, and a much sharper one: two images that share
+    their initial noise keep the same composition, so their pixels co-vary even when the subject has
+    been replaced, while two images from different draws are uncorrelated whatever their average
+    distance happens to be.
+    """
+    a = left.astype(np.float64).ravel()
+    b = right.astype(np.float64).ravel()
+    if a.std() == 0 or b.std() == 0:
+        return float('nan')
+    return float(np.corrcoef(a, b)[0, 1])
+
+
 def unrelated_floor(images: List[np.ndarray]) -> Tuple[float, int]:
     """Median distance between two *different* entities' images, over every unordered pair."""
     values: List[float] = []
@@ -208,10 +223,14 @@ def measure_cross_seed(folder: str, seed_same: int, seed_other: int) -> Dict[str
             continue
         same: List[float] = []
         cross: List[float] = []
+        same_corr: List[float] = []
+        cross_corr: List[float] = []
         for i, path in enumerate(paths):
             on_image = load_rgb(path)
             same.append(mean_abs(on_image, off_same[i]))
             cross.append(mean_abs(on_image, off_other[i]))
+            same_corr.append(correlation(on_image, off_same[i]))
+            cross_corr.append(correlation(on_image, off_other[i]))
         receiver_same = same[1:]
         receiver_cross = cross[1:]
         ratios = [s / c for s, c in zip(receiver_same, receiver_cross) if c]
@@ -221,8 +240,11 @@ def measure_cross_seed(folder: str, seed_same: int, seed_other: int) -> Dict[str
             'receiver_same_seed_median': round(statistics.median(receiver_same), 4),
             'receiver_cross_seed_median': round(statistics.median(receiver_cross), 4),
             'receiver_ratio_median': round(statistics.median(ratios), 4),
+            'receiver_same_seed_correlation_median': round(statistics.median(same_corr[1:]), 4),
+            'receiver_cross_seed_correlation_median': round(statistics.median(cross_corr[1:]), 4),
             'target_same_seed': round(same[0], 4),
             'target_cross_seed': round(cross[0], 4),
+            'target_same_seed_correlation': round(same_corr[0], 4),
         })
 
     return {
@@ -244,11 +266,12 @@ def print_cross_seed(result: Dict[str, Any]) -> None:
           f"on seed {result['seed_same']} against off seeds {result['seed_same']} and "
           f"{result['seed_other']}")
     print(f"{'epoch':>6} {'receivers':>10} {'same-seed':>10} {'cross-seed':>11} {'ratio':>7} "
-          f"{'target same':>12} {'target cross':>13}")
+          f"{'corr same':>10} {'corr cross':>11}")
     for row in result['rows']:
         print(f"{row['epoch']:>6} {row['n_receivers']:>10} {row['receiver_same_seed_median']:>10.4f} "
               f"{row['receiver_cross_seed_median']:>11.4f} {row['receiver_ratio_median']:>7.4f} "
-              f"{row['target_same_seed']:>12.4f} {row['target_cross_seed']:>13.4f}")
+              f"{row['receiver_same_seed_correlation_median']:>10.4f} "
+              f"{row['receiver_cross_seed_correlation_median']:>11.4f}")
 
 
 def self_check() -> int:
@@ -292,6 +315,17 @@ def self_check() -> int:
         return 1
     if not 0.9 <= cross_unshared <= 1.1:
         print('SELF_CHECK_FAILED: the cross-seed ratio left 1.0 when neither baseline shared the noise')
+        return 1
+
+    corr_shared = correlation(on_a, off_a)
+    corr_unshared = correlation(on_a, off_b)
+    print(f'correlation, shared  : {corr_shared:.4f}')
+    print(f'correlation, unshared: {corr_unshared:.4f}')
+    if corr_shared <= 0.5:
+        print('SELF_CHECK_FAILED: the correlation did not rise when the noise was shared')
+        return 1
+    if abs(corr_unshared) >= 0.2:
+        print('SELF_CHECK_FAILED: the correlation did not fall to zero for a different draw')
         return 1
     print('SELF_CHECK_OK: the ratio separates shared noise from a different draw')
     return 0
