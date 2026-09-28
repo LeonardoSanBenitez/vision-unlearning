@@ -228,3 +228,35 @@ class TestTheJoinKeyIsThePrompt:
         )
 
         assert pytest.approx(ratio, rel=1e-12) == 2.5
+
+
+class TestAPartialRunComputesTheEntitiesItNames:
+    """``--index-start N --max-identities K`` must compute entities N .. N+K-1.
+
+    The loop read ``range(index_start, max_identities)``: harmless for the full run from 0 to 100,
+    and empty for any run that starts later with fewer identities than its start index -- so
+    ``--index-start 14 --max-identities 1`` computed nothing and saved a file with no metrics. The
+    closing check then compared the file's rows, which always hold every entity of the task, with
+    ``max_identities``, so the same run also crashed after saving.
+    """
+
+    def test_one_entity_from_a_later_index(self, tmp_path: Any, monkeypatch: Any) -> None:
+        base_folder = _setup_base_folder(tmp_path)
+        monkeypatch.setattr(p07, "get_metadata_filtered", _fake_metadata)
+        row = {"brisque_diff": 0.0, "clip_diff": -1.0, "rmse": 0.0, "ssim": 1.0}
+        monkeypatch.setattr(p07, "get_interference_per_pair", lambda *a, **k: {"Alice": row, "Bob": row})
+        monkeypatch.setattr(p07, "get_interference_per_pair_inverse", lambda *a, **k: {"Alice": row, "Bob": row})
+
+        p07.compute_for_task(
+            task=_TASK, methods=[_METHOD], num_train_epochs_list=[_EPOCHS],
+            index_start=1, max_identities=1,
+            embedding_assets_folder=os.path.join(base_folder, "datasets"),
+            base_folder=base_folder,
+        )
+
+        with open(p07.get_interference_per_entity_path(_TASK, base_folder=base_folder), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        key = f"metric_{_METHOD}_{_EPOCHS}_emitter_average_clip_diff (↑)"
+        assert len(data) == len(_ENTITIES)
+        assert key in data[1], "the named entity (index 1) was not computed"
+        assert key not in data[0], "an entity outside the requested range was computed"

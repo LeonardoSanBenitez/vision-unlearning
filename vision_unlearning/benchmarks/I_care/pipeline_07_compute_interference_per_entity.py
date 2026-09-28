@@ -196,7 +196,7 @@ def compute_for_task(
     for _method_str, num_train_epochs in zip(methods, num_train_epochs_list):
         method = cast(Literal['munba', 'uce', 'distil'], _method_str)
 
-        for index in range(index_start, max_identities):
+        for index in range(index_start, index_start + max_identities):
             if not os.path.exists(get_interference_per_pair_path(
                 task, index, method, num_train_epochs, base_folder=base_folder,
             )):
@@ -410,8 +410,9 @@ def compute_for_task(
 
     # Sanity check
     df = pd.read_json(get_interference_per_entity_path(task, base_folder=base_folder))
-    assert df.shape[0] == max_identities, (
-        f'Expected {max_identities} rows, got {df.shape[0]}'
+    # The file holds one row per entity of the task, whichever range this run computed.
+    assert df.shape[0] == len(metadata_filtered), (
+        f'Expected {len(metadata_filtered)} rows, got {df.shape[0]}'
     )
     logger.info('Assertion passed: %d rows × %d columns', df.shape[0], df.shape[1])
 
