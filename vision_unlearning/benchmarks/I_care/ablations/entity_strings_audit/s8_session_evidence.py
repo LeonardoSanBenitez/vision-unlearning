@@ -197,10 +197,8 @@ def main() -> int:
         with open(entity_path, encoding='utf-8') as f:
             per_entity = json.load(f)
         row = _entity_row(per_entity, target)
-        forget_key = f'forget_clip_diff_{method}_{epochs}'
-        retain_key = f'retain_average_clip_diff_{method}_{epochs}'
-        forget = _lookup(row, forget_key, method)
-        retain = _lookup(row, retain_key, method, 'retain_average_clip_diff')
+        forget = _lookup(row, f'metric_{method}_{epochs}_forget_clip_diff')
+        retain = _lookup(row, f'metric_{method}_{epochs}_retain_average_clip_diff')
         expected_retain = statistics.fmean(clip[n] for n in receivers)
         agg.update({'forget_clip_diff': forget, 'expected_forget': clip[target],
                     'retain_average_clip_diff': retain, 'expected_retain_average': expected_retain})
@@ -242,29 +240,18 @@ def main() -> int:
 
 
 def _entity_row(per_entity: Any, target: str) -> Dict[str, Any]:
-    """The per-entity record of ``target``, from either a list of records or a column dict."""
-    if isinstance(per_entity, list):
-        for r in per_entity:
-            if target in (r.get('name'), r.get('entity'), r.get('target')):
-                return dict(r)
-        return {}
-    if isinstance(per_entity, dict):
-        if target in per_entity and isinstance(per_entity[target], dict):
-            return dict(per_entity[target])
-        # column-oriented (pandas to_json default): {column: {row_index: value}}
-        name_col = next((c for c in ('name', 'entity', 'target') if c in per_entity), None)
-        if name_col is not None:
-            for i, n in per_entity[name_col].items():
-                if n == target:
-                    return {col: vals.get(i) for col, vals in per_entity.items() if isinstance(vals, dict)}
+    """The per-entity record of ``target``: pipeline_07 writes a list of records keyed by ``name``."""
+    for r in per_entity:
+        if r.get('name') == target:
+            return dict(r)
     return {}
 
 
-def _lookup(row: Dict[str, Any], key: str, method: str, bare: str = 'forget_clip_diff') -> Optional[float]:
-    for k in (key, f'{bare}_{method}', bare):
-        if k in row and row[k] is not None:
-            return float(row[k])
-    return None
+def _lookup(row: Dict[str, Any], stem: str) -> Optional[float]:
+    """The value whose key is ``stem`` followed by pipeline_07's direction marker, e.g.
+    ``metric_uce_0_forget_clip_diff (↓)``. None when there is not exactly one such key."""
+    keys = [k for k in row if k == stem or k.startswith(stem + ' (')]
+    return float(row[keys[0]]) if len(keys) == 1 and row[keys[0]] is not None else None
 
 
 def _contact_sheet(shown: List[Tuple[str, str]], clip: Dict[str, float], task: str, method: str, epochs: int,
