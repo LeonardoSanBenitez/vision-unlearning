@@ -24,11 +24,14 @@ Variants:
 * SalUn (``salun``), people entity 0: ``fp32`` and ``tf32``. The SalUn trainer has no precision
   setting of its own, so ``tf32`` is set globally before the trainer is built.
 
-Usage, from the repository root on the card to be measured, with the assets folder on disk::
+Usage, from the repository root on the card to be measured, with the assets folder on disk. **One
+process per variant**: Accelerate keeps its mixed-precision setting in process-global state, so a
+second variant with another precision cannot be built in the same interpreter::
 
-    PYTHONPATH=. python .../spike_training_throughput.py --out DIR
+    PYTHONPATH=. python .../spike_training_throughput.py --out DIR --variant distil:bf16
 
-Writes ``DIR/training_throughput_<card>.json`` and prints ``SPIKE_TRAINING_DONE`` last.
+Writes ``DIR/training_throughput_<card>_<method>_<precision>.json`` and prints ``SPIKE_TRAINING_DONE``
+last.
 Exit codes: 0 finished; 2 a usage or data error.
 """
 from __future__ import annotations
@@ -111,6 +114,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument('--out', required=True, help='Output directory.')
     parser.add_argument('--assets', default=ASSETS, help='The I-CARE assets folder.')
     parser.add_argument('--steps', type=int, nargs=2, default=[20, 60], help='The two step counts per variant.')
+    parser.add_argument('--variant', required=True, choices=[f'{m}:{p}' for m, _, _, p in VARIANTS],
+                        help='method:precision, one per process.')
     args = parser.parse_args(argv)
     import torch
 
@@ -122,14 +127,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     card = torch.cuda.get_device_name(0).replace(' ', '_')
     rows: List[Dict[str, Any]] = []
-    for method, task, index, precision in VARIANTS:
+    selected = [v for v in VARIANTS if f'{v[0]}:{v[3]}' == args.variant]
+    for method, task, index, precision in selected:
         for steps in args.steps:
             row = run_variant(method, task, index, precision, steps, out, assets)
             rows.append(row)
             print(f'SPIKE training {method} {precision} {steps} steps: {row["runtime_training_seconds"]} s', flush=True)
     summary: Dict[str, Any] = {}
     low, high = args.steps
-    for method, task, index, precision in VARIANTS:
+    for method, task, index, precision in selected:
         pair = {r['steps']: r['runtime_training_seconds'] for r in rows if r['method'] == method and r['precision'] == precision}
         summary[f'{method} {precision}'] = {
             'seconds_per_step': round((pair[high] - pair[low]) / (high - low), 4),
@@ -137,7 +143,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         }
     result = {'card': torch.cuda.get_device_name(0), 'torch': torch.__version__, 'rows': rows, 'per_step': summary,
               'environment': {'CUBLAS_WORKSPACE_CONFIG': os.environ.get('CUBLAS_WORKSPACE_CONFIG')}}
-    (out / f'training_throughput_{card}.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+    (out / f'training_throughput_{card}_{args.variant.replace(":", "_")}.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
     print('SPIKE_TRAINING_DONE', flush=True)
     return 0
 
