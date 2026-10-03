@@ -28,7 +28,7 @@ echo "============================================================"
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_04_generate_dataset.py \
 --model-path "/home/leonardo/soham/huggingface_assets/style50_checkpoints/style50_checkpoints/" \
---output-folder "/home/leonardo/soham/huggingface_assets/datasets/Blossom_Season" \
+--output-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Blossom_Season_uce_sd_style50" \
 --emitter Blossom_Season \
 --method uce \
 --unet-state-dict "/home/leonardo/soham/models/Blossom_Season_uce_sd_style50/unet_state_dict.pth" \
@@ -47,10 +47,10 @@ echo "============================================================"
 
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_06_compute_interference_per_pair.py \
---answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/Blossom_Season_uce_sd_style_50" \
+--answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Blossom_Season_uce_sd_style50" \
 --style-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_style.pth" \
 --object-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_object.pth" \
---output-path "/home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_3_uce_sd_style50.json" \
+--output-path "/home/leonardo/soham/huggingface_assets/datasets/interferences_caused_by_3_uce_sd_style50.json" \
 --seed 188 \
 --prefix on \
 --device cuda \
@@ -68,7 +68,7 @@ echo "============================================================"
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_04_generate_dataset.py \
 --model-path "/home/leonardo/soham/huggingface_assets/style50_checkpoints/style50_checkpoints/" \
---output-folder "/home/leonardo/soham/huggingface_assets/datasets/Bricks" \
+--output-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Bricks_uce_sd_style50" \
 --emitter Bricks \
 --method uce \
 --unet-state-dict "/home/leonardo/soham/models/Bricks_uce_sd_style50/unet_state_dict.pth" \
@@ -87,10 +87,10 @@ echo "============================================================"
 
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_06_compute_interference_per_pair.py \
---answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/Bricks_uce_sd_style_50" \
+--answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Bricks_uce_sd_style50" \
 --style-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_style.pth" \
 --object-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_object.pth" \
---output-path "/home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_4_uce_sd_style50.json" \
+--output-path "/home/leonardo/soham/huggingface_assets/datasets/interferences_caused_by_4_uce_sd_style50.json" \
 --seed 188 \
 --prefix on \
 --device cuda \
@@ -127,7 +127,7 @@ echo "============================================================"
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_04_generate_dataset.py \
 --model-path "/home/leonardo/soham/huggingface_assets/style50_checkpoints/style50_checkpoints/" \
---output-folder "/home/leonardo/soham/huggingface_assets/datasets/Architectures" \
+--output-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Architectures_uce_sd_style50" \
 --emitter Architectures \
 --method uce \
 --unet-state-dict "/home/leonardo/soham/models/Architectures_uce_sd_style50/unet_state_dict.pth" \
@@ -146,10 +146,10 @@ echo "============================================================"
 
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_06_compute_interference_per_pair.py \
---answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/Architectures_uce_sd_style_50" \
+--answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Architectures_uce_sd_style50" \
 --style-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_style.pth" \
 --object-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_object.pth" \
---output-path "/home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_52_uce_sd_style50.json" \
+--output-path "/home/leonardo/soham/huggingface_assets/datasets/interferences_caused_by_52_uce_sd_style50.json" \
 --seed 188 \
 --prefix on \
 --device cuda \
@@ -186,7 +186,7 @@ echo "============================================================"
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_04_generate_dataset.py \
 --model-path "/home/leonardo/soham/huggingface_assets/style50_checkpoints/style50_checkpoints/" \
---output-folder "/home/leonardo/soham/huggingface_assets/datasets/Bears" \
+--output-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Bears_uce_sd_style50" \
 --emitter Bears \
 --method uce \
 --unet-state-dict "/home/leonardo/soham/models/Bears_uce_sd_style50/unet_state_dict.pth" \
@@ -205,10 +205,10 @@ echo "============================================================"
 
 PYTHONPATH=./vision-unlearning python3 \
 vision-unlearning/vision_unlearning/benchmarks/u_care/pipeline_06_compute_interference_per_pair.py \
---answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/Bears_uce_sd_style_50" \
+--answer-set-folder "/home/leonardo/soham/huggingface_assets/datasets/generated_Bears_uce_sd_style50" \
 --style-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_style.pth" \
 --object-checkpoint "/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints/classifier_object.pth" \
---output-path "/home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_53_uce_sd_style50.json" \
+--output-path "/home/leonardo/soham/huggingface_assets/datasets/interferences_caused_by_53_uce_sd_style50.json" \
 --seed 188 \
 --prefix on \
 --device cuda \
