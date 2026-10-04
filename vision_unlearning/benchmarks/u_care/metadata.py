@@ -45,7 +45,6 @@ class EntityMetadata(SingleFileArtifact):
     def compute(self) -> list:
         return cast(list, self._resolve())
 
-
 class InterferencePerPair(MetricEffectPerEntityPair):
     """One emitter's row: {receiver: {accuracy, accuracy_diff, target_probability,
     target_probability_diff}}, 71 keys."""
@@ -55,12 +54,8 @@ class InterferencePerPair(MetricEffectPerEntityPair):
     method: cfg.type_unlearning_algorithm
     base_folder: str  # Add base_folder as an attribute
 
-    def __init__(self, emitter: str, method: str, model: str, base_folder: str):
-        """Initialize the InterferencePerPair class with the base folder."""
-        self.emitter = emitter
-        self.method = method
-        self.model = model
-        self.base_folder = base_folder
+    class Config:
+        arbitrary_types_allowed = True  # Allow non-Pydantic types like Path
 
     @property
     def local_path(self) -> Path:
@@ -102,7 +97,8 @@ class InterferencePerPair(MetricEffectPerEntityPair):
         assert isinstance(data, dict) and len(data) == 71
 
     def compute(self) -> Dict[str, Dict[str, float]]:
-        return cast(Dict[str, Dict[str, float]], self._resolve())        
+        return cast(Dict[str, Dict[str, float]], self._resolve())
+
 class InterferencePerEntity(MetricEffectPerEntity):
     """The per-entity summary: each entity's metadata plus metric_{method}_{fragment} (arrow)
     columns. Produced by pipeline_07."""
