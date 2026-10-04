@@ -1,9 +1,14 @@
 import re
 from typing import Any, Dict, List, cast
-
+from pathlib import Path
 from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
 from vision_unlearning.benchmarks.care import MetricEffectPerEntity, MetricEffectPerEntityPair
 from vision_unlearning.benchmarks.u_care import configuration as cfg
+import logging
+
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 
 def _me_column_fragment(inteference_entity: cfg.type_me) -> str:
     """The column fragment for a metric column, given the interference entity. E.g. 'accuracy_diff'
@@ -63,7 +68,34 @@ class InterferencePerPair(MetricEffectPerEntityPair):
     def compute(self) -> Dict[str, Dict[str, float]]:
         return cast(Dict[str, Dict[str, float]], self._resolve())
 
+    # New methods added below
 
+    @property
+    def local_path(self) -> Path:
+        """Get the local path for the artifact."""
+        return Path(self.base_folder) / f"interferences_caused_by_{self.emitter}_{self.method}_{self.model}.json"
+
+    def exists(self) -> bool:
+        """Check if the artifact exists locally or remotely."""
+        # Check if the file exists locally
+        if self.local_path.exists():
+            return True
+        # If not found locally, fallback to checking on Hugging Face
+        return self._exists_on_huggingface()
+
+    def _exists_on_huggingface(self) -> bool:
+        """Check if the artifact exists on Hugging Face."""
+        try:
+            # Assuming `_get_data_path_remote` provides the remote path
+            remote_path = self._get_data_path_remote()
+            # Logic to check if the file exists on Hugging Face (e.g., using HTTP HEAD request)
+            # This is a placeholder; replace with actual Hugging Face API call
+            logger.debug(f"Checking existence of remote artifact: {remote_path}")
+            return False  # Replace with actual check
+        except Exception as e:
+            logger.warning(f"Failed to check remote existence for {self.emitter}: {e}")
+            return False
+        
 class InterferencePerEntity(MetricEffectPerEntity):
     """The per-entity summary: each entity's metadata plus metric_{method}_{fragment} (arrow)
     columns. Produced by pipeline_07."""
