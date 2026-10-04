@@ -53,8 +53,44 @@ class InterferencePerPair(MetricEffectPerEntityPair):
     model: cfg.type_model = "sd_style50"
     emitter: str
     method: cfg.type_unlearning_algorithm
+    base_folder: str  # Add base_folder as an attribute
+
+    def __init__(self, emitter: str, method: str, model: str, base_folder: str):
+        """Initialize the InterferencePerPair class with the base folder."""
+        self.emitter = emitter
+        self.method = method
+        self.model = model
+        self.base_folder = base_folder
+
+    @property
+    def local_path(self) -> Path:
+        """Get the local path for the artifact."""
+        return Path(self.base_folder) / f"interferences_caused_by_{self.emitter}_{self.method}_{self.model}.json"
+
+    def exists(self) -> bool:
+        """Check if the artifact exists locally or remotely."""
+        # Check if the file exists locally
+        if self.local_path.exists():
+            logger.debug(f"Found local artifact for emitter {self.emitter}: {self.local_path}")
+            return True
+        # If not found locally, fallback to checking on Hugging Face
+        logger.debug(f"Local artifact not found for emitter {self.emitter}, checking remote.")
+        return self._exists_on_huggingface()
+
+    def _exists_on_huggingface(self) -> bool:
+        """Check if the artifact exists on Hugging Face."""
+        try:
+            # Assuming `_get_data_path_remote` provides the remote path
+            remote_path = self._get_data_path_remote()
+            logger.debug(f"Checking existence of remote artifact: {remote_path}")
+            # Logic to check if the file exists on Hugging Face (e.g., using HTTP HEAD request)
+            return False  # Replace with actual check
+        except Exception as e:
+            logger.warning(f"Failed to check remote existence for {self.emitter}: {e}")
+            return False
 
     def _get_data_path_remote(self) -> str:
+        """Get the remote path for the artifact."""
         index = cfg.ENTITIES.index(self.emitter)
         return f"datasets/interferences_caused_by_{index}_{self.method}{cfg.model_segment(self.model)}.json"
 
@@ -66,36 +102,7 @@ class InterferencePerPair(MetricEffectPerEntityPair):
         assert isinstance(data, dict) and len(data) == 71
 
     def compute(self) -> Dict[str, Dict[str, float]]:
-        return cast(Dict[str, Dict[str, float]], self._resolve())
-
-    # New methods added below
-
-    @property
-    def local_path(self) -> Path:
-        """Get the local path for the artifact."""
-        return Path(self.base_folder) / f"interferences_caused_by_{self.emitter}_{self.method}_{self.model}.json"
-
-    def exists(self) -> bool:
-        """Check if the artifact exists locally or remotely."""
-        # Check if the file exists locally
-        if self.local_path.exists():
-            return True
-        # If not found locally, fallback to checking on Hugging Face
-        return self._exists_on_huggingface()
-
-    def _exists_on_huggingface(self) -> bool:
-        """Check if the artifact exists on Hugging Face."""
-        try:
-            # Assuming `_get_data_path_remote` provides the remote path
-            remote_path = self._get_data_path_remote()
-            # Logic to check if the file exists on Hugging Face (e.g., using HTTP HEAD request)
-            # This is a placeholder; replace with actual Hugging Face API call
-            logger.debug(f"Checking existence of remote artifact: {remote_path}")
-            return False  # Replace with actual check
-        except Exception as e:
-            logger.warning(f"Failed to check remote existence for {self.emitter}: {e}")
-            return False
-        
+        return cast(Dict[str, Dict[str, float]], self._resolve())        
 class InterferencePerEntity(MetricEffectPerEntity):
     """The per-entity summary: each entity's metadata plus metric_{method}_{fragment} (arrow)
     columns. Produced by pipeline_07."""
