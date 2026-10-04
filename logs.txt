@@ -1,0 +1,360 @@
+/home/leonardo/.conda/envs/vision_unlearn_stable/lib/python3.11/site-packages/phasepack/tools.py:11: UserWarning: 
+Module 'pyfftw' (FFTW Python bindings) could not be imported. To install it, try
+running 'pip install pyfftw' from the terminal. Falling back on the slower
+'fftpack' module for 2D Fourier transforms.
+  warnings.warn("""
+2026-10-04 07:04:13,975 - INFO - Starting computation from artifacts with method: uce
+2026-10-04 07:04:13,975 - INFO - Base folder: /home/leonardo/soham/huggingface_assets/results/results
+2026-10-04 07:04:13,975 - DEBUG - Metadata loaded: [{'name': 'Abstractionism', 'index': 0, 'domain': 'style', 'unlearnable': True}, {'name': 'Artist_Sketch', 'index': 1, 'domain': 'style', 'unlearnable': True}, {'name': 'Blossom_Season', 'index': 2, 'domain': 'style', 'unlearnable': True}, {'name': 'Bricks', 'index': 3, 'domain': 'style', 'unlearnable': True}, {'name': 'Byzantine', 'index': 4, 'domain': 'style', 'unlearnable': True}, {'name': 'Cartoon', 'index': 5, 'domain': 'style', 'unlearnable': True}, {'name': 'Cold_Warm', 'index': 6, 'domain': 'style', 'unlearnable': True}, {'name': 'Color_Fantasy', 'index': 7, 'domain': 'style', 'unlearnable': True}, {'name': 'Comic_Etch', 'index': 8, 'domain': 'style', 'unlearnable': True}, {'name': 'Crayon', 'index': 9, 'domain': 'style', 'unlearnable': True}, {'name': 'Cubism', 'index': 10, 'domain': 'style', 'unlearnable': True}, {'name': 'Dadaism', 'index': 11, 'domain': 'style', 'unlearnable': True}, {'name': 'Dapple', 'index': 12, 'domain': 'style', 'unlearnable': True}, {'name': 'Defoliation', 'index': 13, 'domain': 'style', 'unlearnable': True}, {'name': 'Early_Autumn', 'index': 14, 'domain': 'style', 'unlearnable': True}, {'name': 'Expressionism', 'index': 15, 'domain': 'style', 'unlearnable': True}, {'name': 'Fauvism', 'index': 16, 'domain': 'style', 'unlearnable': True}, {'name': 'French', 'index': 17, 'domain': 'style', 'unlearnable': True}, {'name': 'Glowing_Sunset', 'index': 18, 'domain': 'style', 'unlearnable': True}, {'name': 'Gorgeous_Love', 'index': 19, 'domain': 'style', 'unlearnable': True}, {'name': 'Greenfield', 'index': 20, 'domain': 'style', 'unlearnable': True}, {'name': 'Impressionism', 'index': 21, 'domain': 'style', 'unlearnable': True}, {'name': 'Ink_Art', 'index': 22, 'domain': 'style', 'unlearnable': True}, {'name': 'Joy', 'index': 23, 'domain': 'style', 'unlearnable': True}, {'name': 'Liquid_Dreams', 'index': 24, 'domain': 'style', 'unlearnable': True}, {'name': 'Magic_Cube', 'index': 25, 'domain': 'style', 'unlearnable': True}, {'name': 'Meta_Physics', 'index': 26, 'domain': 'style', 'unlearnable': True}, {'name': 'Meteor_Shower', 'index': 27, 'domain': 'style', 'unlearnable': True}, {'name': 'Monet', 'index': 28, 'domain': 'style', 'unlearnable': True}, {'name': 'Mosaic', 'index': 29, 'domain': 'style', 'unlearnable': True}, {'name': 'Neon_Lines', 'index': 30, 'domain': 'style', 'unlearnable': True}, {'name': 'On_Fire', 'index': 31, 'domain': 'style', 'unlearnable': True}, {'name': 'Pastel', 'index': 32, 'domain': 'style', 'unlearnable': True}, {'name': 'Pencil_Drawing', 'index': 33, 'domain': 'style', 'unlearnable': True}, {'name': 'Picasso', 'index': 34, 'domain': 'style', 'unlearnable': True}, {'name': 'Pop_Art', 'index': 35, 'domain': 'style', 'unlearnable': True}, {'name': 'Red_Blue_Ink', 'index': 36, 'domain': 'style', 'unlearnable': True}, {'name': 'Rust', 'index': 37, 'domain': 'style', 'unlearnable': True}, {'name': 'Seed_Images', 'index': 38, 'domain': 'style', 'unlearnable': False}, {'name': 'Sketch', 'index': 39, 'domain': 'style', 'unlearnable': True}, {'name': 'Sponge_Dabbed', 'index': 40, 'domain': 'style', 'unlearnable': True}, {'name': 'Structuralism', 'index': 41, 'domain': 'style', 'unlearnable': True}, {'name': 'Superstring', 'index': 42, 'domain': 'style', 'unlearnable': True}, {'name': 'Surrealism', 'index': 43, 'domain': 'style', 'unlearnable': True}, {'name': 'Ukiyoe', 'index': 44, 'domain': 'style', 'unlearnable': True}, {'name': 'Van_Gogh', 'index': 45, 'domain': 'style', 'unlearnable': True}, {'name': 'Vibrant_Flow', 'index': 46, 'domain': 'style', 'unlearnable': True}, {'name': 'Warm_Love', 'index': 47, 'domain': 'style', 'unlearnable': True}, {'name': 'Warm_Smear', 'index': 48, 'domain': 'style', 'unlearnable': True}, {'name': 'Watercolor', 'index': 49, 'domain': 'style', 'unlearnable': True}, {'name': 'Winter', 'index': 50, 'domain': 'style', 'unlearnable': True}, {'name': 'Architectures', 'index': 51, 'domain': 'object', 'unlearnable': True}, {'name': 'Bears', 'index': 52, 'domain': 'object', 'unlearnable': True}, {'name': 'Birds', 'index': 53, 'domain': 'object', 'unlearnable': True}, {'name': 'Butterfly', 'index': 54, 'domain': 'object', 'unlearnable': True}, {'name': 'Cats', 'index': 55, 'domain': 'object', 'unlearnable': True}, {'name': 'Dogs', 'index': 56, 'domain': 'object', 'unlearnable': True}, {'name': 'Fishes', 'index': 57, 'domain': 'object', 'unlearnable': True}, {'name': 'Flame', 'index': 58, 'domain': 'object', 'unlearnable': True}, {'name': 'Flowers', 'index': 59, 'domain': 'object', 'unlearnable': True}, {'name': 'Frogs', 'index': 60, 'domain': 'object', 'unlearnable': True}, {'name': 'Horses', 'index': 61, 'domain': 'object', 'unlearnable': True}, {'name': 'Human', 'index': 62, 'domain': 'object', 'unlearnable': True}, {'name': 'Jellyfish', 'index': 63, 'domain': 'object', 'unlearnable': True}, {'name': 'Rabbits', 'index': 64, 'domain': 'object', 'unlearnable': True}, {'name': 'Sandwiches', 'index': 65, 'domain': 'object', 'unlearnable': True}, {'name': 'Sea', 'index': 66, 'domain': 'object', 'unlearnable': True}, {'name': 'Statues', 'index': 67, 'domain': 'object', 'unlearnable': True}, {'name': 'Towers', 'index': 68, 'domain': 'object', 'unlearnable': True}, {'name': 'Trees', 'index': 69, 'domain': 'object', 'unlearnable': True}, {'name': 'Waterfalls', 'index': 70, 'domain': 'object', 'unlearnable': True}]
+2026-10-04 07:04:13,976 - DEBUG - Checking artifact for emitter Abstractionism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Abstractionism_uce_sd_style50.json
+2026-10-04 07:04:13,977 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:14,150 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_0_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:14,151 - WARNING - Artifact does not exist for emitter: Abstractionism
+2026-10-04 07:04:14,152 - DEBUG - Checking artifact for emitter Artist_Sketch: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Artist_Sketch_uce_sd_style50.json
+2026-10-04 07:04:14,153 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:14,291 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_1_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:14,293 - WARNING - Artifact does not exist for emitter: Artist_Sketch
+2026-10-04 07:04:14,294 - DEBUG - Checking artifact for emitter Blossom_Season: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Blossom_Season_uce_sd_style50.json
+2026-10-04 07:04:14,296 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:14,447 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_2_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:14,449 - WARNING - Artifact does not exist for emitter: Blossom_Season
+2026-10-04 07:04:14,450 - DEBUG - Checking artifact for emitter Bricks: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Bricks_uce_sd_style50.json
+2026-10-04 07:04:14,452 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:14,620 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_3_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:14,623 - WARNING - Artifact does not exist for emitter: Bricks
+2026-10-04 07:04:14,623 - DEBUG - Checking artifact for emitter Byzantine: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Byzantine_uce_sd_style50.json
+2026-10-04 07:04:14,626 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:14,776 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_4_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:14,778 - WARNING - Artifact does not exist for emitter: Byzantine
+2026-10-04 07:04:14,778 - DEBUG - Checking artifact for emitter Cartoon: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Cartoon_uce_sd_style50.json
+2026-10-04 07:04:14,781 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:14,931 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_5_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:14,933 - WARNING - Artifact does not exist for emitter: Cartoon
+2026-10-04 07:04:14,934 - DEBUG - Checking artifact for emitter Cold_Warm: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Cold_Warm_uce_sd_style50.json
+2026-10-04 07:04:14,936 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:15,086 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_6_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:15,088 - WARNING - Artifact does not exist for emitter: Cold_Warm
+2026-10-04 07:04:15,089 - DEBUG - Checking artifact for emitter Color_Fantasy: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Color_Fantasy_uce_sd_style50.json
+2026-10-04 07:04:15,092 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:15,245 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_7_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:15,248 - WARNING - Artifact does not exist for emitter: Color_Fantasy
+2026-10-04 07:04:15,249 - DEBUG - Checking artifact for emitter Comic_Etch: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Comic_Etch_uce_sd_style50.json
+2026-10-04 07:04:15,251 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:15,422 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_8_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:15,424 - WARNING - Artifact does not exist for emitter: Comic_Etch
+2026-10-04 07:04:15,425 - DEBUG - Checking artifact for emitter Crayon: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Crayon_uce_sd_style50.json
+2026-10-04 07:04:15,427 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:15,576 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_9_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:15,578 - WARNING - Artifact does not exist for emitter: Crayon
+2026-10-04 07:04:15,579 - DEBUG - Checking artifact for emitter Cubism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Cubism_uce_sd_style50.json
+2026-10-04 07:04:15,581 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:15,731 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_10_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:15,733 - WARNING - Artifact does not exist for emitter: Cubism
+2026-10-04 07:04:15,734 - DEBUG - Checking artifact for emitter Dadaism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Dadaism_uce_sd_style50.json
+2026-10-04 07:04:15,736 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:15,886 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_11_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:15,888 - WARNING - Artifact does not exist for emitter: Dadaism
+2026-10-04 07:04:15,888 - DEBUG - Checking artifact for emitter Dapple: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Dapple_uce_sd_style50.json
+2026-10-04 07:04:15,890 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:16,041 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_12_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:16,043 - WARNING - Artifact does not exist for emitter: Dapple
+2026-10-04 07:04:16,043 - DEBUG - Checking artifact for emitter Defoliation: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Defoliation_uce_sd_style50.json
+2026-10-04 07:04:16,045 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:16,216 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_13_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:16,218 - WARNING - Artifact does not exist for emitter: Defoliation
+2026-10-04 07:04:16,219 - DEBUG - Checking artifact for emitter Early_Autumn: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Early_Autumn_uce_sd_style50.json
+2026-10-04 07:04:16,221 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:16,375 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_14_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:16,377 - WARNING - Artifact does not exist for emitter: Early_Autumn
+2026-10-04 07:04:16,377 - DEBUG - Checking artifact for emitter Expressionism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Expressionism_uce_sd_style50.json
+2026-10-04 07:04:16,379 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:16,526 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_15_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:16,528 - WARNING - Artifact does not exist for emitter: Expressionism
+2026-10-04 07:04:16,529 - DEBUG - Checking artifact for emitter Fauvism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Fauvism_uce_sd_style50.json
+2026-10-04 07:04:16,531 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:16,715 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_16_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:16,717 - WARNING - Artifact does not exist for emitter: Fauvism
+2026-10-04 07:04:16,718 - DEBUG - Checking artifact for emitter French: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_French_uce_sd_style50.json
+2026-10-04 07:04:16,720 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:16,871 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_17_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:16,873 - WARNING - Artifact does not exist for emitter: French
+2026-10-04 07:04:16,873 - DEBUG - Checking artifact for emitter Glowing_Sunset: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Glowing_Sunset_uce_sd_style50.json
+2026-10-04 07:04:16,875 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:17,025 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_18_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:17,027 - WARNING - Artifact does not exist for emitter: Glowing_Sunset
+2026-10-04 07:04:17,028 - DEBUG - Checking artifact for emitter Gorgeous_Love: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Gorgeous_Love_uce_sd_style50.json
+2026-10-04 07:04:17,030 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:17,178 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_19_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:17,180 - WARNING - Artifact does not exist for emitter: Gorgeous_Love
+2026-10-04 07:04:17,180 - DEBUG - Checking artifact for emitter Greenfield: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Greenfield_uce_sd_style50.json
+2026-10-04 07:04:17,182 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:17,332 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_20_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:17,334 - WARNING - Artifact does not exist for emitter: Greenfield
+2026-10-04 07:04:17,334 - DEBUG - Checking artifact for emitter Impressionism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Impressionism_uce_sd_style50.json
+2026-10-04 07:04:17,336 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:17,485 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_21_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:17,487 - WARNING - Artifact does not exist for emitter: Impressionism
+2026-10-04 07:04:17,488 - DEBUG - Checking artifact for emitter Ink_Art: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Ink_Art_uce_sd_style50.json
+2026-10-04 07:04:17,490 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:17,665 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_22_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:17,667 - WARNING - Artifact does not exist for emitter: Ink_Art
+2026-10-04 07:04:17,667 - DEBUG - Checking artifact for emitter Joy: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Joy_uce_sd_style50.json
+2026-10-04 07:04:17,669 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:17,820 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_23_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:17,822 - WARNING - Artifact does not exist for emitter: Joy
+2026-10-04 07:04:17,823 - DEBUG - Checking artifact for emitter Liquid_Dreams: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Liquid_Dreams_uce_sd_style50.json
+2026-10-04 07:04:17,825 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:17,974 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_24_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:17,975 - WARNING - Artifact does not exist for emitter: Liquid_Dreams
+2026-10-04 07:04:17,976 - DEBUG - Checking artifact for emitter Magic_Cube: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Magic_Cube_uce_sd_style50.json
+2026-10-04 07:04:17,978 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:18,127 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_25_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:18,129 - WARNING - Artifact does not exist for emitter: Magic_Cube
+2026-10-04 07:04:18,130 - DEBUG - Checking artifact for emitter Meta_Physics: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Meta_Physics_uce_sd_style50.json
+2026-10-04 07:04:18,132 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:18,285 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_26_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:18,287 - WARNING - Artifact does not exist for emitter: Meta_Physics
+2026-10-04 07:04:18,288 - DEBUG - Checking artifact for emitter Meteor_Shower: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Meteor_Shower_uce_sd_style50.json
+2026-10-04 07:04:18,291 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:18,441 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_27_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:18,443 - WARNING - Artifact does not exist for emitter: Meteor_Shower
+2026-10-04 07:04:18,444 - DEBUG - Checking artifact for emitter Monet: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Monet_uce_sd_style50.json
+2026-10-04 07:04:18,446 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:18,599 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_28_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:18,601 - WARNING - Artifact does not exist for emitter: Monet
+2026-10-04 07:04:18,602 - DEBUG - Checking artifact for emitter Mosaic: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Mosaic_uce_sd_style50.json
+2026-10-04 07:04:18,604 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:18,754 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_29_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:18,756 - WARNING - Artifact does not exist for emitter: Mosaic
+2026-10-04 07:04:18,757 - DEBUG - Checking artifact for emitter Neon_Lines: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Neon_Lines_uce_sd_style50.json
+2026-10-04 07:04:18,759 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:18,909 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_30_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:18,911 - WARNING - Artifact does not exist for emitter: Neon_Lines
+2026-10-04 07:04:18,911 - DEBUG - Checking artifact for emitter On_Fire: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_On_Fire_uce_sd_style50.json
+2026-10-04 07:04:18,913 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:19,062 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_31_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:19,064 - WARNING - Artifact does not exist for emitter: On_Fire
+2026-10-04 07:04:19,065 - DEBUG - Checking artifact for emitter Pastel: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Pastel_uce_sd_style50.json
+2026-10-04 07:04:19,067 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:19,216 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_32_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:19,218 - WARNING - Artifact does not exist for emitter: Pastel
+2026-10-04 07:04:19,218 - DEBUG - Checking artifact for emitter Pencil_Drawing: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Pencil_Drawing_uce_sd_style50.json
+2026-10-04 07:04:19,220 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:19,370 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_33_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:19,371 - WARNING - Artifact does not exist for emitter: Pencil_Drawing
+2026-10-04 07:04:19,372 - DEBUG - Checking artifact for emitter Picasso: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Picasso_uce_sd_style50.json
+2026-10-04 07:04:19,374 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:19,525 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_34_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:19,527 - WARNING - Artifact does not exist for emitter: Picasso
+2026-10-04 07:04:19,528 - DEBUG - Checking artifact for emitter Pop_Art: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Pop_Art_uce_sd_style50.json
+2026-10-04 07:04:19,530 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:19,674 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_35_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:19,676 - WARNING - Artifact does not exist for emitter: Pop_Art
+2026-10-04 07:04:19,677 - DEBUG - Checking artifact for emitter Red_Blue_Ink: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Red_Blue_Ink_uce_sd_style50.json
+2026-10-04 07:04:19,679 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:19,824 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_36_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:19,826 - WARNING - Artifact does not exist for emitter: Red_Blue_Ink
+2026-10-04 07:04:19,827 - DEBUG - Checking artifact for emitter Rust: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Rust_uce_sd_style50.json
+2026-10-04 07:04:19,829 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:19,977 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_37_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:19,979 - WARNING - Artifact does not exist for emitter: Rust
+2026-10-04 07:04:19,980 - DEBUG - Checking artifact for emitter Sketch: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Sketch_uce_sd_style50.json
+2026-10-04 07:04:19,982 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:20,131 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_39_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:20,133 - WARNING - Artifact does not exist for emitter: Sketch
+2026-10-04 07:04:20,134 - DEBUG - Checking artifact for emitter Sponge_Dabbed: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Sponge_Dabbed_uce_sd_style50.json
+2026-10-04 07:04:20,136 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:20,285 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_40_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:20,287 - WARNING - Artifact does not exist for emitter: Sponge_Dabbed
+2026-10-04 07:04:20,288 - DEBUG - Checking artifact for emitter Structuralism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Structuralism_uce_sd_style50.json
+2026-10-04 07:04:20,290 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:20,441 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_41_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:20,444 - WARNING - Artifact does not exist for emitter: Structuralism
+2026-10-04 07:04:20,444 - DEBUG - Checking artifact for emitter Superstring: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Superstring_uce_sd_style50.json
+2026-10-04 07:04:20,447 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:20,595 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_42_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:20,597 - WARNING - Artifact does not exist for emitter: Superstring
+2026-10-04 07:04:20,598 - DEBUG - Checking artifact for emitter Surrealism: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Surrealism_uce_sd_style50.json
+2026-10-04 07:04:20,600 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:20,746 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_43_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:20,748 - WARNING - Artifact does not exist for emitter: Surrealism
+2026-10-04 07:04:20,749 - DEBUG - Checking artifact for emitter Ukiyoe: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Ukiyoe_uce_sd_style50.json
+2026-10-04 07:04:20,751 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:20,896 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_44_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:20,898 - WARNING - Artifact does not exist for emitter: Ukiyoe
+2026-10-04 07:04:20,899 - DEBUG - Checking artifact for emitter Van_Gogh: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Van_Gogh_uce_sd_style50.json
+2026-10-04 07:04:20,901 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:21,048 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_45_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:21,050 - WARNING - Artifact does not exist for emitter: Van_Gogh
+2026-10-04 07:04:21,051 - DEBUG - Checking artifact for emitter Vibrant_Flow: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Vibrant_Flow_uce_sd_style50.json
+2026-10-04 07:04:21,053 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:21,201 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_46_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:21,203 - WARNING - Artifact does not exist for emitter: Vibrant_Flow
+2026-10-04 07:04:21,204 - DEBUG - Checking artifact for emitter Warm_Love: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Warm_Love_uce_sd_style50.json
+2026-10-04 07:04:21,206 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:21,384 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_47_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:21,386 - WARNING - Artifact does not exist for emitter: Warm_Love
+2026-10-04 07:04:21,387 - DEBUG - Checking artifact for emitter Warm_Smear: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Warm_Smear_uce_sd_style50.json
+2026-10-04 07:04:21,389 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:21,537 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_48_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:21,539 - WARNING - Artifact does not exist for emitter: Warm_Smear
+2026-10-04 07:04:21,540 - DEBUG - Checking artifact for emitter Watercolor: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Watercolor_uce_sd_style50.json
+2026-10-04 07:04:21,542 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:21,689 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_49_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:21,691 - WARNING - Artifact does not exist for emitter: Watercolor
+2026-10-04 07:04:21,692 - DEBUG - Checking artifact for emitter Winter: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Winter_uce_sd_style50.json
+2026-10-04 07:04:21,694 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:21,842 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_50_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:21,844 - WARNING - Artifact does not exist for emitter: Winter
+2026-10-04 07:04:21,845 - DEBUG - Checking artifact for emitter Architectures: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Architectures_uce_sd_style50.json
+2026-10-04 07:04:21,847 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:21,995 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_51_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:21,997 - WARNING - Artifact does not exist for emitter: Architectures
+2026-10-04 07:04:21,998 - DEBUG - Checking artifact for emitter Bears: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Bears_uce_sd_style50.json
+2026-10-04 07:04:22,000 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:22,147 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_52_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:22,149 - WARNING - Artifact does not exist for emitter: Bears
+2026-10-04 07:04:22,150 - DEBUG - Checking artifact for emitter Birds: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Birds_uce_sd_style50.json
+2026-10-04 07:04:22,152 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:22,300 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_53_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:22,302 - WARNING - Artifact does not exist for emitter: Birds
+2026-10-04 07:04:22,303 - DEBUG - Checking artifact for emitter Butterfly: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Butterfly_uce_sd_style50.json
+2026-10-04 07:04:22,305 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:22,513 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_54_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:22,515 - WARNING - Artifact does not exist for emitter: Butterfly
+2026-10-04 07:04:22,516 - DEBUG - Checking artifact for emitter Cats: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Cats_uce_sd_style50.json
+2026-10-04 07:04:22,518 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:22,664 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_55_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:22,666 - WARNING - Artifact does not exist for emitter: Cats
+2026-10-04 07:04:22,666 - DEBUG - Checking artifact for emitter Dogs: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Dogs_uce_sd_style50.json
+2026-10-04 07:04:22,668 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:22,817 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_56_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:22,819 - WARNING - Artifact does not exist for emitter: Dogs
+2026-10-04 07:04:22,820 - DEBUG - Checking artifact for emitter Fishes: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Fishes_uce_sd_style50.json
+2026-10-04 07:04:22,822 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:22,971 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_57_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:22,973 - WARNING - Artifact does not exist for emitter: Fishes
+2026-10-04 07:04:22,974 - DEBUG - Checking artifact for emitter Flame: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Flame_uce_sd_style50.json
+2026-10-04 07:04:22,976 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:23,126 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_58_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:23,128 - WARNING - Artifact does not exist for emitter: Flame
+2026-10-04 07:04:23,129 - DEBUG - Checking artifact for emitter Flowers: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Flowers_uce_sd_style50.json
+2026-10-04 07:04:23,131 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:23,278 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_59_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:23,280 - WARNING - Artifact does not exist for emitter: Flowers
+2026-10-04 07:04:23,281 - DEBUG - Checking artifact for emitter Frogs: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Frogs_uce_sd_style50.json
+2026-10-04 07:04:23,283 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:23,432 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_60_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:23,434 - WARNING - Artifact does not exist for emitter: Frogs
+2026-10-04 07:04:23,435 - DEBUG - Checking artifact for emitter Horses: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Horses_uce_sd_style50.json
+2026-10-04 07:04:23,437 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:23,586 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_61_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:23,588 - WARNING - Artifact does not exist for emitter: Horses
+2026-10-04 07:04:23,589 - DEBUG - Checking artifact for emitter Human: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Human_uce_sd_style50.json
+2026-10-04 07:04:23,591 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:23,760 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_62_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:23,762 - WARNING - Artifact does not exist for emitter: Human
+2026-10-04 07:04:23,763 - DEBUG - Checking artifact for emitter Jellyfish: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Jellyfish_uce_sd_style50.json
+2026-10-04 07:04:23,765 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:23,911 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_63_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:23,914 - WARNING - Artifact does not exist for emitter: Jellyfish
+2026-10-04 07:04:23,914 - DEBUG - Checking artifact for emitter Rabbits: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Rabbits_uce_sd_style50.json
+2026-10-04 07:04:23,917 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:24,066 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_64_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:24,069 - WARNING - Artifact does not exist for emitter: Rabbits
+2026-10-04 07:04:24,070 - DEBUG - Checking artifact for emitter Sandwiches: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Sandwiches_uce_sd_style50.json
+2026-10-04 07:04:24,072 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:24,220 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_65_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:24,223 - WARNING - Artifact does not exist for emitter: Sandwiches
+2026-10-04 07:04:24,223 - DEBUG - Checking artifact for emitter Sea: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Sea_uce_sd_style50.json
+2026-10-04 07:04:24,226 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:24,376 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_66_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:24,378 - WARNING - Artifact does not exist for emitter: Sea
+2026-10-04 07:04:24,379 - DEBUG - Checking artifact for emitter Statues: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Statues_uce_sd_style50.json
+2026-10-04 07:04:24,381 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:24,530 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_67_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:24,531 - WARNING - Artifact does not exist for emitter: Statues
+2026-10-04 07:04:24,531 - DEBUG - Checking artifact for emitter Towers: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Towers_uce_sd_style50.json
+2026-10-04 07:04:24,532 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:24,668 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_68_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:24,670 - WARNING - Artifact does not exist for emitter: Towers
+2026-10-04 07:04:24,671 - DEBUG - Checking artifact for emitter Trees: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Trees_uce_sd_style50.json
+2026-10-04 07:04:24,673 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:24,822 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_69_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:24,824 - WARNING - Artifact does not exist for emitter: Trees
+2026-10-04 07:04:24,824 - DEBUG - Checking artifact for emitter Waterfalls: /home/leonardo/soham/huggingface_assets/results/results/interferences_caused_by_Waterfalls_uce_sd_style50.json
+2026-10-04 07:04:24,826 - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-10-04 07:04:24,973 - DEBUG - https://huggingface.co:443 "HEAD /datasets/vision-unlearning/u-care/resolve/main/datasets/interferences_caused_by_70_uce_sd_style50.json HTTP/1.1" 404 0
+2026-10-04 07:04:24,975 - WARNING - Artifact does not exist for emitter: Waterfalls
+2026-10-04 07:04:24,976 - DEBUG - Building per-entity rows
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Abstractionism
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Artist_Sketch
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Blossom_Season
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Bricks
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Byzantine
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Cartoon
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Cold_Warm
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Color_Fantasy
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Comic_Etch
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Crayon
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Cubism
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Dadaism
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Dapple
+2026-10-04 07:04:24,976 - WARNING - No pair results found for emitter: Defoliation
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Early_Autumn
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Expressionism
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Fauvism
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: French
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Glowing_Sunset
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Gorgeous_Love
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Greenfield
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Impressionism
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Ink_Art
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Joy
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Liquid_Dreams
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Magic_Cube
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Meta_Physics
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Meteor_Shower
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Monet
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Mosaic
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Neon_Lines
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: On_Fire
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Pastel
+2026-10-04 07:04:24,977 - WARNING - No pair results found for emitter: Pencil_Drawing
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Picasso
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Pop_Art
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Red_Blue_Ink
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Rust
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Sketch
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Sponge_Dabbed
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Structuralism
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Superstring
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Surrealism
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Ukiyoe
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Van_Gogh
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Vibrant_Flow
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Warm_Love
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Warm_Smear
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Watercolor
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Winter
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Architectures
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Bears
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Birds
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Butterfly
+2026-10-04 07:04:24,978 - WARNING - No pair results found for emitter: Cats
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Dogs
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Fishes
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Flame
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Flowers
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Frogs
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Horses
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Human
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Jellyfish
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Rabbits
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Sandwiches
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Sea
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Statues
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Towers
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Trees
+2026-10-04 07:04:24,979 - WARNING - No pair results found for emitter: Waterfalls
+2026-10-04 07:04:24,980 - INFO - Wrote 0 emitter records to /home/leonardo/soham/huggingface_assets/results/results/interference_per_entity_sd_style50.json
