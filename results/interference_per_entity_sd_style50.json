@@ -1,0 +1,65 @@
+[
+  {
+    "name": "Abstractionism",
+    "index": 0,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.25,
+    "metric_uce_In domain retain accuracy": 0.9640000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Artist_Sketch",
+    "index": 1,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.0,
+    "metric_uce_In domain retain accuracy": 0.9590000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Blossom_Season",
+    "index": 2,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.0,
+    "metric_uce_In domain retain accuracy": 0.9590000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Bricks",
+    "index": 3,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.0,
+    "metric_uce_In domain retain accuracy": 0.9660000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Van_Gogh",
+    "index": 45,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.30000000000000004,
+    "metric_uce_In domain retain accuracy": 0.964,
+    "metric_uce_Cross domain retain accuracy": 0.9803921568627452
+  },
+  {
+    "name": "Architectures",
+    "index": 51,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.019607843137254943,
+    "metric_uce_In domain retain accuracy": 0.9824561403508772,
+    "metric_uce_Cross domain retain accuracy": 0.9666666666666668
+  },
+  {
+    "name": "Bears",
+    "index": 52,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.0,
+    "metric_uce_In domain retain accuracy": 0.9814241486068113,
+    "metric_uce_Cross domain retain accuracy": 0.9676470588235295
+  }
+]
