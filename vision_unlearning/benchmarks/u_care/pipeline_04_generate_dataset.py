@@ -168,6 +168,7 @@ def generate_answer_set(
     started = time.perf_counter()
     for seed in tqdm(seeds, desc="Seeds"):
         for prompt in tqdm(prompt_list, desc=f"Seed {seed}", leave=False):
+            print(f"Generating for {prompt}\n")
             filename = f"{prefix}_{seed:02d}_{prompt}.png"
             image_path = output_dir / filename
             if image_path.exists() and not overwrite:
@@ -235,7 +236,7 @@ def main() -> None:
     if args.emitter is not None and args.style not in (None, args.emitter):
         parser.error("--style must match --emitter for an unlearned answer set")
 
-    style = args.style or args.emitter
+    style = args.style
     if args.output_folder is None:
         output_folder = (
             "assets/datasets/generated_baseline_sd_style50"

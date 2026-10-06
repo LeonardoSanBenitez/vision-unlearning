@@ -6,6 +6,8 @@ from vision_unlearning.benchmarks.care import MetricEffectPerEntity, MetricEffec
 from vision_unlearning.benchmarks.u_care import configuration as cfg
 import logging
 
+import json
+
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -52,10 +54,10 @@ class InterferencePerPair(MetricEffectPerEntityPair):
     model: cfg.type_model = "sd_style50"
     emitter: str
     method: cfg.type_unlearning_algorithm
-    base_folder: str  # Add base_folder as an attribute
+    base_folder: str
 
     class Config:
-        arbitrary_types_allowed = True  # Allow non-Pydantic types like Path
+        arbitrary_types_allowed = True
 
     @property
     def local_path(self) -> Path:
@@ -64,18 +66,26 @@ class InterferencePerPair(MetricEffectPerEntityPair):
 
     def exists(self) -> bool:
         """Check if the artifact exists locally or remotely."""
-        # Check if the file exists locally
         if self.local_path.exists():
             logger.debug(f"Found local artifact for emitter {self.emitter}: {self.local_path}")
             return True
-        # If not found locally, fallback to checking on Hugging Face
         logger.debug(f"Local artifact not found for emitter {self.emitter}, checking remote.")
         return self._exists_on_huggingface()
+
+    def compute(self) -> Dict[str, Dict[str, float]]:
+        """Load the artifact from the local file if it exists."""
+        if self.exists():
+            logger.debug(f"Loading local artifact for emitter {self.emitter}: {self.local_path}")
+            with self.local_path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        raise ArtifactNotAvailableError(
+            f"Artifact for emitter {self.emitter} is not available locally. "
+            "Please ensure the file exists or fetch it from Hugging Face."
+        )
 
     def _exists_on_huggingface(self) -> bool:
         """Check if the artifact exists on Hugging Face."""
         try:
-            # Assuming `_get_data_path_remote` provides the remote path
             remote_path = self._get_data_path_remote()
             logger.debug(f"Checking existence of remote artifact: {remote_path}")
             # Logic to check if the file exists on Hugging Face (e.g., using HTTP HEAD request)
@@ -91,13 +101,11 @@ class InterferencePerPair(MetricEffectPerEntityPair):
 
     def _compute_from_scratch(self) -> Dict[str, Dict[str, float]]:
         raise ArtifactNotAvailableError(
-            "InterferencePerPair is produced by pipeline_06. Provide the local file or fetch it from HuggingFace.")
+            "InterferencePerPair is produced by pipeline_06. Provide the local file or fetch it from HuggingFace."
+        )
 
     def _validate(self, data: Any) -> None:
         assert isinstance(data, dict) and len(data) == 71
-
-    def compute(self) -> Dict[str, Dict[str, float]]:
-        return cast(Dict[str, Dict[str, float]], self._resolve())
 
 class InterferencePerEntity(MetricEffectPerEntity):
     """The per-entity summary: each entity's metadata plus metric_{method}_{fragment} (arrow)

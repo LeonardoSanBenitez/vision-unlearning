@@ -88,6 +88,7 @@ def compute_from_artifacts(
             pair_results[emitter] = artifact.compute()
     rows = build_per_entity_rows(pair_results, method, metadata)
     path = Path(base_folder) / "interference_per_entity_sd_style50.json"
+    print(f"for artifact of {emitter}: {path}: rows are  {rows}")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(rows, handle, indent=2)
@@ -112,6 +113,7 @@ def main() -> None:
     parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
     parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
+    print("unlearnable entities: ",cfg.UNLEARNABLE_ENTITIES)
     compute_from_artifacts(
         args.method,
         args.base_folder,
