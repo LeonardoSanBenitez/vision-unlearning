@@ -2,9 +2,22 @@
 
 set -euo pipefail
 
-# Resolve paths relative to this script so it can be launched from any directory.
-REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_DIR="$(dirname "$REPO_DIR")"
+# Resolve both supported layouts:
+#   workspace/run_all.sh + workspace/vision-unlearning/
+#   checkout/run_all.sh
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "$SCRIPT_DIR/vision-unlearning/vision_unlearning/benchmarks/u_care" ]]; then
+  WORKSPACE_DIR="$SCRIPT_DIR"
+  PYTHON_PACKAGE_ROOT="$WORKSPACE_DIR/vision-unlearning"
+  PIPELINE_DIR="$PYTHON_PACKAGE_ROOT/vision_unlearning/benchmarks/u_care"
+elif [[ -d "$SCRIPT_DIR/vision_unlearning/benchmarks/u_care" ]]; then
+  WORKSPACE_DIR="$SCRIPT_DIR"
+  PYTHON_PACKAGE_ROOT="$WORKSPACE_DIR"
+  PIPELINE_DIR="$PYTHON_PACKAGE_ROOT/vision_unlearning/benchmarks/u_care"
+else
+  echo "Could not locate vision_unlearning/benchmarks/u_care relative to $SCRIPT_DIR" >&2
+  exit 1
+fi
 cd "$WORKSPACE_DIR"
 
 echo "============================================================"
@@ -24,7 +37,6 @@ RESULTS_DIR="/home/leonardo/soham/huggingface_assets/results/results"
 BASELINE_PATH="$RESULTS_DIR/accuracies_original.json"
 STYLE_CLASSIFIER="$CLASSIFIER_ROOT/classifier_style.pth"
 OBJECT_CLASSIFIER="$CLASSIFIER_ROOT/classifier_object.pth"
-PIPELINE_DIR="vision-unlearning/vision_unlearning/benchmarks/u_care"
 EMITTERS=(
   Abstractionism
   Artist_Sketch
@@ -60,7 +72,7 @@ for emitter in "${EMITTERS[@]}"; do
   pair_output="$RESULTS_DIR/interferences_caused_by_${emitter}_uce_sd_style50.json"
 
   echo "Running pipeline_03 for $emitter"
-  PYTHONPATH=./vision-unlearning python3 \
+  PYTHONPATH="$PYTHON_PACKAGE_ROOT" python3 \
     "$PIPELINE_DIR/pipeline_03_unlearn_model.py" \
     --emitter "$emitter" \
     --checkpoint "$MODEL_PATH" \
@@ -72,7 +84,7 @@ for emitter in "${EMITTERS[@]}"; do
     --overwrite
 
   echo "Running pipeline_04 for $emitter"
-  PYTHONPATH=./vision-unlearning python3 \
+  PYTHONPATH="$PYTHON_PACKAGE_ROOT" python3 \
     "$PIPELINE_DIR/pipeline_04_generate_dataset.py" \
     --model-path "$MODEL_PATH" \
     --output-folder "$answer_set_folder" \
@@ -84,7 +96,7 @@ for emitter in "${EMITTERS[@]}"; do
     --overwrite
 
   echo "Running pipeline_06 for $emitter"
-  PYTHONPATH=./vision-unlearning python3 \
+  PYTHONPATH="$PYTHON_PACKAGE_ROOT" python3 \
     "$PIPELINE_DIR/pipeline_06_compute_interference_per_pair.py" \
     --answer-set-folder "$answer_set_folder" \
     --style-checkpoint "$STYLE_CLASSIFIER" \
