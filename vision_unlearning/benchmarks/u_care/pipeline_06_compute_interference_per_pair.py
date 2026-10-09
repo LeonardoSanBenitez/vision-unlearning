@@ -113,17 +113,42 @@ def main() -> None:
     parser.add_argument("--answer-set-folder", required=True)
     parser.add_argument("--style-checkpoint", required=True)
     parser.add_argument("--object-checkpoint", required=True)
-    parser.add_argument("--output-path", default="assets/datasets/accuracies_original.json")
+    parser.add_argument("--output-path")
     parser.add_argument("--seed", type=int, nargs="+", default=[188])
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--prefix", choices=["off", "on"], default="off")
     parser.add_argument("--emitter")
     parser.add_argument("--method", choices=list(cfg.ALGORITHM_REGISTRY))
     parser.add_argument("--baseline-path")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Allow replacing an existing output JSON file.",
+    )
     parser.add_argument("--upload-to-hf", action="store_true")
     parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
     parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
+
+    if (args.emitter is None) != (args.method is None):
+        parser.error("--emitter and --method must be supplied together")
+
+    if args.output_path is not None:
+        output_path = Path(args.output_path)
+    elif args.emitter is not None:
+        index = cfg.ENTITIES.index(args.emitter)
+        output_path = Path(
+            "assets/datasets"
+            f"/interferences_caused_by_{index}_{args.method}"
+            f"{cfg.model_segment('sd_style50')}.json"
+        )
+    else:
+        output_path = Path("assets/datasets/accuracies_original.json")
+
+    if output_path.exists() and not args.overwrite:
+        parser.error(
+            f"Output file already exists: {output_path}. Pass --overwrite to replace it."
+        )
 
     style_classifier = MetricImageClassifier(
         checkpoint_path=args.style_checkpoint,
@@ -148,16 +173,7 @@ def main() -> None:
         prefix=args.prefix,
         baseline=baseline,
     )
-    output_path = args.output_path
-    if args.emitter is not None or args.method is not None:
-        if args.emitter is None or args.method is None:
-            parser.error("--emitter and --method must be supplied together")
-        index = cfg.ENTITIES.index(args.emitter)
-        output_path = (
-            f"assets/datasets/interferences_caused_by_{index}_"
-            f"{args.method}{cfg.model_segment('sd_style50')}.json"
-        )
-    write_json(result, output_path)
+    write_json(result, str(output_path))
     if args.upload_to_hf:
         if not args.hf_token:
             parser.error("--upload-to-hf requires --hf-token or HF_TOKEN")
@@ -167,7 +183,7 @@ def main() -> None:
             else output_path
         )
         upload_file_asset(
-            Path(output_path),
+            output_path,
             remote_path,
             repo_id=args.hf_repo_id,
             token=args.hf_token,

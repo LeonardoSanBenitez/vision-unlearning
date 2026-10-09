@@ -121,10 +121,23 @@ def main() -> None:
     parser.add_argument("--python-executable", default=sys.executable)
     parser.add_argument("--working-directory")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Allow replacing an existing expected model state dict.",
+    )
     parser.add_argument("--upload-to-hf", action="store_true")
     parser.add_argument("--hf-token", default=None)
     parser.add_argument("--hf-repo-id", default=cfg.U_CARE_REMOTE_REPOSITORY_NAME)
     args = parser.parse_args()
+
+    if not args.dry_run and args.expected_model_folder:
+        expected_state_dict = Path(args.expected_model_folder) / "unet_state_dict.pth"
+        if expected_state_dict.exists() and not args.overwrite:
+            parser.error(
+                f"Model state dict already exists: {expected_state_dict}. "
+                "Pass --overwrite to replace it."
+            )
 
     state_dict_path = run_uce(
         emitter=args.emitter,
