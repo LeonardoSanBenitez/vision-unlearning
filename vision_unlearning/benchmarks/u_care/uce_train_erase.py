@@ -272,7 +272,7 @@ if __name__ == '__main__':
     ldm_stable = edit_model(ldm_stable=ldm_stable, old_text_=old_texts, new_text_=new_texts,
                             retain_text_=retain_texts, lamb=args.lamb, erase_scale=erase_scale,
                             preserve_scale=preserve_scale,
-                            technique=technique, with_to_k=False)
+                            technique=technique, with_to_k=True)
 
     # for name,tensor in ldm_stable.unet.state.dict().items():
     #     if torch.is_tensor(tensor) and not torch.isfinite(tensor).all():
