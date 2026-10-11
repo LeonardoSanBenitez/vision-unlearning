@@ -141,7 +141,7 @@ UNLEARNING_CONFIGURATION: Dict[type_unlearning_algorithm, Dict[type_domain, Unle
     "uce": {
         # Read from their UCE method README. "A Elephant image" is their exact string, article
         # error included — keep it verbatim, it produced their numbers.
-        "style": UnlearningConfiguration(erase_scale=0.05, lamb=1.0, guided_concept="An image in Photo style"),
+        "style": UnlearningConfiguration(erase_scale=1.0, lamb=0.5, guided_concept="An image in Photo style"),
         "object": UnlearningConfiguration(erase_scale=1.0, lamb=0.5, guided_concept="A Elephant image"),
     },
     # ... the remaining methods, read from each method's own README
