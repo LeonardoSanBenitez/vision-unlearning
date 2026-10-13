@@ -54,7 +54,6 @@ class InterferencePerPair(MetricEffectPerEntityPair):
     model: cfg.type_model = "sd_style50"
     emitter: str
     method: cfg.type_unlearning_algorithm
-    base_folder: str
 
     class Config:
         arbitrary_types_allowed = True
