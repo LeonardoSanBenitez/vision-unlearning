@@ -139,8 +139,10 @@ class UnlearningConfiguration(BaseModel):
 
 UNLEARNING_CONFIGURATION: Dict[type_unlearning_algorithm, Dict[type_domain, UnlearningConfiguration]] = {
     "uce": {
-        # Read from their UCE method README. "A Elephant image" is their exact string, article
-        # error included — keep it verbatim, it produced their numbers.
+        # Guide concepts read from their UCE method README. "A Elephant image" is their exact string,
+        # article error included — keep it verbatim. erase_scale and lamb are the argparse defaults of
+        # their train_erase.py, as used by their object sweep: the README's values (style 0.05 / 1.0,
+        # object 0.01 / 10.0) are too weak to forget most concepts.
         "style": UnlearningConfiguration(erase_scale=1.0, lamb=0.5, guided_concept="An image in Photo style"),
         "object": UnlearningConfiguration(erase_scale=1.0, lamb=0.5, guided_concept="A Elephant image"),
     },
