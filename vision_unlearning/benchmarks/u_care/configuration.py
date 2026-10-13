@@ -111,6 +111,21 @@ MP_REGISTRY: Dict[type_mp, MetricWithDirectionSpec] = {
         name="target_probability_diff", name_pretty="Delta Target Probability", direction="↑"),
 }
 
+ME_REGISTRY: Dict[type_me, MetricWithDirectionSpec] = {
+    "Unlearning accuracy": MetricWithDirectionSpec(
+        name="Unlearning accuracy", name_pretty="Unlearning accuracy", direction="↑"),
+    "In domain retain accuracy": MetricWithDirectionSpec(
+        name="In domain retain accuracy", name_pretty="In-domain retain accuracy", direction="↑"),
+    "Cross domain retain accuracy": MetricWithDirectionSpec(
+        name="Cross domain retain accuracy", name_pretty="Cross-domain retain accuracy", direction="↑"),
+    "Frechet inception distance": MetricWithDirectionSpec(
+        name="Frechet inception distance", name_pretty="Frechet inception distance", direction="↓"),
+    "Runtime seconds": MetricWithDirectionSpec(
+        name="Runtime seconds", name_pretty="Runtime (seconds)", direction="↓"),
+    "Peak memory bytes": MetricWithDirectionSpec(
+        name="Peak memory bytes", name_pretty="Peak memory (bytes)", direction="↓"),
+}
+
 ALGORITHM_REGISTRY: Dict[type_unlearning_algorithm, UnlearningAlgorithmSpec] = {
     "ca": UnlearningAlgorithmSpec(name="ca", name_pretty="CA"),
     "ediff": UnlearningAlgorithmSpec(name="ediff", name_pretty="EDiff"),

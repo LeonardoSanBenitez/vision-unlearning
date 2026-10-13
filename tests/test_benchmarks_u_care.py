@@ -1,6 +1,7 @@
 """Regression tests for the u-care benchmark configuration and artifacts."""
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, List
 
@@ -9,6 +10,7 @@ import pytest
 import vision_unlearning.benchmarks.u_care.configuration as cfg
 import vision_unlearning.benchmarks.u_care.generated_dataset as generated_dataset_mod
 import vision_unlearning.benchmarks.u_care.metadata as metadata_mod
+import vision_unlearning.benchmarks.u_care.result_templates as result_templates_mod
 from vision_unlearning.benchmarks.u_care.pipeline_06_compute_interference_per_pair import (
     receiver_image_filenames,
 )
@@ -125,3 +127,124 @@ class TestMetadataArtifacts:
     def test_baseline_accuracy_uses_expected_remote_path(self) -> None:
         artifact = metadata_mod.BaselineAccuracy()
         assert artifact._get_data_path_remote() == "datasets/accuracies_original.json"
+
+
+def _write_pair_file(folder: Any, emitter: str, accuracy_by_receiver: dict) -> None:
+    """One emitter's per-pair file, in the layout pipeline_06 writes."""
+    row = {
+        receiver: {
+            "accuracy": accuracy_by_receiver.get(receiver, 1.0),
+            "accuracy_diff": 0.0,
+            "target_probability": 0.5,
+            "target_probability_diff": 0.0,
+        }
+        for receiver in cfg.ENTITIES
+    }
+    path = os.path.join(str(folder), f"interferences_caused_by_{emitter}_uce_sd_style50.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(row, handle)
+
+
+def _write_per_entity_file(folder: Any, rows: List[dict]) -> None:
+    """The per-entity file, in the layout pipeline_07 writes."""
+    path = os.path.join(str(folder), "interference_per_entity_sd_style50.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(rows, handle)
+
+
+def _per_entity_row(name: str, ua: float, ira: float, cra: float) -> dict:
+    return {
+        "name": name, "index": cfg.ENTITIES.index(name), "domain": cfg.entity_domain(name), "unlearnable": True,
+        "metric_uce_Unlearning accuracy": ua,
+        "metric_uce_In domain retain accuracy": ira,
+        "metric_uce_Cross domain retain accuracy": cra,
+    }
+
+
+class TestResultTemplateInterferenceMatrix:
+    def test_rows_are_all_emitters_and_columns_all_receivers(self, tmp_path: Any) -> None:
+        _write_pair_file(tmp_path, "Van_Gogh", {"Van_Gogh": 0.0, "Monet": 0.8})
+        rt = result_templates_mod.ResultTemplateInterferenceMatrix(
+            base_folder=str(tmp_path), unlearning_algorithm="uce", interference_pair="accuracy")
+        data = rt._compute_from_scratch()
+        rt._validate(data)
+        rows = data["result"]
+        assert [row["emitter"] for row in rows] == cfg.UNLEARNABLE_ENTITIES
+        assert all(list(row)[1:] == cfg.ENTITIES for row in rows)
+        van_gogh = rows[cfg.UNLEARNABLE_ENTITIES.index("Van_Gogh")]
+        assert van_gogh["Van_Gogh"] == 0.0
+        assert van_gogh["Monet"] == 0.8
+        assert van_gogh["Cats"] == 1.0
+
+    def test_missing_emitter_is_an_empty_row_and_is_counted(self, tmp_path: Any) -> None:
+        _write_pair_file(tmp_path, "Van_Gogh", {})
+        _write_pair_file(tmp_path, "Bears", {})
+        data = result_templates_mod.ResultTemplateInterferenceMatrix(
+            base_folder=str(tmp_path), unlearning_algorithm="uce", interference_pair="accuracy",
+        )._compute_from_scratch()
+        assert data["metadata"]["n_emitters_present"] == 2
+        assert data["metadata"]["n_emitters_total"] == 70
+        cats = data["result"][cfg.UNLEARNABLE_ENTITIES.index("Cats")]
+        assert all(cats[receiver] is None for receiver in cfg.ENTITIES)
+
+    def test_plot_draws_only_the_present_rows(self, tmp_path: Any) -> None:
+        _write_pair_file(tmp_path, "Van_Gogh", {})
+        _write_pair_file(tmp_path, "Bears", {})
+        data = result_templates_mod.ResultTemplateInterferenceMatrix(
+            base_folder=str(tmp_path), unlearning_algorithm="uce", interference_pair="accuracy",
+        )._compute_from_scratch()
+        result = result_templates_mod.ResultTemplateInterferenceMatrix.plot(data, return_fig=True)
+        assert result is not None
+        fig, ax = result
+        assert ax.images[0].get_array().shape == (2, 71)
+        assert "n=2/70" in ax.get_title()
+
+    def test_remote_path_names_the_parameters(self) -> None:
+        rt = result_templates_mod.ResultTemplateInterferenceMatrix(unlearning_algorithm="uce", interference_pair="accuracy")
+        assert rt._get_data_path_remote() == "results/InterferenceMatrix/sd_style50_unlearncanvas_uce_accuracy.json"
+
+
+class TestResultTemplateBenchmarkSummary:
+    def test_means_over_the_domain_emitters(self, tmp_path: Any) -> None:
+        _write_per_entity_file(tmp_path, [
+            _per_entity_row("Van_Gogh", 1.0, 0.9, 0.8),
+            _per_entity_row("Monet", 0.5, 0.7, 0.6),
+            _per_entity_row("Bears", 0.25, 0.5, 0.4),
+        ])
+        rt = result_templates_mod.ResultTemplateBenchmarkSummary(
+            base_folder=str(tmp_path), unlearning_algorithm_list=["uce"], domain="style")
+        data = rt._compute_from_scratch()
+        rt._validate(data)
+        (row,) = data["result"]
+        assert row["method"] == "uce"
+        assert row["n_emitters"] == 2
+        assert row["Unlearning accuracy"] == pytest.approx(0.75)
+        assert row["In domain retain accuracy"] == pytest.approx(0.8)
+        assert row["Cross domain retain accuracy"] == pytest.approx(0.7)
+
+    def test_a_metric_no_row_carries_stays_missing(self, tmp_path: Any) -> None:
+        _write_per_entity_file(tmp_path, [_per_entity_row("Bears", 0.25, 0.5, 0.4)])
+        data = result_templates_mod.ResultTemplateBenchmarkSummary(
+            base_folder=str(tmp_path), unlearning_algorithm_list=["uce", "esd"], domain="object",
+        )._compute_from_scratch()
+        uce, esd = data["result"]
+        assert uce["Frechet inception distance"] is None
+        assert uce["Runtime seconds"] is None
+        assert esd["n_emitters"] == 0
+        assert esd["Unlearning accuracy"] is None
+
+    def test_plot_renders_one_table_row_per_method(self, tmp_path: Any) -> None:
+        _write_per_entity_file(tmp_path, [_per_entity_row("Bears", 0.25, 0.5, 0.4)])
+        data = result_templates_mod.ResultTemplateBenchmarkSummary(
+            base_folder=str(tmp_path), unlearning_algorithm_list=["uce", "esd"], domain="object",
+        )._compute_from_scratch()
+        result = result_templates_mod.ResultTemplateBenchmarkSummary.plot(data, return_fig=True)
+        assert result is not None
+        fig, ax = result
+        texts = [cell.get_text().get_text() for cell in ax.tables[0].get_celld().values()]
+        assert "0.25" in texts
+        assert "UCE" in texts and "ESD" in texts
+
+    def test_remote_path_names_the_parameters(self) -> None:
+        rt = result_templates_mod.ResultTemplateBenchmarkSummary(unlearning_algorithm_list=["uce", "esd"], domain="style")
+        assert rt._get_data_path_remote() == "results/BenchmarkSummary/sd_style50_unlearncanvas_uce-esd_style.json"
