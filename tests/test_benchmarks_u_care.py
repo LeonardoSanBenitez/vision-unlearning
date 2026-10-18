@@ -199,6 +199,18 @@ class TestResultTemplateInterferenceMatrix:
         assert ax.images[0].get_array().shape == (2, 71)
         assert "n=2/70" in ax.get_title()
 
+    def test_plot_colour_range_is_the_data_by_default_and_fixed_when_given(self, tmp_path: Any) -> None:
+        _write_pair_file(tmp_path, "Van_Gogh", {})
+        data = result_templates_mod.ResultTemplateInterferenceMatrix(
+            base_folder=str(tmp_path), unlearning_algorithm="uce", interference_pair="accuracy",
+        )._compute_from_scratch()
+        plot = result_templates_mod.ResultTemplateInterferenceMatrix.plot
+        default = plot(data, return_fig=True)
+        fixed = plot(data, return_fig=True, vmin=-1.0, vmax=1.0)
+        assert default is not None and fixed is not None
+        assert default[1].images[0].get_clim() != (-1.0, 1.0)
+        assert fixed[1].images[0].get_clim() == (-1.0, 1.0)
+
     def test_remote_path_names_the_parameters(self) -> None:
         rt = result_templates_mod.ResultTemplateInterferenceMatrix(unlearning_algorithm="uce", interference_pair="accuracy")
         assert rt._get_data_path_remote() == "results/InterferenceMatrix/sd_style50_unlearncanvas_uce_accuracy.json"

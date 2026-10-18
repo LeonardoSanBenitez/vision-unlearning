@@ -80,15 +80,21 @@ class ResultTemplateInterferenceMatrix(ResultTemplate):
 
     @classmethod
     def plot(cls, data: dict, figsize: Optional[Tuple[float, float]] = None, cmap: str = "viridis",
-             return_fig: bool = False) -> Optional[Tuple[Figure, plt.Axes]]:
-        """Heatmap of the present emitters (rows) against every receiver (columns)."""
+             return_fig: bool = False, vmin: Optional[float] = None,
+             vmax: Optional[float] = None) -> Optional[Tuple[Figure, plt.Axes]]:
+        """Heatmap of the present emitters (rows) against every receiver (columns).
+
+        ``vmin`` and ``vmax`` fix the colour range; by default it spans the data. Pass a range
+        symmetric around zero, with a diverging ``cmap``, for a difference metric, so that zero is
+        the middle colour.
+        """
         metadata = data["metadata"]
         present = [row for row in data["result"] if any(row[r] is not None for r in cfg.ENTITIES)]
         matrix = np.array([[row[r] for r in cfg.ENTITIES] for row in present], dtype=float).reshape(len(present), len(cfg.ENTITIES))
         if figsize is None:
             figsize = (max(8.0, len(cfg.ENTITIES) * 0.22), max(3.0, len(present) * 0.22 + 2.0))
         fig, ax = plt.subplots(figsize=figsize)
-        image = ax.imshow(matrix, cmap=cmap, aspect="auto", interpolation="nearest")
+        image = ax.imshow(matrix, cmap=cmap, aspect="auto", interpolation="nearest", vmin=vmin, vmax=vmax)
         colorbar = plt.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
         colorbar.ax.tick_params(labelsize=7)
         ax.set_xticks(np.arange(len(cfg.ENTITIES)))
