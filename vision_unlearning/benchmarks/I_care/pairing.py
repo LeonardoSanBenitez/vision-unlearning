@@ -37,6 +37,7 @@ from collections import Counter
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 
 from vision_unlearning.utils.noise import PAIRING_SCHEMA_VERSION, pairing_record  # noqa: F401  (the record's single definition)
+from vision_unlearning.utils.noise import scheduler_parameters
 
 # The schedulers a paired route may run, with the configuration values each must have. A scheduler
 # that draws noise after the initial latent would make the latent hash an incomplete record of the
@@ -134,9 +135,10 @@ def check(
         assert_scheduler_allowed(record['scheduler_class'], record['scheduler_config'])
     if candidate['scheduler_class'] != baseline['scheduler_class']:
         raise PairingFailure(f"scheduler {candidate['scheduler_class']} against the baseline's {baseline['scheduler_class']}")
-    if dict(candidate['scheduler_config']) != dict(baseline['scheduler_config']):
-        changed = sorted(k for k in set(candidate['scheduler_config']) | set(baseline['scheduler_config'])
-                         if candidate['scheduler_config'].get(k) != baseline['scheduler_config'].get(k))
+    cand_scheduler = scheduler_parameters(dict(candidate['scheduler_config']))
+    base_scheduler = scheduler_parameters(dict(baseline['scheduler_config']))
+    if cand_scheduler != base_scheduler:
+        changed = sorted(k for k in set(cand_scheduler) | set(base_scheduler) if cand_scheduler.get(k) != base_scheduler.get(k))
         raise PairingFailure(f'the scheduler configuration differs from the baseline in {changed}')
 
     cand_kwargs, base_kwargs = dict(candidate['generation_kwargs']), dict(baseline['generation_kwargs'])

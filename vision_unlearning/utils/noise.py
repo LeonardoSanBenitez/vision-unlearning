@@ -177,8 +177,18 @@ def effective_generation_kwargs(pipeline: Any, call_kwargs: Dict[str, Any], batc
     }
 
 
+def scheduler_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
+    '''The entries of a scheduler configuration that parameterise the scheduler.
+
+    diffusers adds bookkeeping entries whose names start with an underscore (``_class_name``,
+    ``_diffusers_version``, ``_use_default_values``); they do not change what the scheduler computes,
+    and ``_use_default_values`` is built from a set, so its order differs between processes.
+    '''
+    return {name: value for name, value in config.items() if not name.startswith('_')}
+
+
 def scheduler_identity(pipeline: Any) -> Tuple[str, Dict[str, Any]]:
-    '''The scheduler's class name and its configuration as plain JSON-ready values.'''
+    '''The scheduler's class name and its parameters (:func:`scheduler_parameters`) as JSON-ready values.'''
     import json
     config = json.loads(json.dumps(dict(pipeline.scheduler.config), default=str))
-    return type(pipeline.scheduler).__name__, config
+    return type(pipeline.scheduler).__name__, scheduler_parameters(config)

@@ -124,6 +124,14 @@ def test_a_scheduler_configuration_change_fails() -> None:
         _check(_record('on', config={**PNDM, 'skip_prk_steps': False}), _record('off'))
 
 
+def test_scheduler_bookkeeping_entries_do_not_count_as_a_change() -> None:
+    # diffusers builds _use_default_values from a set, so two processes loading the same scheduler
+    # record it in different orders; that and the other underscore entries are not parameters.
+    base = _record('off', config={**PNDM, '_class_name': 'PNDMScheduler', '_use_default_values': ['prediction_type', 'timestep_spacing']})
+    cand = _record('on', config={**PNDM, '_class_name': 'PNDMScheduler', '_use_default_values': ['timestep_spacing', 'prediction_type']})
+    assert _check(cand, base)['verdict'] == 'paired'
+
+
 @pytest.mark.parametrize('changed', [{'num_inference_steps': 49}, {'guidance_scale': 7.0}])
 def test_a_changed_effective_argument_fails(changed: Dict[str, Any]) -> None:
     with pytest.raises(PairingFailure, match='effective generation arguments'):
