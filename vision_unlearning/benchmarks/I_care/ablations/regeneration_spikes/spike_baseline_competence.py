@@ -84,6 +84,7 @@ def summarise(per_entity: dict) -> dict:
             panel = rng.sample(eligible, 5)
             floors.append(0.5 * statistics.fmean(
                 statistics.fmean(r["specificity"] for r in per_entity[p]) for p in panel))
+
     def quant(xs: List[float], q: float) -> float:
         return sorted(xs)[int(q * (len(xs) - 1))]
     return {
