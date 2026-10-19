@@ -20,6 +20,11 @@ from vision_unlearning.datasets.testbed import (
     GeneratedDataset,
 )
 from vision_unlearning.benchmarks.I_care import get_interference_per_pair_path, save_interference_per_pair
+from vision_unlearning.benchmarks.I_care.metadata import (
+    means_from_per_seed,
+    per_seed_path_of,
+    save_interference_per_pair_per_seed,
+)
 from vision_unlearning.benchmarks.I_care.configuration import (
     ALGORITHM_REGISTRY,
     type_unlearning_algorithm,
@@ -281,6 +286,10 @@ def evaluate_one(prompt, seed, plot: bool = False) -> dict:
 
 
 def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
+    """Every metric of one (emitter, receiver) pair, per seed, with the CLIP components on both sides.
+
+    The per-pair file stores the means of these lists, computed by ``means_from_per_seed``.
+    """
     """Evaluate a single (emitter-entity, receiver-prompt) pair across all seeds in one batched pass.
 
     GPU optimisations applied:
@@ -335,16 +344,17 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
                 f"{GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt, base_folder=base_folder)} "  # type: ignore[arg-type]
                 f"against {ds_entity.file_path('on', s, prompt)}"
             )
-    dino_diff_val = sum(dino_sims) / n  # TODO: compute this from the outputs of script `pipeline_5_compute_embeddings.py`
+    # TODO: compute dino_diff from the outputs of script `pipeline_5_compute_embeddings.py`
 
-    result = {
-        'brisque_diff': sum(brisque_on[i]['brisque'] - brisque_off[i]['brisque'] for i in range(n)) / n,
-        'clip_diff': sum(clip_on[i] - clip_off[i] for i in range(n)) / n,
-        'rmse': sum(d['rmse'] for d in img_diffs) / n,
-        'ssim': sum(d['ssim'] for d in img_diffs) / n,
-        'dino_diff': dino_diff_val,
+    return {
+        'brisque_diff': [brisque_on[i]['brisque'] - brisque_off[i]['brisque'] for i in range(n)],
+        'clip_diff': [clip_on[i] - clip_off[i] for i in range(n)],
+        'rmse': [d['rmse'] for d in img_diffs],
+        'ssim': [d['ssim'] for d in img_diffs],
+        'dino_diff': list(dino_sims),
+        'clip_off': list(clip_off),
+        'clip_on': list(clip_on),
     }
-    return result
 
 
 ###########
@@ -437,19 +447,22 @@ for index in range(index_start, index_start + max_identities):
     # for an incomplete dataset.
     try:
         print(f'Measuring interferences caused by {index} {target}')
-        interference_per_pair = {}  # interferences caused by the current EMITER (given by `index`) to each RECEIVER (the keys of interference_per_pair)
+        per_seed = {}  # interferences caused by the current EMITER (given by `index`) to each RECEIVER, per seed
         for i, m in enumerate(metadata_filtered[:len(eval_prompts)]):
             p = eval_prompts[i]
             print("Prompt: ", p)
             # evaluate_all_seeds batches BRISQUE across all seeds in one GPU pass
-            interference_per_pair[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
+            per_seed[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
         print('-' * 50 + '\n' + '-' * 50)
+        interference_per_pair = means_from_per_seed(per_seed)
         save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs, base_folder=base_folder)
+        _local = get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder=base_folder)
+        save_interference_per_pair_per_seed(per_seed, generate_dataset_seeds, _local)
         if _args.upload:
             _assert_complete(interference_per_pair, [m['name'] for m in metadata_filtered])
-            _local = get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder=base_folder)
-            upload_file(_local, remote_path_of(_local, base_folder), repository, HF_TOKEN or None)
-            logger.info("Uploaded and checked by content: %s", _local)
+            for _file in (_local, per_seed_path_of(_local)):
+                upload_file(_file, remote_path_of(_file, base_folder), repository, HF_TOKEN or None)
+                logger.info("Uploaded and checked by content: %s", _file)
     except Exception as _exc:
         logger.warning(
             "Measuring interferences failed for '%s' (index %d): %s. Skipping.",

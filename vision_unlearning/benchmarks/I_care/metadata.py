@@ -82,6 +82,44 @@ def get_control_interference_per_pair_path(
     return os.path.join(base_folder, 'datasets', name)
 
 
+# Per-seed values of every per-pair file, kept in a sibling file rather than inside it. The per-pair
+# file's fields, types and values stay exactly what every existing reader expects; the sibling is
+# opened only by code that asks for it. Its prefix keeps it out of every listing of per-pair files.
+PER_SEED_PREFIX = 'per_seed_'
+PER_PAIR_METRICS = ('brisque_diff', 'clip_diff', 'rmse', 'ssim', 'dino_diff')
+
+
+def per_seed_path_of(per_pair_path: str) -> str:
+    """The per-seed sibling of a per-pair (regular or control) file."""
+    folder, name = os.path.split(per_pair_path)
+    return os.path.join(folder, PER_SEED_PREFIX + name)
+
+
+def means_from_per_seed(per_seed: Dict[str, Dict[str, List[float]]]) -> Dict[str, Dict[str, float]]:
+    """The per-pair file's values: for every receiver, the mean over seeds of each metric.
+
+    The single place the stored means come from, so they are by construction the means of the
+    stored per-seed values.
+    """
+    means: Dict[str, Dict[str, float]] = {}
+    for receiver, values in per_seed.items():
+        lengths = {len(values[metric]) for metric in PER_PAIR_METRICS}
+        if len(lengths) != 1 or 0 in lengths:
+            raise ValueError(f'receiver {receiver!r} has per-seed lists of lengths {sorted(lengths)}')
+        means[receiver] = {metric: sum(values[metric]) / len(values[metric]) for metric in PER_PAIR_METRICS}
+    return means
+
+
+def save_interference_per_pair_per_seed(
+    per_seed: Dict[str, Dict[str, List[float]]], seeds: List[int], per_pair_path: str,
+) -> str:
+    """Write the per-seed sibling of a per-pair file: the seeds, then every receiver's lists."""
+    path = per_seed_path_of(per_pair_path)
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump({'seeds': list(seeds), 'receivers': per_seed}, handle)
+    return path
+
+
 def get_interference_per_pair_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
