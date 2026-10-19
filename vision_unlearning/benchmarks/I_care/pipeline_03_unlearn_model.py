@@ -212,6 +212,10 @@ _parser.add_argument("--pins", default=None,
                      help="The run's pins.json, whose sha256 every provenance.json records.")
 _parser.add_argument("--freeze", default=None,
                      help="The run's environment freeze, whose sha256 every provenance.json records.")
+_parser.add_argument("--full-precision", action="store_true", default=False,
+                     help="Train in float32 instead of the method's reference precision (SPARE bfloat16 "
+                          "mixed precision, SalUn TensorFloat-32), to measure what that precision changes. "
+                          "Refused for UCE.")
 _parser.add_argument("--uce-guide-concepts", default=None,
                      help="UCE only: the concept the edit pushes the entity towards. Left unset it is "
                           "the task's substitute concept. Set to the task name ('people', 'breeds', "
@@ -290,6 +294,7 @@ for index in range(index_start, index_start + max_identities):
         uce_guide_concepts=uce_guide_concepts,
         retained_entities=[m['name'] for m in metadata_filtered if m['name'] != target] if method == 'uce' else None,
         uce_erase_scale_override=_args.uce_erase_scale,
+        full_precision=_args.full_precision,
     )
     if uce_guide_concepts is not None:
         logger.info('UCE guide concept set by the caller to %r (default: the substitute concept)', uce_guide_concepts)
@@ -351,7 +356,8 @@ for index in range(index_start, index_start + max_identities):
         eval_results = unlearner.train()
         logger.info('Evaluation metrics:\n' + pd.DataFrame([{'Name': r.metric_name, 'Value': r.metric_value} for r in eval_results]).to_markdown())
         write_provenance(output_dir, producer_facts(
-            precision=str(hyperparameters.get('mixed_precision') or ('tf32' if hyperparameters.get('allow_tf32') else 'float32')),
+            precision=str(hyperparameters['mixed_precision'] if hyperparameters.get('mixed_precision') not in (None, 'no')
+                          else ('tf32' if hyperparameters.get('allow_tf32') else 'float32')),
             pins_path=_args.pins, freeze_path=_args.freeze, producer='pipeline_03',
             task=task, method=method, entity=target, num_train_epochs=num_train_epochs,
             configuration={k: v for k, v in hyperparameters.items() if isinstance(v, (str, int, float, bool, list, type(None)))},

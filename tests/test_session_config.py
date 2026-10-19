@@ -320,5 +320,13 @@ class TestTheReferenceConfigurations:
     def test_every_evaluation_is_seeded(self, method: str) -> None:
         assert _config('people', method, 'Mark_Philippoussis')['evaluation_noise_seed'] == 42
 
+    def test_full_precision_trains_spare_and_salun_in_float32(self) -> None:
+        spare = _config('people', 'distil', 'Mark_Philippoussis', full_precision=True)
+        salun = _config('people', 'salun', 'Mark_Philippoussis', full_precision=True)
+        assert spare['mixed_precision'] == 'no' and 'allow_tf32' not in spare
+        assert salun['allow_tf32'] is False and 'mixed_precision' not in salun
+        with pytest.raises(ValueError, match='no training precision'):
+            _config('people', 'uce', 'Mark_Philippoussis', num_train_epochs=0, retained_entities=['x'], full_precision=True)
+
     def test_the_internal_record_path_is_gone_from_the_uce_docstring(self) -> None:
         assert 'tickets/' not in (session_config._uce.__doc__ or '')

@@ -66,6 +66,7 @@ def session_hyperparameters(
     uce_guide_concepts: Optional[str] = None,
     retained_entities: Optional[Sequence[str]] = None,
     uce_erase_scale_override: Optional[float] = None,
+    full_precision: bool = False,
 ) -> Dict[str, Any]:
     """Return the hyperparameters of one unlearning session.
 
@@ -87,6 +88,9 @@ def session_hyperparameters(
         from their retain splits. The target is refused if present.
     @param uce_erase_scale_override: UCE only: the strength dial, for equalization's sweep. None
         uses the task's value in ``configuration.uce_erase_scale``.
+    @param full_precision: train in float32 instead of the reference's reduced precision (SPARE's
+        bfloat16 mixed precision, SalUn's TensorFloat-32), to measure what the reduced precision
+        changes. Refused for UCE, which does not train.
     @raises NotImplementedError: the method has no configuration here.
     """
     forget_prompts, retain_prompts = evaluation_prompts(task, entity)
@@ -120,6 +124,12 @@ def session_hyperparameters(
     else:
         raise NotImplementedError(f'no session configuration for method {method!r}')
 
+    if full_precision:
+        if method == 'uce':
+            raise ValueError('UCE is a closed-form edit; it has no training precision to change')
+        for name, value in (('mixed_precision', 'no'), ('allow_tf32', False)):
+            if name in hyperparameters:
+                hyperparameters[name] = value
     return hyperparameters
 
 
