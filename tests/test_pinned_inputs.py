@@ -101,3 +101,11 @@ def test_the_freeze_is_the_real_pip_freeze(tmp_path: Any) -> None:
     assert capture_pins._run_to_file([sys.executable, '-m', 'pip', 'freeze', '--all'], str(tmp_path / 'f.txt'))
     lines: List[str] = (tmp_path / 'f.txt').read_text().splitlines()
     assert any(line.lower().startswith('pip==') for line in lines)
+
+
+def test_a_repository_loaded_by_commit_is_pinned_by_its_only_snapshot(tmp_path: Any) -> None:
+    folder = tmp_path / 'datasets--bitmind--lfw' / 'snapshots' / '274dfbca'
+    folder.mkdir(parents=True)
+    assert capture_pins.hub_commit(str(tmp_path), 'datasets--bitmind--lfw') == '274dfbca'
+    (tmp_path / 'datasets--bitmind--lfw' / 'snapshots' / 'another').mkdir()
+    assert capture_pins.hub_commit(str(tmp_path), 'datasets--bitmind--lfw') is None

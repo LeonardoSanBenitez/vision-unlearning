@@ -75,12 +75,19 @@ def sha256_tree(folder: str) -> str:
 
 
 def hub_commit(hf_cache: str, repository_folder: str) -> Optional[str]:
-    """The commit a cached Hub repository's ``main`` points to, or None when it is not cached."""
+    """The commit a cached Hub repository resolves to, or None when that is not determined.
+
+    ``refs/main`` when the repository was loaded by its branch. A repository loaded by an exact commit
+    has no ref, only that commit's snapshot folder; it is the answer when it is the only one, and
+    with several snapshots and no ref the cached state is ambiguous, so None.
+    """
     path = os.path.join(hf_cache, repository_folder, 'refs', 'main')
-    if not os.path.isfile(path):
-        return None
-    with open(path, encoding='utf-8') as handle:
-        return handle.read().strip() or None
+    if os.path.isfile(path):
+        with open(path, encoding='utf-8') as handle:
+            return handle.read().strip() or None
+    snapshots = os.path.join(hf_cache, repository_folder, 'snapshots')
+    found = sorted(os.listdir(snapshots)) if os.path.isdir(snapshots) else []
+    return found[0] if len(found) == 1 else None
 
 
 def dinov2_hashes(torch_hub: str) -> Dict[str, Optional[str]]:
