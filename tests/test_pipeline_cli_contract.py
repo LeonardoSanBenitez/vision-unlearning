@@ -197,3 +197,17 @@ def test_the_orchestrator_types_no_epoch_count() -> None:
     """Every epoch count comes from configuration.py; fails on the code before, which typed 39."""
     typed = re.findall(r'--(?:num-train-epochs|epochs)\s+\d', _read(ORCHESTRATOR))
     assert not typed, f'{ORCHESTRATOR} types epoch counts by hand: {typed[:3]}'
+
+
+@pytest.mark.parametrize('flag', ['--train-batch-size', '--gradient-accumulation-steps', '--repository', '--upload',
+                                  '--uce-erase-scale', '--pins', '--freeze'])
+def test_the_session_script_takes_its_batch_sizes_and_targets_as_arguments(flag: str) -> None:
+    """Fails on the code before: the training batch was chosen from free video memory, with no flag
+    to pin it and nothing recording which branch ran."""
+    assert flag in _flags_declared_by('pipeline_03_unlearn_model.py')
+
+
+def test_the_session_script_never_chooses_the_generation_batch_from_memory() -> None:
+    section = _read('vision_unlearning/benchmarks/I_care/pipeline_03_unlearn_model.py')
+    start = section.index('batch_size_inference = ')
+    assert 'free_memory' not in section[start:start + 300]

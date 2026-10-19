@@ -48,6 +48,20 @@ from vision_unlearning.datasets.testbed import (  # noqa: E402
 )
 from vision_unlearning.unlearner.loaders import get_partial_weights_loader  # noqa: E402
 from vision_unlearning.utils.data_generation import generate_dataset  # noqa: E402
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME  # noqa: E402
+from vision_unlearning.benchmarks.I_care.configuration import (  # noqa: E402
+    GENERATE_DATASET_SEEDS,
+    GENERATION_BATCH_SIZE,
+    GENERATION_NOISE,
+)
+from vision_unlearning.benchmarks.I_care.provenance import producer_facts, write_provenance  # noqa: E402
+from vision_unlearning.benchmarks.I_care.upload import (  # noqa: E402
+    assert_upload_allowed,
+    remote_path_of,
+    upload_folder,
+)
+from vision_unlearning.datasets.entity_names import generation_prompt  # noqa: E402
+from vision_unlearning.datasets.testbed import get_generated_dataset_file  # noqa: E402
 
 
 # Breeds
@@ -146,7 +160,7 @@ replace_if_exists: bool = False
 
 ###
 perform_dataset_generation: bool = True
-generate_dataset_seeds = [42, 43, 44, 45]  # [42]  # [42, 43, 44, 45]
+generate_dataset_seeds = list(GENERATE_DATASET_SEEDS)
 generate_dataset_limit_prompts: Optional[int] = None  # 5  # None
 hub_model_id = None  # 'LeonardoBenitez/demo-vision-unlearning-' + 'fade' if method=='distil' else method  #None
 
@@ -177,10 +191,27 @@ _parser.add_argument("--max-identities", type=int, default=max_identities,
 _parser.add_argument("--replace-if-exists", action="store_true", default=replace_if_exists,
                      help="Re-run a session whose artifact is already on disk.")
 _parser.add_argument("--batch-size-inference", type=int, default=None,
-                     help="Images generated per forward pass. Left unset, it is chosen from "
-                          "free video memory, which makes the images depend on the card and on "
-                          "what else was running -- see the note at the selection site. Set it "
-                          "for any run whose images must be comparable with another run's.")
+                     help="Images generated per forward pass. Left unset, it is the benchmark's "
+                          f"configuration.GENERATION_BATCH_SIZE ({GENERATION_BATCH_SIZE}), the size the "
+                          "baseline is generated at, because the batch shape changes the pixels.")
+_parser.add_argument("--train-batch-size", type=int, default=None,
+                     help="Training batch per device. Left unset, a method whose reference configuration "
+                          "fixes it (SPARE: 4) uses that, and Munba chooses it from free video memory. A "
+                          "batch that does not fit the card fails the session; it is never shrunk.")
+_parser.add_argument("--gradient-accumulation-steps", type=int, default=None,
+                     help="Training steps accumulated per update. Same defaults as --train-batch-size.")
+_parser.add_argument("--uce-erase-scale", type=float, default=None,
+                     help="UCE only: the strength dial. Left unset, configuration.uce_erase_scale of the task.")
+_parser.add_argument("--repository", default=DEFAULT_REMOTE_REPOSITORY_NAME,
+                     help=f"HuggingFace dataset repository to upload to (default: {DEFAULT_REMOTE_REPOSITORY_NAME}).")
+_parser.add_argument("--upload", action="store_true", default=False,
+                     help="Upload each session's model folder and image folder once each is complete, "
+                          "checked by content. Only the benchmark's current corpus may be written to; any "
+                          "other --repository is refused at start-up.")
+_parser.add_argument("--pins", default=None,
+                     help="The run's pins.json, whose sha256 every provenance.json records.")
+_parser.add_argument("--freeze", default=None,
+                     help="The run's environment freeze, whose sha256 every provenance.json records.")
 _parser.add_argument("--uce-guide-concepts", default=None,
                      help="UCE only: the concept the edit pushes the entity towards. Left unset it is "
                           "the task's substitute concept. Set to the task name ('people', 'breeds', "
@@ -197,6 +228,9 @@ max_identities = _args.max_identities
 replace_if_exists = _args.replace_if_exists
 batch_size_inference_override: Optional[int] = _args.batch_size_inference
 uce_guide_concepts: Optional[str] = _args.uce_guide_concepts
+if _args.upload:
+    # Before any model is loaded: an upload aimed somewhere forbidden stops here.
+    assert_upload_allowed(_args.repository)
 
 # Basic params
 with open(os.path.join(base_folder, f"metadata_{task}_2_enriched_filtered.json"), "r", encoding="utf-8") as f:
@@ -254,12 +288,23 @@ for index in range(index_start, index_start + max_identities):
         num_train_epochs=num_train_epochs,
         hub_model_id=hub_model_id,
         uce_guide_concepts=uce_guide_concepts,
+        retained_entities=[m['name'] for m in metadata_filtered if m['name'] != target] if method == 'uce' else None,
+        uce_erase_scale_override=_args.uce_erase_scale,
     )
     if uce_guide_concepts is not None:
         logger.info('UCE guide concept set by the caller to %r (default: the substitute concept)', uce_guide_concepts)
-    if method in ('distil', 'munba'):
-        # How much fits on this card: a property of the machine, not of the session, which is why
-        # it is the one piece of the configuration that did not move out of this file.
+    if _args.train_batch_size is not None or _args.gradient_accumulation_steps is not None:
+        if method == 'uce':
+            raise ValueError('UCE is a closed-form edit; it has no training batch')
+        if _args.train_batch_size is not None:
+            hyperparameters['per_device_train_batch_size'] = _args.train_batch_size
+        if _args.gradient_accumulation_steps is not None:
+            hyperparameters['gradient_accumulation_steps'] = _args.gradient_accumulation_steps
+        logger.info('training batch set by the caller: %s x %s', hyperparameters.get('per_device_train_batch_size'),
+                    hyperparameters.get('gradient_accumulation_steps', 1))
+    elif method == 'munba':
+        # How much fits on this card: a property of the machine, not of the session. SPARE's batch
+        # is part of its reference configuration and is set in session_config instead.
         if free_memory > 20e9:
             hyperparameters.update({
                 "per_device_train_batch_size": 4,
@@ -276,27 +321,11 @@ for index in range(index_start, index_start + max_identities):
                 "gradient_accumulation_steps": 2,  # 4,
             })
 
-    # The generation batch size is NOT only a performance knob. `generate_dataset` draws one
-    # noise tensor per batch, so the batch size decides the initial noise of every image: the
-    # same prompt at the same seed in a batch of 8 and a batch of 50 gives different pictures.
-    # Choosing it from free memory therefore makes the output depend on which card the job
-    # landed on and on what else happened to be running -- which is how a shared baseline
-    # generated at one size and per-entity images generated at another came to be compared
-    # pair by pair. Any run whose images must be comparable with another run passes
-    # --batch-size-inference explicitly; the memory-derived values below remain the default so
-    # that nothing existing changes behaviour.
-    if batch_size_inference_override is not None:
-        logger.info('batch_size_inference pinned to %s by the caller', batch_size_inference_override)
-        batch_size_inference = batch_size_inference_override
-    elif free_memory > 20e9:
-        logger.debug('Choosing hyperparams for free_memory>20e9')
-        batch_size_inference = 50
-    elif free_memory > 14e9:
-        logger.debug('Choosing hyperparams for free_memory>14e9')
-        batch_size_inference = 25  # 25
-    else:
-        logger.error('Too little GPU, diverting power from life support...')
-        batch_size_inference = 25
+    # The generation batch size is NOT only a performance knob: the batch shape changes the
+    # kernels' arithmetic and so the pixels, even with every image's noise fixed. It is the size the
+    # baseline was generated at unless the caller says otherwise, never one chosen from free memory.
+    batch_size_inference = GENERATION_BATCH_SIZE if batch_size_inference_override is None else batch_size_inference_override
+    logger.info('generation batch size %s, noise %s', batch_size_inference, GENERATION_NOISE)
 
     unlearner: Unlearner
     if method == 'distil':
@@ -321,6 +350,12 @@ for index in range(index_start, index_start + max_identities):
         logger.info(hyperparameters)
         eval_results = unlearner.train()
         logger.info('Evaluation metrics:\n' + pd.DataFrame([{'Name': r.metric_name, 'Value': r.metric_value} for r in eval_results]).to_markdown())
+        write_provenance(output_dir, producer_facts(
+            precision=str(hyperparameters.get('mixed_precision') or ('tf32' if hyperparameters.get('allow_tf32') else 'float32')),
+            pins_path=_args.pins, freeze_path=_args.freeze, producer='pipeline_03',
+            task=task, method=method, entity=target, num_train_epochs=num_train_epochs,
+            configuration={k: v for k, v in hyperparameters.items() if isinstance(v, (str, int, float, bool, list, type(None)))},
+        ))
 
         ###########################################
         # Check metrics
@@ -370,7 +405,7 @@ for index in range(index_start, index_start + max_identities):
     # Generate dataset
     ###########################################
     if perform_dataset_generation:
-        prompts = [f"An image of {get_target_overwrite(task, method, m['name'])[0]}" for m in metadata_filtered]
+        prompts = [generation_prompt(task, m['name']) for m in metadata_filtered]
         if generate_dataset_limit_prompts is not None:
             prompts = prompts[:generate_dataset_limit_prompts]
 
@@ -418,7 +453,7 @@ for index in range(index_start, index_start + max_identities):
                 model_generate_name = model_base_name
                 lora_generate_name = output_dir
 
-            filenames = [f'on_{seed}_{prompt}.png' for seed in generate_dataset_seeds for prompt in prompts]
+            filenames = [get_generated_dataset_file('on', seed, prompt) for seed in generate_dataset_seeds for prompt in prompts]
             generate_dataset(  # type: ignore[arg-type]
                 model_base_name=model_generate_name,
                 lora_name=lora_generate_name,
@@ -429,6 +464,11 @@ for index in range(index_start, index_start + max_identities):
                 filenames=filenames,
                 batch_size=batch_size_inference,
                 lora_requires_inversion=artifact_kind == 'lora_adapter_inverted',
+                noise=GENERATION_NOISE,
+                provenance=producer_facts(
+                    precision='float16', pins_path=_args.pins, freeze_path=_args.freeze, producer='pipeline_03',
+                    task=task, method=method, entity=target, num_train_epochs=num_train_epochs,
+                ),
             )
             del model_pipeline
             gc.collect()
@@ -438,6 +478,17 @@ for index in range(index_start, index_start + max_identities):
         else:
             logger.info(f'Skipping dataset generation for "{target_preprocessed}" since already exists at "{generated_dataset_output_path}"')
         assert ds_entity.exists(generate_dataset_seeds, prompts)
+        if _args.upload:
+            token = os.getenv('HF_TOKEN') or None
+            model_files = sorted(
+                os.path.relpath(os.path.join(root, name), output_dir)
+                for root, _, files in os.walk(output_dir) for name in files
+            )
+            upload_folder(output_dir, remote_path_of(output_dir, base_folder), _args.repository, token, model_files)
+            image_files = [get_generated_dataset_file('on', seed, prompt) for seed in generate_dataset_seeds for prompt in prompts]
+            upload_folder(generated_dataset_output_path, remote_path_of(generated_dataset_output_path, base_folder),
+                          _args.repository, token, image_files + ['metadata.jsonl', 'provenance.json'])
+            logger.info('Uploaded and checked by content: %s and %s', output_dir, generated_dataset_output_path)
 
     logger.info('-' * 100)
     logger.info(f"Finished unlearning and dataset generation for target '{target_preprocessed}' ({index}/{index_start + max_identities -1})")

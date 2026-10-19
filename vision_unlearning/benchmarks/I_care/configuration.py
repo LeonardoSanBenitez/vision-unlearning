@@ -844,6 +844,16 @@ GENERATE_DATASET_SEEDS: List[int] = [42, 43, 44, 45]
 GENERATION_NOISE: type_noise = 'per_image_processor'
 GENERATION_BATCH_SIZE: int = 8
 
+# UCE's strength dial (`erase_scale`) per task, at its reference ridge (`lamb` 0.5) and with the
+# task's other entities as its preserve set. Equalization sweeps `c * 2**k` around these values and
+# replaces them with the selected ones; until it has, they are the centres of its ladders and record
+# no equalization result.
+uce_erase_scale: Dict[str, float] = {
+    'people': 1500.0,
+    'scenes': 1500.0,
+    'breeds': 1150.0,
+}
+
 
 # The method's hyperparameter is specially problematic to map/find, because i initially thought it should
 # be configurable and then I chagned my mind. Sometimes it can be infered (like in `choose_metric_column_interference_per_entity`),

@@ -1,21 +1,15 @@
 """Every field of an unlearning session's configuration, asserted directly.
 
-The expected dictionaries below were read field by field out of ``pipeline_03_unlearn_model.py`` as
-it stood before this configuration was extracted out of it, so this file is also the equivalence
-proof for the move: anything that differs from the old behaviour differs on purpose, and there are
-exactly two such differences, each marked where it appears.
+The three methods on the benchmark's method axis -- UCE, SPARE (``distil``) and SalUn -- run their
+authors' reference configurations apart from the strength dial; :class:`TestTheReferenceConfigurations`
+holds each value against the published source, and fails on the code before, which ran all three at
+settings nobody published (SPARE at rate 6e-4, rank 16, alpha 4, clipping 5.0; UCE at ridge 0.01 with
+the task word as its preserve set; SalUn at retain weight 0.1). Munba is not on the axis and keeps the
+settings it was run with.
 
-1. UCE's ``guide_concepts`` is the task's substitute concept instead of the literal task name, so
-   the three methods push the entity towards the same thing.
-2. Both prompt lists come from the one prompt builder, so the retain side is the substitute concept
-   for all three tasks.
-
-``preserve_concepts`` was briefly a third difference -- it was set to None -- and that was reversed
-on 2026-09-26. It is the literal task name again, exactly as before the extraction.
-
-The per-machine settings -- batch size and gradient accumulation, chosen from free video memory --
-are deliberately not here; they stay in the pipeline, because they describe where a run happens
-rather than what it is.
+The per-machine settings of Munba -- batch size and gradient accumulation, chosen from free video
+memory -- are deliberately not here; they stay in the pipeline. SPARE's batch of 4 is part of its
+published configuration, so it is.
 """
 import json
 import os
@@ -34,6 +28,11 @@ _TASKS_AND_ENTITIES = [
     ('breeds', 'bouvier des flandres dog'),
     ('scenes', 'football_field'),
 ]
+_OTHERS = {
+    'people': ['George_W_Bush', 'Colin_Powell'],
+    'breeds': ['basenji dog', 'kuvasz dog'],
+    'scenes': ['abbey', 'badlands'],
+}
 
 
 def _config(task: str, method: str, entity: str, **overrides: Any) -> Dict[str, Any]:
@@ -46,6 +45,8 @@ def _config(task: str, method: str, entity: str, **overrides: Any) -> Dict[str, 
         'num_train_epochs': 100,
         'hub_model_id': None,
     }
+    if method == 'uce':
+        settings.setdefault('retained_entities', _OTHERS[task])
     settings.update(overrides)
     return session_config.session_hyperparameters(task, method, entity, **settings)  # type: ignore[arg-type]
 
@@ -55,21 +56,20 @@ class TestUce:
     def test_every_field(self, task: str, entity: str) -> None:
         config = _config(task, 'uce', entity, num_train_epochs=0)
 
-        expected_scales = (
-            {'erase_scale': 230, 'preserve_scale': 1.2, 'lamb': 0.1} if task == 'breeds'
-            else {'erase_scale': 30, 'preserve_scale': 0.01, 'lamb': 0.01}
-        )
         forget, retain = evaluation_prompts(task, entity)  # type: ignore[arg-type]
         assert config == {
             'output_dir': 'assets/models/out',
             'hub_model_id': None,
-            'final_eval_prompts_forget': forget,   # change 2
-            'final_eval_prompts_retain': retain,   # change 2
+            'final_eval_prompts_forget': forget,
+            'final_eval_prompts_retain': retain,
+            'evaluation_noise_seed': 42,
             'pretrained_model_name_or_path': _MODEL,
-            **expected_scales,
+            'erase_scale': {'people': 1500.0, 'scenes': 1500.0, 'breeds': 1150.0}[task],
+            'preserve_scale': 0.5,     # max(0.1, 1/2) for the two retained entities of this fixture
+            'lamb': 0.5,
             'edit_concepts': canonical_entity(task, entity),  # type: ignore[arg-type]
-            'guide_concepts': substitute_concept(task),       # change 1
-            'preserve_concepts': task,
+            'guide_concepts': substitute_concept(task),       # type: ignore[arg-type]
+            'preserve_concepts': ';'.join(canonical_entity(task, e) for e in _OTHERS[task]),  # type: ignore[arg-type]
             'expand_prompts': False,
             'device': 'cuda',
             'save_entire_model': False,
@@ -98,23 +98,36 @@ class TestUce:
             {k: v for k, v in default.items() if k != 'guide_concepts'}
 
     @pytest.mark.parametrize('method', ['salun', 'distil', 'munba'])
-    def test_the_guide_override_is_refused_for_other_methods(self, method: str) -> None:
+    @pytest.mark.parametrize('setting', ['uce_guide_concepts', 'retained_entities', 'uce_erase_scale_override'])
+    def test_a_uce_setting_is_refused_for_other_methods(self, method: str, setting: str) -> None:
         """A UCE-only setting passed to another method is an error, not a silent no-op."""
-        with pytest.raises(ValueError, match='uce_guide_concepts'):
-            _config('breeds', method, 'bouvier des flandres dog', uce_guide_concepts='breeds')
+        value: Any = {'uce_guide_concepts': 'breeds', 'retained_entities': ['x'], 'uce_erase_scale_override': 3.0}[setting]
+        with pytest.raises(ValueError, match=setting):
+            _config('breeds', method, 'bouvier des flandres dog', **{setting: value})
 
-    @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
-    def test_the_preserve_concept_is_kept(self, task: str, entity: str) -> None:
-        """Dropping it was tried and reversed; a protection is not removed for being badly chosen.
+    def test_the_preserve_set_is_every_other_entity_of_the_task(self) -> None:
+        """Fails on the code before, which preserved the one word ``people``. Ninety-nine entities
+        give the authors' per-concept weight floor of 0.1."""
+        others = [f'Person_{k}' for k in range(99)]
+        config = _config('people', 'uce', 'Mark_Philippoussis', num_train_epochs=0, retained_entities=others)
+        preserved = config['preserve_concepts'].split(';')
+        assert len(preserved) == 99 and 'Mark Philippoussis' not in preserved
+        assert preserved[0] == 'Person 0'
+        assert config['preserve_scale'] == 0.1
 
-        It is badly chosen -- regularising towards the word ``people`` protects nothing in
-        particular, and the original author said so on the line. Replacing it with the retained
-        entities is the paper's version and needs ``erase_scale`` re-tuned with it, which belongs to
-        equalization. Until then this asserts the historical value, so a session stays comparable
-        with the published corpus.
-        """
-        config = _config(task, 'uce', entity, num_train_epochs=0)
-        assert config['preserve_concepts'] == task
+    def test_the_target_is_never_preserved(self) -> None:
+        with pytest.raises(ValueError, match='among the entities'):
+            _config('people', 'uce', 'Mark_Philippoussis', retained_entities=['Mark_Philippoussis', 'X'])
+
+    def test_uce_needs_its_preserve_set(self) -> None:
+        with pytest.raises(ValueError, match='retained_entities'):
+            session_config.session_hyperparameters(
+                'people', 'uce', 'Mark_Philippoussis', output_dir='o', dataset_forget_name='f',
+                dataset_retain_name='r', model_base_name=_MODEL, device='cpu', num_train_epochs=0,
+            )
+
+    def test_the_erase_scale_is_the_dial(self) -> None:
+        assert _config('scenes', 'uce', 'football_field', uce_erase_scale_override=23.4375)['erase_scale'] == 23.4375
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
     def test_the_three_methods_aim_at_the_same_substitute(self, task: str, entity: str) -> None:
@@ -139,12 +152,18 @@ class TestSalun:
             'dataset_retain_name': 'assets/datasets/x/train_retain',
             'overwriting_concept': substitute_concept(task),  # type: ignore[arg-type]
             'train_method': 'xattn',
+            'learning_rate': 1e-5,
+            'mask_threshold': 0.5,
+            'alpha': 0.5,
+            'mask_guidance': 7.5,
             'num_train_epochs': 100,
             'resolution': 512,
             'random_flip': True,
             'dataloader_num_workers': 0,
             'per_device_train_batch_size': 1,
+            'allow_tf32': True,
             'device': 'cuda',
+            'evaluation_noise_seed': 42,
         }
 
 
@@ -180,6 +199,7 @@ class TestTheAdapterTrainers:
             'lora_alpha': 4,
             'lora_dropout': 0.2,
             'seed': 42,
+            'evaluation_noise_seed': 42,
         }
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
@@ -187,6 +207,11 @@ class TestTheAdapterTrainers:
         expected = self._expected_common(task, entity)
         expected['overwritting_concept'] = substitute_concept(task)  # type: ignore[arg-type]
         expected['forget_concept'] = canonical_entity(task, entity)  # type: ignore[arg-type]
+        expected.update({
+            'learning_rate': 1e-4, 'lora_r': 4, 'lora_alpha': 8, 'lora_dropout': 0.2, 'max_grad_norm': 1.0,
+            'adam_beta1': 0.9, 'adam_beta2': 0.999, 'adam_epsilon': 1e-8, 'adam_weight_decay': 1e-2,
+            'per_device_train_batch_size': 4, 'gradient_accumulation_steps': 1, 'mixed_precision': 'bf16',
+        })
         assert _config(task, 'distil', entity) == expected
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
@@ -259,3 +284,41 @@ class TestTheDataPrecondition:
     def test_the_methods_that_read_training_data_are_named(self) -> None:
         trained: List[str] = sorted(session_config.METHODS_WITH_TRAINING_DATA)
         assert trained == ['distil', 'munba', 'salun']
+
+
+
+class TestTheReferenceConfigurations:
+    """Each method's settings against its published source, value by value (the dial excepted)."""
+
+    UCE = {'lamb': 0.5, 'preserve_scale': 0.1, 'guide_concepts': 'the substitute concept'}
+    SPARE = {'learning_rate': 1e-4, 'lr_scheduler_type': 'constant', 'lr_warmup_steps': 0, 'lora_r': 4,
+             'lora_alpha': 8, 'lora_dropout': 0.2, 'per_device_train_batch_size': 4, 'adam_beta1': 0.9,
+             'adam_beta2': 0.999, 'adam_epsilon': 1e-8, 'adam_weight_decay': 1e-2, 'random_flip': True,
+             'max_grad_norm': 1.0, 'target_modules': ['to_k', 'to_q', 'to_v', 'to_out.0'],
+             'mixed_precision': 'bf16'}
+    SALUN = {'learning_rate': 1e-5, 'mask_threshold': 0.5, 'alpha': 0.5, 'mask_guidance': 7.5,
+             'train_method': 'xattn', 'per_device_train_batch_size': 1, 'allow_tf32': True}
+
+    @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
+    def test_uce(self, task: str, entity: str) -> None:
+        others = [f'other {k}' for k in range(99)]
+        config = _config(task, 'uce', entity, num_train_epochs=0, retained_entities=others)
+        assert config['lamb'] == self.UCE['lamb'] and config['preserve_scale'] == self.UCE['preserve_scale']
+        assert config['guide_concepts'] == substitute_concept(task)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
+    def test_spare(self, task: str, entity: str) -> None:
+        config = _config(task, 'distil', entity)
+        assert {key: config[key] for key in self.SPARE} == self.SPARE
+
+    @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
+    def test_salun(self, task: str, entity: str) -> None:
+        config = _config(task, 'salun', entity)
+        assert {key: config[key] for key in self.SALUN} == self.SALUN
+
+    @pytest.mark.parametrize('method', ['uce', 'salun', 'distil'])
+    def test_every_evaluation_is_seeded(self, method: str) -> None:
+        assert _config('people', method, 'Mark_Philippoussis')['evaluation_noise_seed'] == 42
+
+    def test_the_internal_record_path_is_gone_from_the_uce_docstring(self) -> None:
+        assert 'tickets/' not in (session_config._uce.__doc__ or '')
