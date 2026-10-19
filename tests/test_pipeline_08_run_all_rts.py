@@ -81,9 +81,10 @@ class TestShouldSkip:
     ) -> None:
         monkeypatch.setenv("HF_TOKEN", "fake-token")
         uploaded: List[dict] = []
+        # Uploads go through the benchmark's guarded helper; replace it where it is looked up.
         monkeypatch.setattr(
-            "vision_unlearning.integrations.huggingface.huggingface_dataset_file_upload",
-            lambda **kw: uploaded.append(kw),
+            "vision_unlearning.benchmarks.I_care.upload.upload_file",
+            lambda local, remote, repository, token: uploaded.append({"dataset_path": remote}),
         )
         local = tmp_path / "present.json"
         local.write_text("{}")
@@ -98,9 +99,10 @@ class TestShouldSkip:
     ) -> None:
         monkeypatch.setenv("HF_TOKEN", "fake-token")
         uploaded: List[dict] = []
+        # Uploads go through the benchmark's guarded helper; replace it where it is looked up.
         monkeypatch.setattr(
-            "vision_unlearning.integrations.huggingface.huggingface_dataset_file_upload",
-            lambda **kw: uploaded.append(kw),
+            "vision_unlearning.benchmarks.I_care.upload.upload_file",
+            lambda local, remote, repository, token: uploaded.append({"dataset_path": remote}),
         )
         local = tmp_path / "present.json"
         local.write_text("{}")

@@ -50,6 +50,7 @@ from vision_unlearning.datasets.testbed import (
     get_metadata_filtered,
     get_target_overwrite,
 )
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME
 
 
 logger = get_logger('unlearning_analysis')
@@ -164,8 +165,11 @@ def compute_for_task(
     embedding_assets_folder: str,
     base_folder: str,
     ledger: Optional[RunLedger] = None,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
     """Aggregate per-pair interference data for one task into interference_per_entity_{task}.json.
+
+    `repository` is where the metadata and any per-pair file absent locally are read from.
 
     Per-entity computation errors are caught and logged (the entity's row keeps whatever
     columns were already written and simply lacks this (method, epochs) combination's
@@ -176,7 +180,7 @@ def compute_for_task(
     logger.info('Starting pipeline_07 for task=%s, methods=%s, epochs=%s',
                 task, methods, num_train_epochs_list)
 
-    metadata_filtered = get_metadata_filtered(task, base_folder=base_folder)
+    metadata_filtered = get_metadata_filtered(task, base_folder=base_folder, remote_repository_name=repository)
     interference_per_entity = metadata_filtered.copy()
 
     baseline_embedding_path = os.path.join(
@@ -218,6 +222,7 @@ def compute_for_task(
                 )
                 interference_per_pair = get_interference_per_pair(
                     task, index, method, num_train_epochs, base_folder=base_folder,
+                    remote_repository_name=repository,
                 )
 
                 assert index < len(metadata_filtered)
@@ -472,6 +477,11 @@ def main() -> None:
         default=False,
         help='Disable writing the run ledger for this invocation.',
     )
+    parser.add_argument(
+        '--repository',
+        default=DEFAULT_REMOTE_REPOSITORY_NAME,
+        help=f'HuggingFace dataset repository inputs absent locally are read from (default: {DEFAULT_REMOTE_REPOSITORY_NAME}).',
+    )
     args = parser.parse_args()
 
     if len(args.methods) != len(args.epochs):
@@ -497,6 +507,7 @@ def main() -> None:
             embedding_assets_folder=embedding_assets_folder,
             base_folder=args.base_folder,
             ledger=ledger,
+            repository=args.repository,
         )
     finally:
         if ledger is not None:

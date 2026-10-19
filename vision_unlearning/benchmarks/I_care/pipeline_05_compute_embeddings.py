@@ -37,8 +37,9 @@ from vision_unlearning.datasets.testbed import (
     get_metadata_filtered,
     GeneratedDataset,
 )
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME
+from vision_unlearning.benchmarks.I_care.upload import assert_upload_allowed, upload_file
 from vision_unlearning.integrations.huggingface import (
-    huggingface_dataset_file_upload,
     huggingface_dataset_file_exists,
     huggingface_dataset_file_download,
 )
@@ -57,7 +58,6 @@ logger = logging.getLogger("compute_embeddings")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-HF_REPO = "LeonardoBenitez/VisionUnlearningEvaluationTestbeds"
 EMBEDDING_MODEL = "dinov2_vits14"
 EMBEDDING_DIM = 384
 
@@ -101,7 +101,7 @@ def should_skip(
     replace_if_exists: bool,
     upload_to_hf: bool,
     hf_file_exists_fn: Callable[[str, str, str], bool] = huggingface_dataset_file_exists,
-    hf_repo: str = HF_REPO,
+    hf_repo: str = DEFAULT_REMOTE_REPOSITORY_NAME,
     hf_token: str = "",
 ) -> bool:
     """Return True if we should skip this entity (already done).
@@ -341,10 +341,15 @@ def run_session(
     hf_upload_fn: Optional[Callable[..., None]] = None,
     hf_download_fn: Optional[Callable[..., None]] = None,
     hf_folder_exists_fn: Callable[..., bool] = hf_dataset_folder_exists,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
     """
     Embed all images for one forgetting session (one entity x one lora_state),
     save JSON with new schema, optionally upload to HF.
+
+    `repository` is read from for missing datasets and, when uploading, written to through the
+    guarded helper of `vision_unlearning.benchmarks.I_care.upload`, which refuses every repository
+    but the benchmark's current corpus and checks the uploaded file by content.
 
     All external side effects (HF check, embed, upload, download, folder check)
     are injectable for testing.
@@ -361,7 +366,7 @@ def run_session(
         replace_if_exists,
         upload_to_hf,
         hf_file_exists_fn=hf_file_exists_fn,
-        hf_repo=HF_REPO,
+        hf_repo=repository,
         hf_token=hf_token,
     ):
         progress[progress_key] = "skipped"
@@ -374,7 +379,7 @@ def run_session(
 
             # Pre-flight: check if the dataset folder exists on HF before attempting
             # a download that would fail or produce a broken local folder.
-            if not hf_folder_exists_fn(HF_REPO, dataset_config_name, hf_token):
+            if not hf_folder_exists_fn(repository, dataset_config_name, hf_token):
                 logger.warning(
                     "Dataset absent from HF (skipping): %s", dataset_config_name
                 )
@@ -388,7 +393,7 @@ def run_session(
             else:
                 huggingface_dataset_download(
                     folder_datasets=os.path.join(base_folder, "datasets"),
-                    dataset_repository=HF_REPO,
+                    dataset_repository=repository,
                     dataset_config=dataset_config_name,
                     token=hf_token,
                 )
@@ -438,12 +443,7 @@ def run_session(
             if hf_upload_fn is not None:
                 hf_upload_fn(output_path, hf_path)
             else:
-                huggingface_dataset_file_upload(
-                    file_path=output_path,
-                    dataset_repository=HF_REPO,
-                    dataset_path=hf_path,
-                    token=hf_token,
-                )
+                upload_file(output_path, hf_path, repository, hf_token)
             logger.info("Uploaded to HF: %s", hf_path)
 
         progress[progress_key] = "done"
@@ -549,6 +549,10 @@ if __name__ == "__main__":
                         help="Re-embed even if output already exists.")
     parser.add_argument("--no-upload", action="store_true", default=False,
                         help="Skip uploading to HuggingFace.")
+    parser.add_argument("--repository", default=DEFAULT_REMOTE_REPOSITORY_NAME,
+                        help="HuggingFace dataset repository to read datasets from and upload "
+                             f"embeddings to (default: {DEFAULT_REMOTE_REPOSITORY_NAME}). Uploads are "
+                             "refused for every repository but the benchmark's current corpus.")
     parser.add_argument("--delete-dataset", action="store_true", default=False,
                         help="Delete local dataset folder after computing embeddings. Default is to KEEP the dataset.")
     parser.add_argument("--seeds", nargs="+", type=int, default=[42, 43, 44, 45],
@@ -578,6 +582,11 @@ if __name__ == "__main__":
     lora_state: Literal["on", "off"] = args.lora_state  # type: ignore[assignment]
     replace_if_exists: bool = args.replace_if_exists
     upload_to_hf: bool = not args.no_upload
+    repository: str = args.repository
+    if upload_to_hf:
+        # Before any compute or token lookup: a run that would upload to a forbidden repository
+        # fails here, not after embedding a whole session.
+        assert_upload_allowed(repository)
     generate_dataset_seeds: List[int] = args.seeds
     base_folder = args.base_folder
     progress_path = os.path.join(base_folder, "embedding_progress.json")
@@ -616,7 +625,7 @@ if __name__ == "__main__":
         logger.info("Downloading metadata from HF: %s", metadata_hf_path)
         huggingface_dataset_file_download(
             folder_datasets=base_folder,
-            dataset_repository=HF_REPO,
+            dataset_repository=repository,
             file_path=metadata_hf_path,
             token=HF_TOKEN,
         )
@@ -667,7 +676,7 @@ if __name__ == "__main__":
             metadata_filtered=metadata_with_hf_name,
             lora_states=lora_states_for_manifest,
             base_folder=base_folder,
-            hf_repo=HF_REPO,
+            hf_repo=repository,
             hf_token=HF_TOKEN,
             seeds=generate_dataset_seeds,
             prompts=prompts,
@@ -758,7 +767,7 @@ if __name__ == "__main__":
         # Guard: check HF first so a missing dataset does not crash here.
         if not os.path.exists(dataset_folder):
             dataset_config_name = os.path.basename(dataset_folder)
-            if not hf_dataset_folder_exists(HF_REPO, dataset_config_name, HF_TOKEN):
+            if not hf_dataset_folder_exists(repository, dataset_config_name, HF_TOKEN):
                 logger.warning(
                     "Dataset absent from HF, skipping entity: %s", dataset_config_name
                 )
@@ -781,7 +790,7 @@ if __name__ == "__main__":
             logger.info("Downloading dataset: %s", dataset_config_name)
             huggingface_dataset_download(
                 folder_datasets=os.path.join(base_folder, "datasets"),
-                dataset_repository=HF_REPO,
+                dataset_repository=repository,
                 dataset_config=dataset_config_name,
                 token=HF_TOKEN,
             )
@@ -831,6 +840,7 @@ if __name__ == "__main__":
                 base_folder=base_folder,
                 progress_path=progress_path,
                 embed_image_fn=embed_image,
+                repository=repository,
             )
 
         # --- lora-ON embedding ---
@@ -860,6 +870,7 @@ if __name__ == "__main__":
             base_folder=base_folder,
             progress_path=progress_path,
             embed_image_fn=embed_image,
+            repository=repository,
         )
 
         # Delete local dataset folder to free disk space (only if --delete-dataset was passed)

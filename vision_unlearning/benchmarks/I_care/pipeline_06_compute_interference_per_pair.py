@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import shutil
 import sys
@@ -23,11 +24,11 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     type_unlearning_algorithm,
 )
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
+from vision_unlearning.benchmarks.I_care.upload import assert_upload_allowed, remote_path_of, upload_file
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME
 
 logger = get_logger('unlearning_analysis')
 setup_loggers(modules_info=['unlearning'])
-
-HF_REPO = "LeonardoBenitez/VisionUnlearningEvaluationTestbeds"
 
 # ---------------------------------------------------------------------------
 # CLI args — override any of the defaults set in the param blocks below
@@ -52,7 +53,18 @@ _parser.add_argument("--ledger-path", default="",
                           "not a paper artifact). Default (empty): '{base_folder}/logs/pipeline_06_ledger.jsonl'.")
 _parser.add_argument("--no-ledger", action="store_true", default=False,
                      help="Disable writing the run ledger for this invocation.")
+_parser.add_argument("--repository", default=DEFAULT_REMOTE_REPOSITORY_NAME,
+                     help="HuggingFace dataset repository datasets are read from and, with --upload, "
+                          f"per-pair files are written to (default: {DEFAULT_REMOTE_REPOSITORY_NAME}).")
+_parser.add_argument("--upload", action="store_true", default=False,
+                     help="Upload each per-pair file once it holds a finite value of every metric for "
+                          "every receiver, checked by content afterwards. Only the benchmark's current "
+                          "corpus may be written to; any other --repository is refused at start-up.")
 _args = _parser.parse_args()
+repository: str = _args.repository
+if _args.upload:
+    # Before any model or data is loaded: a run that would upload somewhere forbidden fails now.
+    assert_upload_allowed(repository)
 
 # Load HF_TOKEN (needed for download; safe to skip if datasets are already local)
 try:
@@ -197,7 +209,7 @@ all_prompts = [
 # After this call, GeneratedDataset.get_off_image_path() and evaluate_all_seeds()
 # can safely assume the shared baseline folder exists locally.
 logger.info("Ensuring shared baseline is available for task=%s ...", task)
-_baseline_ds = GeneratedDataset(task=task, base_folder=base_folder)  # type: ignore[arg-type]
+_baseline_ds = GeneratedDataset(task=task, base_folder=base_folder, remote_repository_name=repository)  # type: ignore[arg-type]
 _baseline_ds.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
 logger.info("Shared baseline ready: %s", _baseline_ds.folder_path)
 
@@ -226,6 +238,7 @@ def evaluate_one(prompt, seed, plot: bool = False) -> dict:
         artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
         artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
         base_folder=base_folder,
+        remote_repository_name=repository,
     )
     out_off = Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, seed, prompt, base_folder=base_folder))  # type: ignore[arg-type]
     out_on = Image.open(ds_entity.file_path('on', seed, prompt))
@@ -281,6 +294,7 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
         artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
         artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
         base_folder=base_folder,
+        remote_repository_name=repository,
     )
     imgs_off = [Image.open(GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt, base_folder=base_folder)) for s in seeds]  # type: ignore[arg-type]
     imgs_on = [Image.open(ds_entity.file_path('on', s, prompt)) for s in seeds]
@@ -304,8 +318,16 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
         compute_dino_image_similarity(imgs_off[i], imgs_on[i], _dino_model, _dino_transform, _dino_device)
         for i in range(n)
     ]
-    valid_dino = [v for v in dino_sims if not (v != v)]  # filter NaN
-    dino_diff_val = sum(valid_dino) / len(valid_dino) if valid_dino else float('nan')  # TODO: compute this from the outputs of script `pipeline_5_compute_embeddings.py`
+    # A missing value is an error, never averaged around: a mean over fewer seeds than the others is
+    # a different quantity under the same name.
+    for s, value in zip(seeds, dino_sims):
+        if not math.isfinite(value):
+            raise ValueError(
+                f"dino_diff is {value} for prompt {prompt!r} at seed {s}: "
+                f"{GeneratedDataset.get_off_image_path(task, target_hf_name, method, num_train_epochs, s, prompt, base_folder=base_folder)} "  # type: ignore[arg-type]
+                f"against {ds_entity.file_path('on', s, prompt)}"
+            )
+    dino_diff_val = sum(dino_sims) / n  # TODO: compute this from the outputs of script `pipeline_5_compute_embeddings.py`
 
     result = {
         'brisque_diff': sum(brisque_on[i]['brisque'] - brisque_off[i]['brisque'] for i in range(n)) / n,
@@ -326,6 +348,18 @@ eval_prompts = all_prompts
 if generate_dataset_limit_prompts is not None:
     eval_prompts = all_prompts[:generate_dataset_limit_prompts]
 
+def _assert_complete(per_pair: dict, receivers: list) -> None:
+    """Refuse to publish a per-pair file missing a receiver, a metric, or holding a non-finite value."""
+    expected = ['brisque_diff', 'clip_diff', 'rmse', 'ssim', 'dino_diff']
+    missing = [r for r in receivers if r not in per_pair]
+    bad = [(r, k) for r in receivers if r in per_pair for k in expected
+           if not isinstance(per_pair[r].get(k), (int, float)) or not math.isfinite(per_pair[r][k])]
+    if missing or bad:
+        raise ValueError(f"per-pair file incomplete: {len(missing)} receivers missing (first {missing[:3]}), "
+                         f"{len(bad)} missing or non-finite values (first {bad[:3]}); not uploaded")
+
+
+_failures: list = []
 for index in range(index_start, index_start + max_identities):
     target = metadata_filtered[index]['name']
     _entity_context = f'InterferencePerPair for {task}/{method}/{num_train_epochs}/index={index}'
@@ -353,6 +387,7 @@ for index in range(index_start, index_start + max_identities):
         artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
         artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
         base_folder=base_folder,
+        remote_repository_name=repository,
     )
     try:
         ds_entity.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
@@ -402,6 +437,11 @@ for index in range(index_start, index_start + max_identities):
             interference_per_pair[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
         print('-' * 50 + '\n' + '-' * 50)
         save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs, base_folder=base_folder)
+        if _args.upload:
+            _assert_complete(interference_per_pair, [m['name'] for m in metadata_filtered])
+            _local = get_interference_per_pair_path(task, index, method, num_train_epochs, base_folder=base_folder)
+            upload_file(_local, remote_path_of(_local, base_folder), repository, HF_TOKEN or None)
+            logger.info("Uploaded and checked by content: %s", _local)
     except Exception as _exc:
         logger.warning(
             "Measuring interferences failed for '%s' (index %d): %s. Skipping.",
@@ -412,6 +452,7 @@ for index in range(index_start, index_start + max_identities):
                 _entity_context, status='failed',
                 exception_type=type(_exc).__name__, message=str(_exc),
             )
+        _failures.append(index)
         continue
     if _ledger is not None:
         _ledger.record(_entity_context, status='ok')
@@ -424,3 +465,9 @@ for index in range(index_start, index_start + max_identities):
 if _ledger is not None:
     logger.info("Run ledger: %d records written to %s", _ledger.count, _ledger.path)
     _ledger.close()
+
+# Each failing emitter was logged and skipped so the others could run; the exit status still says
+# that the run did not deliver everything it was asked for.
+if _failures:
+    logger.error("%d emitters failed: %s", len(_failures), _failures)
+    sys.exit(1)

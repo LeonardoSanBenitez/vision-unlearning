@@ -13,7 +13,7 @@ import seaborn as sns
 from pydantic import BaseModel
 
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
+from vision_unlearning.artifact import ArtifactNotAvailableError, DEFAULT_REMOTE_REPOSITORY_NAME, SingleFileArtifact
 from vision_unlearning.benchmarks.care import MetricEffectPerEntity, MetricEffectPerEntityPair
 from vision_unlearning.datasets.testbed import get_metadata_filtered, get_generated_dataset_folder, get_generated_dataset_file, get_target_overwrite
 from vision_unlearning.integrations.huggingface import (
@@ -68,6 +68,7 @@ def get_interference_per_pair(
     max_identities: int = 100,
     base_folder: str = 'assets',
     model: type_model = 'sd1.4',
+    remote_repository_name: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> Dict[str, Dict[str, float]]:
     """Thin wrapper delegating to InterferencePerPair's local -> HuggingFace -> from-scratch
     cascade (see InterferencePerPair below), mirroring get_metadata_filtered's relationship
@@ -76,6 +77,7 @@ def get_interference_per_pair(
     return InterferencePerPair(
         task=cast(type_task, task), index=index, method=method, num_train_epochs=num_train_epochs,
         max_identities=max_identities, base_folder=base_folder, model=model,
+        remote_repository_name=remote_repository_name,
     ).compute()
 
 

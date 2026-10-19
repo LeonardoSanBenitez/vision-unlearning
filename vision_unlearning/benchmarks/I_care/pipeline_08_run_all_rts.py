@@ -66,6 +66,12 @@ logger = logging.getLogger(__name__)
 
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger, summarize  # noqa: E402
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME  # noqa: E402
+from vision_unlearning.benchmarks.I_care.upload import assert_upload_allowed  # noqa: E402
+
+# The repository every RT of this run reads its result from and, with --upload-if-recomputed,
+# writes it to. Set once from --repository in main(); every RT the runners build is pointed at it.
+_REPOSITORY: str = DEFAULT_REMOTE_REPOSITORY_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -166,16 +172,11 @@ def _should_skip(
     if os.path.exists(local):
         # Already local.  If upload_if_recomputed and not on HF yet, upload it.
         if upload_if_recomputed and remote not in hf_files:
-            from vision_unlearning.integrations.huggingface import huggingface_dataset_file_upload
+            from vision_unlearning.benchmarks.I_care.upload import upload_file
             hf_token = os.getenv("HF_TOKEN")
             if hf_token:
                 try:
-                    huggingface_dataset_file_upload(
-                        file_path=local,
-                        dataset_repository=rt.remote_repository_name,
-                        dataset_path=remote,
-                        token=hf_token,
-                    )
+                    upload_file(local, remote, rt.remote_repository_name, hf_token)
                     logger.info("Uploaded local-only result: %s", remote)
                 except Exception as exc:
                     logger.warning("Upload of %s failed: %s", remote, exc)
@@ -207,6 +208,7 @@ def _compute_and_report(
     ledger = _get_ledger()
     try:
         rt = rt_factory()
+        rt.remote_repository_name = _REPOSITORY
         if _should_skip(rt, hf_files, upload_if_recomputed):
             if ledger is not None:
                 ledger.record(error_context, status="skipped")
@@ -1062,7 +1064,16 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help=(
             "Upload each newly computed RT result to HuggingFace immediately. "
-            "Requires HF_TOKEN environment variable.  Default: off."
+            "Requires HF_TOKEN environment variable.  Default: off. Only the benchmark's "
+            "current corpus may be written to; any other --repository is refused at start-up."
+        ),
+    )
+    parser.add_argument(
+        "--repository",
+        default=DEFAULT_REMOTE_REPOSITORY_NAME,
+        help=(
+            "HuggingFace dataset repository RT results are read from, listed for "
+            f"--skip-if-on-hf and uploaded to (default: {DEFAULT_REMOTE_REPOSITORY_NAME})."
         ),
     )
     parser.add_argument(
@@ -1155,6 +1166,10 @@ def main() -> None:
     tasks: List[str] = args.tasks
     methods: List[str] = args.methods
     upload: bool = args.upload_if_recomputed
+    global _REPOSITORY
+    _REPOSITORY = args.repository
+    if upload:
+        assert_upload_allowed(_REPOSITORY)
 
     ledger: Optional[RunLedger] = None
     if args.action in ("run", "all") and not args.no_ledger:
@@ -1170,11 +1185,10 @@ def main() -> None:
         logger.info("Upload:      %s", upload)
 
         # List HF results tree once to avoid per-file HEAD requests
-        _HF_REPO = "LeonardoBenitez/VisionUnlearningEvaluationTestbeds"
         hf_files: FrozenSet[str] = frozenset()
         if args.skip_if_on_hf:
             hf_token = os.getenv("HF_TOKEN")
-            hf_files = list_hf_result_files(repository=_HF_REPO, token=hf_token)
+            hf_files = list_hf_result_files(repository=_REPOSITORY, token=hf_token)
 
         for rt_name in rt_names:
             logger.info("=== Starting: %s ===", rt_name)

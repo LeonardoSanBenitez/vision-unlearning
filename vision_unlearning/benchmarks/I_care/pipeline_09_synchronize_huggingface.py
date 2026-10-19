@@ -69,10 +69,8 @@ from vision_unlearning.datasets.testbed import (
     get_target_overwrite,
     get_unlearned_model_folder,
 )
-from vision_unlearning.integrations.huggingface import (
-    huggingface_dataset_file_upload,
-    huggingface_dataset_upload,
-)
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME
+from vision_unlearning.benchmarks.I_care.upload import assert_upload_allowed, upload_file, upload_folder
 from vision_unlearning.utils.mechanistic_interpretability import get_act_fingerprints_path
 
 logging.basicConfig(
@@ -83,7 +81,6 @@ logging.basicConfig(
 logger = logging.getLogger("synchronize_huggingface")
 
 
-HF_REPO = "LeonardoBenitez/VisionUnlearningEvaluationTestbeds"
 SD_MODEL = "sd1.4"
 GENERATE_DATASET_SEEDS = [42, 43, 44, 45]
 
@@ -398,6 +395,23 @@ def upload_with_retry(
     return last_error
 
 
+def _guarded_file_upload(file_path: str, dataset_repository: str, dataset_path: str, token: str) -> None:
+    """Upload one file through the benchmark's guarded, content-checked helper."""
+    upload_file(file_path, dataset_path, dataset_repository, token)
+
+
+def _guarded_folder_upload(
+    folder_datasets: str, dataset_repository: str, dataset_config: str, token: str, path_in_repo: str,
+) -> None:
+    """Upload every file of a local folder through the guarded, content-checked helper."""
+    folder = os.path.join(folder_datasets, dataset_config)
+    names = sorted(
+        os.path.relpath(os.path.join(root, name), folder)
+        for root, _, files in os.walk(folder) for name in files
+    )
+    upload_folder(folder, path_in_repo, dataset_repository, token, expected_files=names)
+
+
 def synchronize(
     items: List[SyncItem],
     snapshot: RemoteSnapshot,
@@ -407,8 +421,8 @@ def synchronize(
     base_folder: str,
     max_retries: int,
     retry_base_seconds: float,
-    upload_file_fn: Callable[..., None] = huggingface_dataset_file_upload,
-    upload_folder_fn: Callable[..., None] = huggingface_dataset_upload,
+    upload_file_fn: Callable[..., None] = _guarded_file_upload,
+    upload_folder_fn: Callable[..., None] = _guarded_folder_upload,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> None:
     """Upload every item that is local-only (present locally, absent remotely).
@@ -523,7 +537,10 @@ if __name__ == "__main__":
     parser.add_argument("--status-path", default=None,
                         help="Where to write the JSON status report "
                              "(default: '{base_folder}/hf_sync_status.json').")
-    parser.add_argument("--repository", default=HF_REPO)
+    parser.add_argument("--repository", default=DEFAULT_REMOTE_REPOSITORY_NAME,
+                        help="HuggingFace dataset repository to compare with and, unless --no-upload, "
+                             "upload to. Uploads are refused for every repository but the benchmark's "
+                             f"current corpus (default: {DEFAULT_REMOTE_REPOSITORY_NAME}).")
     parser.add_argument("--max-retries", type=int, default=5,
                         help="Upload retry attempts per item (exponential backoff).")
     parser.add_argument("--retry-base-seconds", type=float, default=60.0,
@@ -534,6 +551,10 @@ if __name__ == "__main__":
 
     stages: List[str] = STAGES if "all" in args.stages else args.stages
     upload: bool = not args.no_upload
+    if upload:
+        # Before the token lookup and the listing: an upload run aimed at a forbidden repository
+        # stops here.
+        assert_upload_allowed(args.repository)
     # The status report defaults inside the chosen base folder so nothing is written
     # outside it when --base-folder is overridden; an explicit --status-path still wins.
     status_path: str = args.status_path or os.path.join(args.base_folder, "hf_sync_status.json")

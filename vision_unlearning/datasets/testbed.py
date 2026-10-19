@@ -7,7 +7,7 @@ import os
 from pydantic import BaseModel, model_validator, PrivateAttr
 
 from vision_unlearning.utils.logger import get_logger
-from vision_unlearning.artifact import Artifact, ArtifactNotAvailableError, SingleFileArtifact
+from vision_unlearning.artifact import Artifact, ArtifactNotAvailableError, DEFAULT_REMOTE_REPOSITORY_NAME, SingleFileArtifact
 from vision_unlearning.datasets.entity_names import canonical_entity, substitute_concept
 
 
@@ -115,9 +115,10 @@ class MetadataFiltered(SingleFileArtifact):
 
 def get_metadata_filtered(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
-    base_folder: str = 'assets'
+    base_folder: str = 'assets',
+    remote_repository_name: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> List[Dict[str, Any]]:
-    return MetadataFiltered(task=task, base_folder=base_folder).compute()
+    return MetadataFiltered(task=task, base_folder=base_folder, remote_repository_name=remote_repository_name).compute()
 
 
 def save_metadata_filtered(
