@@ -133,3 +133,24 @@ class TestTheTwoWritersAgree:
         )
 
         assert batched == unbatched
+
+
+class TestAShortSessionIsRefused:
+    """Fails on the code before: a missing image was skipped with a warning, so a session file of
+    399 records was written and read everywhere as if it held 400."""
+
+    @pytest.mark.parametrize("writer", ["unbatched", "batched"])
+    def test_a_folder_missing_one_image_raises(self, tmp_path: Any, writer: str) -> None:
+        from vision_unlearning.datasets.testbed import get_generated_dataset_file
+
+        prompts = _prompts("scenes")
+        folder = str(tmp_path / "images")
+        _write_images(folder, prompts, {prompts[0]: (3, 4), prompts[1]: (5, 6)})
+        os.remove(os.path.join(folder, get_generated_dataset_file("on", _SEEDS[1], prompts[0])))
+        common = dict(dataset_folder=folder, seeds=_SEEDS, prompts=prompts, metadata_filtered=_metadata(),
+                      lora_state="on", task="scenes")
+        with pytest.raises(FileNotFoundError, match="1 of the 4 images"):
+            if writer == "unbatched":
+                emb.embed_forgetting_session(embed_image_fn=_embed_from_size, **common)  # type: ignore[arg-type]
+            else:
+                emb.embed_forgetting_session_batched(model=None, transform=None, device="cpu", **common)  # type: ignore[arg-type]

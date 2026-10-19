@@ -107,6 +107,23 @@ def embed_image_with_dino(
     return feat.squeeze().tolist()  # type: ignore[attr-defined]
 
 
+def _raise_on_missing_images(
+    dataset_folder: str, seeds: List[int], prompts: List[str], lora_state: Literal["on", "off"],
+) -> None:
+    """Raise FileNotFoundError naming every expected image of the session that is absent."""
+    from vision_unlearning.datasets.testbed import get_generated_dataset_file
+    missing = [
+        os.path.join(dataset_folder, get_generated_dataset_file(lora_state, seed, prompt))
+        for seed in seeds for prompt in prompts
+        if not os.path.exists(os.path.join(dataset_folder, get_generated_dataset_file(lora_state, seed, prompt)))
+    ]
+    if missing:
+        raise FileNotFoundError(
+            f"{len(missing)} of the {len(seeds) * len(prompts)} images this session must embed are "
+            f"missing (first: {missing[:3]}); refusing to write a short embedding file."
+        )
+
+
 def embed_forgetting_session(
     dataset_folder: str,
     seeds: List[int],
@@ -119,7 +136,9 @@ def embed_forgetting_session(
     """Embed all images from one forgetting session (entity or baseline).
 
     Iterates over all (seed, prompt) combinations and embeds each matching image.
-    Images that do not exist on disk are skipped with a warning.
+    Raises FileNotFoundError, naming the missing files, if any expected image is absent:
+    a session file with fewer records than images is a different quantity under the same
+    name, and every reader would take it as complete.
 
     Args:
         dataset_folder: Local directory containing the generated images.
@@ -153,15 +172,13 @@ def embed_forgetting_session(
             "(partially applied with model/transform/device) or a test stub."
         )
 
+    _raise_on_missing_images(dataset_folder, seeds, prompts, lora_state)
     records: List[Dict[str, Any]] = []
     for seed in seeds:
         for i, prompt in enumerate(prompts):
             prompted_entity = canonical_entity(cast(type_entity_task, task), metadata_filtered[i]["name"])
             filename = get_generated_dataset_file(lora_state, seed, prompt)
             image_path = os.path.join(dataset_folder, filename)
-            if not os.path.exists(image_path):
-                logger.warning("Image not found, skipping: %s", image_path)
-                continue
             embedding = embed_image_fn(image_path)
             records.append(
                 {
@@ -214,15 +231,13 @@ def embed_forgetting_session_batched(
     from vision_unlearning.datasets.testbed import get_generated_dataset_file
 
     # Collect all (image_path, metadata) tuples
+    _raise_on_missing_images(dataset_folder, seeds, prompts, lora_state)
     items: List[Dict[str, Any]] = []
     for seed in seeds:
         for i, prompt in enumerate(prompts):
             prompted_entity = canonical_entity(cast(type_entity_task, task), metadata_filtered[i]["name"])
             filename = get_generated_dataset_file(lora_state, seed, prompt)
             image_path = os.path.join(dataset_folder, filename)
-            if not os.path.exists(image_path):
-                logger.warning("Image not found, skipping: %s", image_path)
-                continue
             items.append(
                 {
                     "image_path": image_path,
