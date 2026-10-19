@@ -52,7 +52,7 @@ _parser.add_argument("--ledger-path", default="",
                           "not a paper artifact). Default (empty): '{base_folder}/logs/pipeline_06_ledger.jsonl'.")
 _parser.add_argument("--no-ledger", action="store_true", default=False,
                      help="Disable writing the run ledger for this invocation.")
-_args, _unknown = _parser.parse_known_args()
+_args = _parser.parse_args()
 
 # Load HF_TOKEN (needed for download; safe to skip if datasets are already local)
 try:

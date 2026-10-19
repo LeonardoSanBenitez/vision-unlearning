@@ -92,7 +92,12 @@ def test_the_orchestrator_actually_varies_the_unlearning_combination() -> None:
     )
 
 
-@pytest.mark.parametrize('script_name', ['pipeline_03_unlearn_model.py'])
+def _pipeline_scripts() -> list:
+    folder = _repo_root() / 'vision_unlearning' / 'benchmarks' / 'I_care'
+    return sorted(path.name for path in folder.glob('pipeline_*.py'))
+
+
+@pytest.mark.parametrize('script_name', _pipeline_scripts())
 def test_pipeline_parses_strictly(script_name: str) -> None:
     """`parse_known_args` makes a typo, a renamed flag and a missing flag look identical.
 
@@ -175,3 +180,20 @@ def test_the_generation_route_is_chosen_from_the_declared_artifact_kind() -> Non
         'Derive it from ALGORITHM_REGISTRY[method].artifact_kind so a method added later is routed '
         'by what it writes.'
     )
+
+
+def _commands(script: str) -> list:
+    """The orchestrator's lines that run something: not blank, not a comment, not the shebang."""
+    return [line.strip() for line in script.splitlines() if line.strip() and not line.strip().startswith('#')]
+
+
+def test_the_orchestrator_stops_at_the_first_failure() -> None:
+    """Fails on the code before: with no ``set -e`` a failing stage was walked past, and nine
+    consecutive invocations that exited 2 reached the end of the script looking successful."""
+    assert _commands(_read(ORCHESTRATOR))[0] == 'set -euo pipefail'
+
+
+def test_the_orchestrator_types_no_epoch_count() -> None:
+    """Every epoch count comes from configuration.py; fails on the code before, which typed 39."""
+    typed = re.findall(r'--(?:num-train-epochs|epochs)\s+\d', _read(ORCHESTRATOR))
+    assert not typed, f'{ORCHESTRATOR} types epoch counts by hand: {typed[:3]}'

@@ -1,9 +1,22 @@
+#!/usr/bin/env bash
 # Run the full I-CARE pipeline end-to-end.
 # All scripts are idempotent: re-running skips already-completed steps.
-# Parameters must be consistent with configuration.py.
 # Total compute: >1000 GPU-hours; meant as a reference, not a single run.
-clear
-cd vision-unlearning/vision_unlearning/benchmarks/I_care
+#
+# It stops at the first failing command (set -euo pipefail), so a stage that fails cannot be walked
+# past to an end that looks successful. Every epoch count is read from configuration.py, which is the
+# single record of what each method is trained with, rather than typed here a second time.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+cd "$HERE"
+
+# The epoch count of one (task, method), from configuration.unlearning_algorithm_to_epochs.
+epochs() {
+    python -c "from vision_unlearning.benchmarks.I_care.configuration import unlearning_algorithm_to_epochs as e; print(e['$1']['$2'])"
+}
 
 # pipeline_01 is a Jupyter notebook (.ipynb) — execute with:
 #   jupyter nbconvert --to notebook --execute pipeline_01_get_data.ipynb
@@ -22,15 +35,15 @@ python pipeline_02_compute_similarities.py --task people --similarity jacc
 python pipeline_02_compute_similarities.py --task people --similarity dino
 python pipeline_02_compute_similarities.py --task people --similarity act
 
-python pipeline_03_unlearn_model.py --task breeds --method uce --num-train-epochs 0
-python pipeline_03_unlearn_model.py --task breeds --method munba --num-train-epochs 50
-python pipeline_03_unlearn_model.py --task breeds --method distil --num-train-epochs 100
-python pipeline_03_unlearn_model.py --task scenes --method uce --num-train-epochs 0
-python pipeline_03_unlearn_model.py --task scenes --method munba --num-train-epochs 100
-python pipeline_03_unlearn_model.py --task scenes --method distil --num-train-epochs 100
-python pipeline_03_unlearn_model.py --task people --method uce --num-train-epochs 0
-python pipeline_03_unlearn_model.py --task people --method munba --num-train-epochs 200
-python pipeline_03_unlearn_model.py --task people --method distil --num-train-epochs 400
+python pipeline_03_unlearn_model.py --task breeds --method uce --num-train-epochs "$(epochs breeds uce)"
+python pipeline_03_unlearn_model.py --task breeds --method munba --num-train-epochs "$(epochs breeds munba)"
+python pipeline_03_unlearn_model.py --task breeds --method distil --num-train-epochs "$(epochs breeds distil)"
+python pipeline_03_unlearn_model.py --task scenes --method uce --num-train-epochs "$(epochs scenes uce)"
+python pipeline_03_unlearn_model.py --task scenes --method munba --num-train-epochs "$(epochs scenes munba)"
+python pipeline_03_unlearn_model.py --task scenes --method distil --num-train-epochs "$(epochs scenes distil)"
+python pipeline_03_unlearn_model.py --task people --method uce --num-train-epochs "$(epochs people uce)"
+python pipeline_03_unlearn_model.py --task people --method munba --num-train-epochs "$(epochs people munba)"
+python pipeline_03_unlearn_model.py --task people --method distil --num-train-epochs "$(epochs people distil)"
 
 # Baseline dataset (method-agnostic; run once per task before the per-method runs)
 python pipeline_04_generate_dataset.py --task breeds --baseline
@@ -38,40 +51,40 @@ python pipeline_04_generate_dataset.py --task scenes --baseline
 python pipeline_04_generate_dataset.py --task people --baseline
 
 # Per-method generated datasets (unlearned model → LoRA-ON + LoRA-OFF images)
-python pipeline_04_generate_dataset.py --task breeds --method uce --num-train-epochs 0
-python pipeline_04_generate_dataset.py --task breeds --method munba --num-train-epochs 50
-python pipeline_04_generate_dataset.py --task breeds --method distil --num-train-epochs 100
-python pipeline_04_generate_dataset.py --task scenes --method uce --num-train-epochs 0
-python pipeline_04_generate_dataset.py --task scenes --method munba --num-train-epochs 100
-python pipeline_04_generate_dataset.py --task scenes --method distil --num-train-epochs 100
-python pipeline_04_generate_dataset.py --task people --method uce --num-train-epochs 0
-python pipeline_04_generate_dataset.py --task people --method munba --num-train-epochs 200
-python pipeline_04_generate_dataset.py --task people --method distil --num-train-epochs 400
+python pipeline_04_generate_dataset.py --task breeds --method uce --num-train-epochs "$(epochs breeds uce)"
+python pipeline_04_generate_dataset.py --task breeds --method munba --num-train-epochs "$(epochs breeds munba)"
+python pipeline_04_generate_dataset.py --task breeds --method distil --num-train-epochs "$(epochs breeds distil)"
+python pipeline_04_generate_dataset.py --task scenes --method uce --num-train-epochs "$(epochs scenes uce)"
+python pipeline_04_generate_dataset.py --task scenes --method munba --num-train-epochs "$(epochs scenes munba)"
+python pipeline_04_generate_dataset.py --task scenes --method distil --num-train-epochs "$(epochs scenes distil)"
+python pipeline_04_generate_dataset.py --task people --method uce --num-train-epochs "$(epochs people uce)"
+python pipeline_04_generate_dataset.py --task people --method munba --num-train-epochs "$(epochs people munba)"
+python pipeline_04_generate_dataset.py --task people --method distil --num-train-epochs "$(epochs people distil)"
 
-python pipeline_05_compute_embeddings.py --task breeds --method uce --num-train-epochs 0
-python pipeline_05_compute_embeddings.py --task breeds --method munba --num-train-epochs 50
-python pipeline_05_compute_embeddings.py --task breeds --method distil --num-train-epochs 100
-python pipeline_05_compute_embeddings.py --task scenes --method uce --num-train-epochs 0
-python pipeline_05_compute_embeddings.py --task scenes --method munba --num-train-epochs 100
-python pipeline_05_compute_embeddings.py --task scenes --method distil --num-train-epochs 100
-python pipeline_05_compute_embeddings.py --task people --method uce --num-train-epochs 0
-python pipeline_05_compute_embeddings.py --task people --method munba --num-train-epochs 200
-python pipeline_05_compute_embeddings.py --task people --method distil --num-train-epochs 400
+python pipeline_05_compute_embeddings.py --task breeds --method uce --num-train-epochs "$(epochs breeds uce)"
+python pipeline_05_compute_embeddings.py --task breeds --method munba --num-train-epochs "$(epochs breeds munba)"
+python pipeline_05_compute_embeddings.py --task breeds --method distil --num-train-epochs "$(epochs breeds distil)"
+python pipeline_05_compute_embeddings.py --task scenes --method uce --num-train-epochs "$(epochs scenes uce)"
+python pipeline_05_compute_embeddings.py --task scenes --method munba --num-train-epochs "$(epochs scenes munba)"
+python pipeline_05_compute_embeddings.py --task scenes --method distil --num-train-epochs "$(epochs scenes distil)"
+python pipeline_05_compute_embeddings.py --task people --method uce --num-train-epochs "$(epochs people uce)"
+python pipeline_05_compute_embeddings.py --task people --method munba --num-train-epochs "$(epochs people munba)"
+python pipeline_05_compute_embeddings.py --task people --method distil --num-train-epochs "$(epochs people distil)"
 
-python pipeline_06_compute_interference_per_pair.py --task breeds --method uce --num-train-epochs 0
-python pipeline_06_compute_interference_per_pair.py --task breeds --method munba --num-train-epochs 50
-python pipeline_06_compute_interference_per_pair.py --task breeds --method distil --num-train-epochs 100
-python pipeline_06_compute_interference_per_pair.py --task scenes --method uce --num-train-epochs 0
-python pipeline_06_compute_interference_per_pair.py --task scenes --method munba --num-train-epochs 100
-python pipeline_06_compute_interference_per_pair.py --task scenes --method distil --num-train-epochs 100
-python pipeline_06_compute_interference_per_pair.py --task people --method uce --num-train-epochs 0
-python pipeline_06_compute_interference_per_pair.py --task people --method munba --num-train-epochs 200
-python pipeline_06_compute_interference_per_pair.py --task people --method distil --num-train-epochs 400
+python pipeline_06_compute_interference_per_pair.py --task breeds --method uce --num-train-epochs "$(epochs breeds uce)"
+python pipeline_06_compute_interference_per_pair.py --task breeds --method munba --num-train-epochs "$(epochs breeds munba)"
+python pipeline_06_compute_interference_per_pair.py --task breeds --method distil --num-train-epochs "$(epochs breeds distil)"
+python pipeline_06_compute_interference_per_pair.py --task scenes --method uce --num-train-epochs "$(epochs scenes uce)"
+python pipeline_06_compute_interference_per_pair.py --task scenes --method munba --num-train-epochs "$(epochs scenes munba)"
+python pipeline_06_compute_interference_per_pair.py --task scenes --method distil --num-train-epochs "$(epochs scenes distil)"
+python pipeline_06_compute_interference_per_pair.py --task people --method uce --num-train-epochs "$(epochs people uce)"
+python pipeline_06_compute_interference_per_pair.py --task people --method munba --num-train-epochs "$(epochs people munba)"
+python pipeline_06_compute_interference_per_pair.py --task people --method distil --num-train-epochs "$(epochs people distil)"
 
 
-python pipeline_07_compute_interference_per_entity.py --task breeds --methods uce munba distil --epochs 0 50 100
-python pipeline_07_compute_interference_per_entity.py --task scenes --methods uce munba distil --epochs 0 100 100
-python pipeline_07_compute_interference_per_entity.py --task people --methods uce munba distil --epochs 0 200 400
+python pipeline_07_compute_interference_per_entity.py --task breeds --methods uce munba distil --epochs "$(epochs breeds uce)" "$(epochs breeds munba)" "$(epochs breeds distil)"
+python pipeline_07_compute_interference_per_entity.py --task scenes --methods uce munba distil --epochs "$(epochs scenes uce)" "$(epochs scenes munba)" "$(epochs scenes distil)"
+python pipeline_07_compute_interference_per_entity.py --task people --methods uce munba distil --epochs "$(epochs people uce)" "$(epochs people munba)" "$(epochs people distil)"
 
 python pipeline_08_run_all_rts.py --rts MetricMetricAlignment MetricSimilarityAlignment InterferenceMatrix SimilarityMatrix SignificantRelationship CountSignificantRelationship MethodComparisonByMetricEntity ImplicitAssociationTest 
 
