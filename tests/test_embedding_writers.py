@@ -143,6 +143,8 @@ class TestAShortSessionIsRefused:
     def test_a_folder_missing_one_image_raises(self, tmp_path: Any, writer: str) -> None:
         from vision_unlearning.datasets.testbed import get_generated_dataset_file
 
+        if writer == "batched":
+            pytest.importorskip("torch")  # the batched writer imports torch before it reads a file
         prompts = _prompts("scenes")
         folder = str(tmp_path / "images")
         _write_images(folder, prompts, {prompts[0]: (3, 4), prompts[1]: (5, 6)})
