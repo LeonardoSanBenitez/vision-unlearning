@@ -99,5 +99,7 @@ def test_score_batch_mixed_inputs():
 def test_a_batch_scores_each_image_exactly_as_alone():
     """Fails on the code before: the stacked batch differed from single-image scores by up to 0.0025."""
     metric = MetricQuality()
-    a, b = Image.fromarray(random_image()), Image.fromarray(random_image())
+    # At 256 pixels and above the stacked call drifts; at 64 it happens to agree.
+    rng = np.random.default_rng(0)
+    a, b = (Image.fromarray(rng.integers(0, 256, (256, 256, 3), dtype=np.uint8)) for _ in range(2))
     assert metric.score_batch([a, b]) == [metric.score(a), metric.score(b)]
