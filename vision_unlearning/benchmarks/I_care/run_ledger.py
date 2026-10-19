@@ -1,4 +1,4 @@
-"""Append-only execution ledger for ``pipeline_08_run_all_rts.py``.
+"""Append-only execution ledgers: ``pipeline_08_run_all_rts.py``'s, and a campaign's.
 
 Every attempted Result Template computation (skipped / succeeded / failed) is written as
 one JSON line, immediately, to a local log file. This is a debugging and traceability aid
@@ -6,6 +6,15 @@ only: it records what a run actually did, and why a given attempt failed, which 
 otherwise only visible in transient stdout / process logs. It is not a Result Template, it
 produces no data any RT reads, and it is not one of the artifacts described in the paper --
 see the module docstring of ``pipeline_08_run_all_rts.py`` for the actual RT catalogue.
+
+The same append-only mechanism records a data-producing campaign: each attempt of each session is
+one line whose ``fields`` hold what makes it checkable -- the session key, the attempt number, the
+commit and the hashes of the run's ``pins.json`` and environment freeze, the card, the digests of
+the outputs it wrote, its counts and pairing verdict, and whether it was a calibration run. Failed
+attempts stay in the file; an attempt whose output was later replaced is marked by a ``superseded``
+record, never deleted. :func:`check` reads such a ledger and reports everything that would make the
+campaign's record untrustworthy; ``python -m vision_unlearning.benchmarks.I_care.run_ledger check
+--help`` runs it.
 """
 from __future__ import annotations
 
@@ -14,7 +23,10 @@ import os
 import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from typing import DefaultDict, Dict, Optional, TextIO
+import argparse
+import hashlib
+import sys
+from typing import Any, DefaultDict, Dict, Iterable, List, Optional, TextIO
 
 
 def get_commit_sha(repo_dir: Optional[str] = None) -> str:
@@ -63,6 +75,7 @@ class RunLedger:
         status: str,
         exception_type: Optional[str] = None,
         message: Optional[str] = None,
+        fields: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Write one ledger line.
 
@@ -70,11 +83,14 @@ class RunLedger:
             context: human-readable description of what was attempted -- the Result
                 Template name followed by " for " and its parameters, e.g.
                 "MetricMetricAlignment for sd1.4/people/distil/clip_diff/rmse".
-            status: one of "ok", "skipped", "failed".
+            status: one of "ok", "skipped", "failed", and for a campaign also "superseded" and
+                "drift".
             exception_type: exception class name; only set when ``status == "failed"``.
             message: exception message; only set when ``status == "failed"``.
+            fields: structured fields of a campaign record (see :func:`check`); written under
+                ``"fields"`` only when given, so a record without them is exactly as before.
         """
-        record = {
+        record: Dict[str, Any] = {
             "context": context,
             "status": status,
             "exception_type": exception_type,
@@ -82,6 +98,8 @@ class RunLedger:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "commit_sha": self._commit_sha,
         }
+        if fields is not None:
+            record["fields"] = fields
         self._file.write(json.dumps(record) + "\n")
         self._file.flush()
         self._count += 1
@@ -148,3 +166,126 @@ def summarize(ledger_path: str) -> str:
             lines.append(f"  {count:>4}x  {reason}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# The campaign check
+# ---------------------------------------------------------------------------
+
+def _sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_records(ledger_path: str) -> List[Dict[str, Any]]:
+    """Every record of a ledger, in file order."""
+    with open(ledger_path, "r", encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def check(
+    ledger_path: str,
+    expected_sessions: Iterable[str],
+    base_folder: Optional[str] = None,
+) -> List[str]:
+    """Every reason a campaign ledger cannot be trusted; an empty list means it can.
+
+    A campaign record is one with ``fields``; ``fields["session"]`` names its session and
+    ``fields["attempt"]`` numbers its attempt. Reported:
+
+    * **an expected session with no live ok attempt** -- live meaning not superseded;
+    * **two live ok attempts of one session whose output digests differ** -- a session ran twice and
+      the record does not say which output stands; supersede one;
+    * **a live ok output that no longer matches its digest**, when `base_folder` is given:
+      ``fields["outputs"]`` maps paths relative to it to sha256, and every file is re-hashed;
+    * **a live ok attempt whose commit, pins.json hash or freeze hash differs** from the campaign's
+      first live ok attempt without a ``drift`` record admitting it. A drift record's fields hold the
+      ``"commit"``, ``"pins_sha256"`` and ``"freeze_sha256"`` it admits, and the reason.
+
+    A ``superseded`` record's ``fields["supersedes"]`` is the attempt it retires, of the same
+    session.
+    """
+    records = [r for r in read_records(ledger_path) if "fields" in r]
+    problems: List[str] = []
+    retired = {
+        (r["fields"]["session"], r["fields"]["supersedes"])
+        for r in records if r["status"] == "superseded"
+    }
+    admitted: Dict[str, set] = {"commit": set(), "pins_sha256": set(), "freeze_sha256": set()}
+    for r in records:
+        if r["status"] == "drift":
+            for key in admitted:
+                if r["fields"].get(key) is not None:
+                    admitted[key].add(r["fields"][key])
+
+    live: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in records:
+        f = r["fields"]
+        if r["status"] == "ok" and (f["session"], f["attempt"]) not in retired:
+            live[f["session"]].append(r)
+
+    for session in expected_sessions:
+        if not live.get(session):
+            problems.append(f"missing: {session} has no live ok attempt")
+
+    reference: Optional[Dict[str, Any]] = None
+    for session, attempts in sorted(live.items()):
+        digests = {json.dumps(a["fields"].get("outputs", {}), sort_keys=True) for a in attempts}
+        if len(digests) > 1:
+            numbers = [a["fields"]["attempt"] for a in attempts]
+            problems.append(f"duplicate: {session} has {len(attempts)} live ok attempts {numbers} with different outputs")
+        for attempt in attempts:
+            f = attempt["fields"]
+            if reference is None:
+                reference = f
+            for key in ("commit", "pins_sha256", "freeze_sha256"):
+                if f.get(key) != reference.get(key) and f.get(key) not in admitted[key]:
+                    problems.append(
+                        f"drift: {session} attempt {f['attempt']} ran with {key} {f.get(key)} against the "
+                        f"campaign's {reference.get(key)}, and no drift record admits it"
+                    )
+            if base_folder is not None:
+                for relative, expected in sorted(f.get("outputs", {}).items()):
+                    path = os.path.join(base_folder, relative)
+                    if not os.path.isfile(path):
+                        problems.append(f"stale: {session} attempt {f['attempt']} output {relative} is gone")
+                    elif _sha256(path) != expected:
+                        problems.append(f"stale: {session} attempt {f['attempt']} output {relative} no longer matches its digest")
+    return problems
+
+
+def _main(argv: Optional[List[str]] = None) -> int:
+    description = (
+        "check: read a campaign ledger and report every reason its record cannot be trusted -- a "
+        "missing expected session, a session with two live ok attempts whose outputs differ, an "
+        "output that no longer matches its recorded sha256, or an attempt run at another commit or "
+        "with other pinned inputs than the campaign's without a drift record. Prints one line per "
+        "problem, then a one-line summary. Exit status: 0 nothing found, 1 problems found, 2 bad "
+        "arguments."
+    )
+    parser = argparse.ArgumentParser(prog="python -m vision_unlearning.benchmarks.I_care.run_ledger", description=description)
+    sub = parser.add_subparsers(dest="command", required=True)
+    run = sub.add_parser("check", help="check a campaign ledger", description=description)
+    run.add_argument("--ledger", required=True, help="the ledger file (JSON lines)")
+    run.add_argument("--expected", required=True,
+                     help="a file with one expected session key per line, spelled as fields['session'] is")
+    run.add_argument("--base-folder", default=None,
+                     help="re-hash every live ok output below this folder; omitted, outputs are not re-hashed")
+    args = parser.parse_args(argv)
+    with open(args.expected, encoding="utf-8") as handle:
+        expected = [line.strip() for line in handle if line.strip()]
+    problems = check(args.ledger, expected, args.base_folder)
+    for problem in problems:
+        print(problem)
+    records = [r for r in read_records(args.ledger) if "fields" in r]
+    statuses = Counter(r["status"] for r in records)
+    print(f"{len(records)} campaign records {dict(sorted(statuses.items()))}; {len(expected)} expected sessions; "
+          f"{len(problems)} problems")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main())
