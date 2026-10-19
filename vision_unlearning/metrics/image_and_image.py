@@ -1,6 +1,8 @@
+import inspect
 from typing import List, Literal, Dict, Optional, Union
 from PIL import Image
-from image_similarity_measures.evaluate import evaluation
+from image_similarity_measures.evaluate import read_image
+from image_similarity_measures.quality_metrics import metric_functions
 import lpips
 from torchvision import transforms
 from vision_unlearning.metrics.base import Metric
@@ -27,6 +29,12 @@ class MetricImageImage(Metric):
             "lpips_vgg",
         ]
     ]
+    # The largest pixel value of the images, which `rmse`, `psnr` and `ssim` normalise by. None (the
+    # default) keeps the underlying library's default of 4095, the maximum of 12-bit imagery. For
+    # ordinary 8-bit images pass 255: with 4095 every difference is divided by a range sixteen times
+    # wider than the data can span, so `rmse` and `psnr` are off by a constant factor and `ssim`'s
+    # stabilising constants, which scale with the range, swamp the structure it measures.
+    max_pixel_value: Optional[int] = None
 
     def model_post_init(self, __context: Optional[dict] = None) -> None:
         # initialize LPIPS if requested
@@ -75,7 +83,16 @@ class MetricImageImage(Metric):
             metrics_remaining.remove("lpips_vgg")
 
         if len(metrics_remaining) > 0:
-            distances.update(evaluation(org_img_path, pred_img_path, metrics_remaining))
+            org_img = read_image(org_img_path)
+            pred_img = read_image(pred_img_path)
+            for metric in metrics_remaining:
+                function = metric_functions[metric]
+                scale = (
+                    {"max_p": self.max_pixel_value}
+                    if self.max_pixel_value is not None and "max_p" in inspect.signature(function).parameters
+                    else {}
+                )
+                distances[metric] = float(function(org_img, pred_img, **scale))
 
         assert len(distances) == len(self.metrics)
         return {k: float(v) for k, v in distances.items()}

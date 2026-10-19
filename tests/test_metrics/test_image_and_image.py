@@ -127,3 +127,23 @@ def test_score_batch_from_file_and_array():
                 assert isinstance(score[k], float)
     finally:
         os.unlink(tmp)
+
+
+# ---------------------------------------------------------------------------
+# The pixel range rmse and ssim normalise by. This fails on the code before the change, which always
+# used the underlying library's 12-bit default of 4095 and so reported a full black-to-white
+# difference on 8-bit images as 255 / 4095 = 0.0623.
+# ---------------------------------------------------------------------------
+
+def test_a_full_scale_difference_is_one_on_the_eight_bit_scale():
+    black = Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8))
+    white = Image.fromarray(np.full((16, 16, 3), 255, dtype=np.uint8))
+    eight_bit = MetricImageImage(metrics=['rmse', 'ssim'], max_pixel_value=255).score(black, white)
+    assert eight_bit['rmse'] == pytest.approx(1.0)
+    assert eight_bit['ssim'] == pytest.approx(0.0, abs=1e-3)
+
+
+def test_the_default_keeps_the_library_scale():
+    black = Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8))
+    white = Image.fromarray(np.full((16, 16, 3), 255, dtype=np.uint8))
+    assert MetricImageImage(metrics=['rmse']).score(black, white)['rmse'] == pytest.approx(255 / 4095, rel=1e-5)

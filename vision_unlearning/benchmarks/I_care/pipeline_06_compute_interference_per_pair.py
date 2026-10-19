@@ -205,7 +205,8 @@ logger.info("Shared baseline ready: %s", _baseline_ds.folder_path)
 
 metric_quality = MetricQuality()
 metric_clip = MetricImageTextSimilarity(metrics=['clip'])
-metric_image_difference = MetricImageImage(metrics=['rmse', 'ssim'])  # type: ignore[call-arg]
+# The benchmark's images are 8-bit PNGs, so the pixel range is 255, not the library default of 4095.
+metric_image_difference = MetricImageImage(metrics=['rmse', 'ssim'], max_pixel_value=255)  # type: ignore[call-arg]
 
 # DINOv2 model for dino_diff computation.  Loading once at script start adds ~100 MB VRAM
 # and a few seconds; negligible vs the SD pipeline already loaded during generation.
