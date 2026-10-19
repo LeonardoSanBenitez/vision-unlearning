@@ -192,3 +192,25 @@ def scheduler_identity(pipeline: Any) -> Tuple[str, Dict[str, Any]]:
     import json
     config = json.loads(json.dumps(dict(pipeline.scheduler.config), default=str))
     return type(pipeline.scheduler).__name__, scheduler_parameters(config)
+
+
+def capture_pairing_record(
+    pipeline: Any,
+    latent_hashes: Dict[int, Dict[int, str]],
+    call_kwargs: Dict[str, Any],
+    batch_size: int,
+) -> Dict[str, Any]:
+    '''The pairing record of a capture: a pass that ran the pipeline from per-image initial latents
+    and kept something other than images (final latents, activations).
+
+    `latent_hashes` is ``{prompt index: {seed: hash}}`` as the capture recorded it; every key gets
+    ``file_name`` None, there being no file. `call_kwargs` are the arguments the capture passed the
+    pipeline besides the prompts and the latents (its step count, at least).
+    '''
+    keys = [
+        {'prompt_index': int(index), 'seed': int(seed), 'file_name': None, 'initial_latent_sha256': latent_hash}
+        for index, by_seed in sorted(latent_hashes.items()) for seed, latent_hash in sorted(by_seed.items())
+    ]
+    scheduler_class, scheduler_config = scheduler_identity(pipeline)
+    return pairing_record(keys, scheduler_class, scheduler_config,
+                          effective_generation_kwargs(pipeline, call_kwargs, batch_size))

@@ -326,6 +326,7 @@ def save_act_fingerprints(
     batch_size: Optional[int] = None,
     entity_prompts: Optional[Dict[str, str]] = None,
     initial_latent_sha256: Optional[Dict[str, Dict[str, str]]] = None,
+    pairing: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Save entity activation fingerprints to disk.
@@ -346,6 +347,9 @@ def save_act_fingerprints(
     @param initial_latent_sha256: ``{entity: {seed: hash}}`` of the initial latents the pipeline was
         handed, recorded when given. With the three above it is what lets a reader check, key by
         key, that the capture started from the same noise as the images it is compared with.
+    @param pairing: the capture's pairing record (`vision_unlearning.utils.noise.capture_pairing_record`),
+        recorded when given; `vision_unlearning.benchmarks.I_care.pairing.check` certifies it against the
+        task baseline's with the class ``'act'``.
     @return: Path to the saved JSON file.
     """
     output_path = get_act_fingerprints_path(task, model, base_folder)
@@ -380,6 +384,7 @@ def save_act_fingerprints(
         "batch_size": batch_size,
         "entity_prompts": entity_prompts,
         "initial_latent_sha256": initial_latent_sha256,
+        "pairing": pairing,
     }
     output["metadata"].update({key: value for key, value in capture_record.items() if value is not None})
 

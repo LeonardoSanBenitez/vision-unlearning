@@ -214,6 +214,7 @@ def run_act(
             GENERATION_BATCH_SIZE,
             GENERATION_NOISE,
         )
+        from vision_unlearning.utils.noise import capture_pairing_record
         names = list(entity_prompts)
         vectors, latent_hashes = capture_act_fingerprints(
             pipeline=pipeline,
@@ -239,6 +240,7 @@ def run_act(
                 name: {str(seed): latent_hash for seed, latent_hash in latent_hashes[index].items()}
                 for index, name in enumerate(names)
             },
+            pairing=capture_pairing_record(pipeline, latent_hashes, {'num_inference_steps': n_steps}, GENERATION_BATCH_SIZE),
         )
         logger.info("Activation fingerprints saved to %s.", fingerprint_path)
     else:

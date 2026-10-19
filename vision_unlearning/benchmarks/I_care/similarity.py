@@ -282,11 +282,15 @@ class UnetLatentSimilarity(BaseModel):
         entities: Dict[str, Dict[str, Any]],
         prompts_ordered: List[str],
         verification: Dict[str, Any],
+        pairing: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Write the cache atomically: temporary file first, then rename.
 
         Only the seeds actually captured are written, in ``self.seeds`` order -- a checkpoint
         written at a seed boundary legitimately holds fewer seeds than the finished cache.
+        `pairing`, when given, is written as ``metadata.pairing``: the capture's pairing record,
+        which ``pairing.check`` certifies against the task baseline's with the class
+        ``'unet_latent'``.
         """
         os.makedirs(os.path.dirname(path), exist_ok=True)
         shapes = {
@@ -295,7 +299,7 @@ class UnetLatentSimilarity(BaseModel):
         }
         if len(shapes) > 1:
             raise ValueError(f"refusing to write a cache with mixed latent shapes {sorted(shapes)}")
-        payload = {
+        payload: Dict[str, Any] = {
             'metadata': self._metadata(
                 prompts_ordered, shapes.pop() if shapes else (), verification,
             ),
@@ -316,6 +320,8 @@ class UnetLatentSimilarity(BaseModel):
                 for entity in entities.values()
             ],
         }
+        if pairing is not None:
+            payload['metadata']['pairing'] = pairing
         tmp_path = path + '.tmp'
         with open(tmp_path, 'w', encoding='utf-8') as handle:
             json.dump(payload, handle, allow_nan=False)
@@ -676,12 +682,14 @@ class UnetLatentSimilarity(BaseModel):
         verification: Dict[str, Any] = {
             'n_checked': 0, 'max_mean_abs_difference': 0.0, 'tolerance': BASELINE_TOLERANCE,
         }
+        pairing: Optional[Dict[str, Any]] = None
 
         if os.path.exists(self.cache_path_partial()):
             metadata, cached = self._read_cache(self.cache_path_partial())
             self._assert_resumable(metadata, cached, entity_prompts)
             entities = cached
             verification = dict(metadata['baseline_verification'])
+            pairing = metadata.get('pairing')
 
         complete = self._complete_seeds(entities, entity_prompts)
         remaining = [seed for seed in self.seeds if seed not in complete]
@@ -740,10 +748,11 @@ class UnetLatentSimilarity(BaseModel):
                                 verification['max_mean_abs_difference'], BASELINE_TOLERANCE,
                                 self._resource_sample(),
                             )
+                    pairing = self._pairing_record(pipeline, entities, entity_prompts)
                     self._write_cache(
                         self.cache_path_partial(),
                         self._in_metadata_order(entities, entity_prompts),
-                        prompts, verification,
+                        prompts, verification, pairing,
                     )
                     logger.info(
                         "unet_latent capture: seed %s complete, checkpoint written to %s",
@@ -754,10 +763,23 @@ class UnetLatentSimilarity(BaseModel):
 
         self._write_cache(
             self.cache_path(), self._in_metadata_order(entities, entity_prompts),
-            prompts, verification,
+            prompts, verification, pairing,
         )
         if os.path.exists(self.cache_path_partial()):
             os.remove(self.cache_path_partial())
+
+    def _pairing_record(
+        self, pipeline: Any, entities: Dict[str, Dict[str, Any]], entity_prompts: List[Tuple[str, str]],
+    ) -> Optional[Dict[str, Any]]:
+        """The pairing record of the seeds captured so far; None when no latent hash is recorded."""
+        from vision_unlearning.utils.noise import capture_pairing_record
+        hashes: Dict[int, Dict[int, str]] = {}
+        for index, (name, _) in enumerate(entity_prompts):
+            for seed, latent_hash in (entities.get(name) or {}).get('initial_latent_sha256', {}).items():
+                hashes.setdefault(index, {})[int(seed)] = latent_hash
+        if not hashes:
+            return None
+        return capture_pairing_record(pipeline, hashes, {'num_inference_steps': self.num_inference_steps}, self.batch_size)
 
     @staticmethod
     def _in_metadata_order(

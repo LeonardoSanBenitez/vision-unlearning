@@ -418,3 +418,69 @@ def test_the_clip_text_similarity_is_computed_from_canonical_names(tmp_path: Any
             assert matrix[a][b] == matrix[b][a]
     assert ('an abbey scene', 'a badlands scene') in seen
     assert len(seen) == 6  # each unordered pair once, with the diagonal
+
+
+# -- the captures' pairing records ----------------------------------------------------------------
+
+
+class ProvenanceActStandIn(ActStandIn):
+    """The activation stand-in with a scheduler and the call defaults the real pipelines resolve from."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scheduler = ProvenancePipeline().scheduler
+
+    def __call__(self, prompt: List[str], latents: Optional[torch.Tensor] = None, generator: Any = None,  # type: ignore[override]
+                 num_inference_steps: int = 50, guidance_scale: float = 7.5, **kwargs: Any) -> Any:
+        return super().__call__(prompt, latents=latents, generator=generator, num_inference_steps=num_inference_steps)
+
+
+def _baseline_pairing(folder: str, prompts: List[str], seeds: List[int]) -> Any:
+    data_generation.generate_dataset(
+        model_base_name=None, lora_name=None, model_pipeline=ProvenancePipeline(), prompts=prompts,
+        output_path=folder, device='cpu', seeds=seeds, batch_size=8, noise='per_image_processor',
+        provenance={'commit': 'abc'},
+    )
+    with open(os.path.join(folder, 'provenance.json'), encoding='utf-8') as handle:
+        return json.load(handle)['pairing']
+
+
+def test_the_activation_capture_record_passes_the_act_class_against_the_baseline(tmp_path: Any) -> None:
+    """Fails on the code before: no capture wrote a pairing record, so `act` could not be certified."""
+    from vision_unlearning.benchmarks.I_care.pairing import ACT_STEPS, PairingFailure, check
+    from vision_unlearning.utils.mechanistic_interpretability import capture_act_fingerprints, save_act_fingerprints
+    from vision_unlearning.utils.noise import capture_pairing_record
+    prompts, seeds = [f"An image of entity {k}" for k in range(3)], [42, 43]
+    baseline = _baseline_pairing(str(tmp_path / 'baseline'), prompts, seeds)
+    pipeline = ProvenanceActStandIn()
+    vectors, hashes = capture_act_fingerprints(pipeline, prompts, ACT_STEPS, seeds, 'cpu', noise='per_image_processor', batch_size=8)
+    record = capture_pairing_record(pipeline, hashes, {'num_inference_steps': ACT_STEPS}, 8)
+    assert check(record, baseline, prompts, seeds, 'act')['verdict'] == 'paired'
+    with pytest.raises(PairingFailure, match='effective generation arguments'):
+        check(record, baseline, prompts, seeds, 'image_pairs')  # 10 steps is not an image-equivalent capture
+    path = save_act_fingerprints(dict(zip(prompts, vectors)), 'people', 'sd1.4', str(tmp_path), ACT_STEPS, seeds, pairing=record)
+    with open(path, encoding='utf-8') as handle:
+        assert json.load(handle)['metadata']['pairing'] == record
+
+
+def test_the_latent_capture_record_passes_the_unet_latent_class_against_the_baseline(tmp_path: Any) -> None:
+    """Fails on the code before: the latent cache recorded hashes but no scheduler or arguments."""
+    from vision_unlearning.benchmarks.I_care.pairing import check
+    from vision_unlearning.benchmarks.I_care.similarity import UnetLatentSimilarity
+    capture = UnetLatentSimilarity(task='breeds', base_folder=str(tmp_path))
+    prompts, seeds = [f"An image of entity {k}" for k in range(3)], capture.seeds
+    baseline = _baseline_pairing(str(tmp_path / 'baseline'), prompts, seeds)
+    pipeline = ProvenancePipeline()
+    entity_prompts = [(f'entity {k}', prompt) for k, prompt in enumerate(prompts)]
+    entities = {
+        name: {'name': name, 'prompt': prompt,
+               'latents': {str(s): np.zeros((4, 2, 2), dtype=np.float16) for s in seeds},
+               'initial_latent_sha256': {str(s): initial_latents(pipeline, s, 1)[1][0] for s in seeds}}
+        for name, prompt in entity_prompts
+    }
+    record = capture._pairing_record(pipeline, entities, entity_prompts)
+    assert record is not None
+    assert check(record, baseline, prompts, seeds, 'unet_latent')['verdict'] == 'paired'
+    capture._write_cache(capture.cache_path(), entities, prompts, {'n_checked': 12, 'max_mean_abs_difference': 0.0}, record)
+    with open(capture.cache_path(), encoding='utf-8') as handle:
+        assert json.load(handle)['metadata']['pairing'] == record
