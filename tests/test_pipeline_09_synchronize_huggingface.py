@@ -10,6 +10,8 @@ import pytest
 
 from vision_unlearning.benchmarks.I_care.pipeline_09_synchronize_huggingface import (
     RemoteSnapshot,
+    _count_in_ancestors,
+    count_local_files,
     SyncItem,
     annotate_local_existence,
     annotate_remote_existence,
@@ -127,6 +129,57 @@ class TestRemoteSnapshot:
         annotate_remote_existence(items, snapshot)
         assert items[0].remote_exists_before is True
         assert items[1].remote_exists_before is False
+
+
+class TestFolderCompleteness:
+    """A remote folder counts as uploaded only if it holds every file the local copy holds.
+
+    Fails on the code before: presence of the folder name was enough, so an upload interrupted after
+    180 of 401 files was reported as uploaded and never retried.
+    """
+
+    def _folder(self, tmp_path: Any, n_files: int) -> SyncItem:
+        folder = tmp_path / "generated_people_x"
+        folder.mkdir()
+        for index in range(n_files):
+            (folder / f"{index}.png").write_bytes(b"x")
+        return SyncItem(stage="generated-datasets", task="people", name="x", kind="folder",
+                        local_path=str(folder), remote_path="datasets/generated_people_x")
+
+    def test_a_partly_uploaded_folder_is_not_uploaded(self, tmp_path: Any) -> None:
+        item = self._folder(tmp_path, 401)
+        item.local_file_count = count_local_files(item.local_path)
+        snapshot = RemoteSnapshot(folders={"datasets/generated_people_x"},
+                                  folder_file_counts={"datasets/generated_people_x": 180})
+        assert item.local_file_count == 401
+        assert not snapshot.exists(item)
+
+    def test_a_complete_folder_is_uploaded(self, tmp_path: Any) -> None:
+        item = self._folder(tmp_path, 401)
+        item.local_file_count = 401
+        snapshot = RemoteSnapshot(folders={"datasets/generated_people_x"},
+                                  folder_file_counts={"datasets/generated_people_x": 401})
+        assert snapshot.exists(item)
+
+    def test_an_uncounted_remote_folder_is_not_taken_on_trust(self, tmp_path: Any) -> None:
+        item = self._folder(tmp_path, 3)
+        item.local_file_count = 3
+        assert not RemoteSnapshot(folders={"datasets/generated_people_x"}).exists(item)
+
+    def test_the_listing_counts_files_into_every_ancestor_folder(self) -> None:
+        snapshot = RemoteSnapshot()
+        for path in ["datasets/generated_a/1.png", "datasets/generated_a/2.png",
+                     "datasets/generated_a/sub/3.png", "datasets/generated_b/1.png"]:
+            _count_in_ancestors(snapshot, path, "datasets")
+        assert snapshot.folder_file_counts == {
+            "datasets/generated_a": 3, "datasets/generated_a/sub": 1, "datasets/generated_b": 1,
+        }
+
+    def test_local_existence_counts_a_present_folder(self, tmp_path: Any) -> None:
+        item = self._folder(tmp_path, 5)
+        item.stage = "act-fingerprints"
+        annotate_local_existence([item], {}, [42], str(tmp_path))
+        assert item.local_file_count == 5
 
 
 class TestAnnotateLocalExistence:

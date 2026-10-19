@@ -119,6 +119,9 @@ class SyncItem(BaseModel):
     local_path: str
     remote_path: str
     local_exists: bool = False
+    # For a folder: how many files it holds locally, set by annotate_local_existence when the folder
+    # exists. None means not counted (a file item, or a folder that is absent locally).
+    local_file_count: Optional[int] = None
     remote_exists_before: bool = False
     uploaded_now: bool = False
     upload_error: Optional[str] = None
@@ -133,24 +136,45 @@ class SyncItem(BaseModel):
 
 
 class RemoteSnapshot(BaseModel):
-    """File and folder paths present in the remote repository (within the listed prefixes)."""
+    """File and folder paths present in the remote repository (within the listed prefixes).
+
+    ``folder_file_counts`` holds, for every folder the listing reached recursively, how many files it
+    holds at any depth.
+    """
     files: Set[str] = set()
     folders: Set[str] = set()
+    folder_file_counts: Dict[str, int] = {}
 
     def exists(self, item: SyncItem) -> bool:
+        """Whether the item is on the remote -- for a folder, whether ALL of it is.
+
+        A folder that exists remotely with fewer files than the local copy is an interrupted upload,
+        and counting it as present is how such a folder stays incomplete forever: nothing ever
+        uploads it again. So when the local folder has been counted, the remote one must hold the
+        same number of files, and a remote folder whose files were not counted is not taken on
+        trust. Only a folder absent locally falls back to presence, because there is nothing to
+        compare it with.
+        """
         if item.kind == "file":
             return item.remote_path in self.files
-        return item.remote_path in self.folders
+        if item.remote_path not in self.folders:
+            return False
+        if item.local_file_count is None:
+            return True
+        return self.folder_file_counts.get(item.remote_path) == item.local_file_count
 
 
 def fetch_remote_snapshot(
     repository: str,
     token: Optional[str],
     prefixes: Iterable[str] = ("", "datasets", "models"),
+    recursive_prefixes: Iterable[str] = ("datasets", "models"),
 ) -> RemoteSnapshot:
-    """List the remote repository once per prefix (non-recursive, paginated).
+    """List the remote repository once per prefix (paginated).
 
-    A prefix that does not exist remotely contributes nothing (no error).
+    The prefixes in ``recursive_prefixes`` are listed recursively, so the snapshot knows how many
+    files every folder below them holds (``folder_file_counts``); the others are listed one level
+    deep. A prefix that does not exist remotely contributes nothing (no error).
     """
     from huggingface_hub import HfApi
     from huggingface_hub.hf_api import RepoFile
@@ -158,6 +182,7 @@ def fetch_remote_snapshot(
 
     api = HfApi(token=token)
     snapshot = RemoteSnapshot()
+    deep = set(recursive_prefixes)
     for prefix in prefixes:
         try:
             n_before = len(snapshot.files) + len(snapshot.folders)
@@ -165,10 +190,12 @@ def fetch_remote_snapshot(
                 repository,
                 path_in_repo=prefix or None,
                 repo_type="dataset",
-                recursive=False,
+                recursive=prefix in deep,
             ):
                 if isinstance(entry, RepoFile):
                     snapshot.files.add(entry.path)
+                    if prefix in deep:
+                        _count_in_ancestors(snapshot, entry.path, prefix)
                 else:
                     snapshot.folders.add(entry.path)
             n_added = len(snapshot.files) + len(snapshot.folders) - n_before
@@ -176,6 +203,20 @@ def fetch_remote_snapshot(
         except EntryNotFoundError:
             logger.warning("Remote prefix not found (treated as empty): '%s/'", prefix)
     return snapshot
+
+
+def _count_in_ancestors(snapshot: RemoteSnapshot, file_path: str, prefix: str) -> None:
+    """Add one file to the count of every folder between ``prefix`` and the file."""
+    parts = file_path.split("/")
+    depth = len(prefix.split("/")) if prefix else 0
+    for end in range(depth + 1, len(parts)):
+        folder = "/".join(parts[:end])
+        snapshot.folder_file_counts[folder] = snapshot.folder_file_counts.get(folder, 0) + 1
+
+
+def count_local_files(folder: str) -> int:
+    """How many files a local folder holds at any depth."""
+    return sum(len(files) for _, _, files in os.walk(folder))
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +358,8 @@ def annotate_local_existence(
             item.local_exists = exists_unlearned_dataset(item.local_path, seeds, prompts_by_task[item.task])
         else:
             item.local_exists = os.path.exists(item.local_path)
+        if item.kind == "folder" and os.path.isdir(item.local_path):
+            item.local_file_count = count_local_files(item.local_path)
 
 
 def annotate_remote_existence(items: List[SyncItem], snapshot: RemoteSnapshot) -> None:
