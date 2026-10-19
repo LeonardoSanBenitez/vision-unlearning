@@ -94,3 +94,10 @@ def test_score_batch_mixed_inputs():
         for score in batch_scores:
             assert "brisque" in score
             assert isinstance(score["brisque"], float)
+
+
+def test_a_batch_scores_each_image_exactly_as_alone():
+    """Fails on the code before: the stacked batch differed from single-image scores by up to 0.0025."""
+    metric = MetricQuality()
+    a, b = Image.fromarray(random_image()), Image.fromarray(random_image())
+    assert metric.score_batch([a, b]) == [metric.score(a), metric.score(b)]

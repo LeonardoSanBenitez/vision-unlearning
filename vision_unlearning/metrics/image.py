@@ -200,36 +200,13 @@ class MetricQuality(MetricImage):
         self,
         images: List[Union[Image.Image, np.ndarray, str]],
     ) -> List[Dict[str, float]]:
-        tensors: List[torch.Tensor] = [self._load_image(img) for img in images]
+        """One BRISQUE value per image, each exactly the value `score` returns for that image.
 
-        shapes = {t.shape for t in tensors}
-        if len(shapes) != 1:
-            raise ValueError(
-                "All images must have identical shape for batching. "
-                f"Found shapes: {shapes}"
-            )
-
-        batch: torch.Tensor = torch.stack(tensors, dim=0).to(self.device, non_blocking=True)  # [N, C, H, W]
-
-        assert batch.ndim == 4
-        assert batch.dtype == torch.float32
-        assert 0.0 <= float(batch.min())
-        assert float(batch.max()) <= 1.0
-
-        with torch.no_grad():
-            scores: torch.Tensor = piq.brisque(  # [N]
-                batch,
-                data_range=1.0,
-                reduction="none",
-            )
-
-        assert scores.ndim == 1, f"Return shape is {scores.ndim}"
-        assert scores.shape[0] == batch.shape[0]
-
-        results: List[Dict[str, float]] = [
-            {"brisque": float(v.item())} for v in scores
-        ]
-
+        The images are scored one at a time. `piq.brisque` over a stacked batch returned values that
+        differ from the single-image ones by up to 0.0025, so the same image could carry two BRISQUE
+        values depending on how it was scored; one image has one value.
+        """
+        results: List[Dict[str, float]] = [self.score(img) for img in images]
         assert len(results) == len(images)
         return results
 
