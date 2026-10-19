@@ -91,6 +91,10 @@ urllib3 = "<=2.0.0"
 black = "*"
 pydantic = "*"
 PyYAML = "*"
+# Read by the I-CARE pipeline scripts: python-dotenv loads their .env token file, and tabulate is
+# what pandas.DataFrame.to_markdown needs to print their result tables.
+python-dotenv = ">=0.21.0"
+tabulate = "*"
 Unidecode = "~1.4.0"
 #deepface = "~0.0.95"  # Optional dependency, for MetricRace
 #tf_keras = "~2.19.0"  # idem

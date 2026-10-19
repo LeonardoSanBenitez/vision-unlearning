@@ -307,9 +307,9 @@ from vision_unlearning.benchmarks.I_care.configuration import (  # noqa: E402
 from vision_unlearning.benchmarks.I_care.embeddings import embed_forgetting_session  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# HF dataset download helper (implementation lives in utils_analysis)
+# HF dataset download helper (the library's parallel folder downloader)
 # ---------------------------------------------------------------------------
-from utils_analysis import huggingface_dataset_download  # noqa: E402 — after sys.path setup
+from vision_unlearning.integrations.huggingface import huggingface_dataset_download_parallel as huggingface_dataset_download  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
