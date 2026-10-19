@@ -32,7 +32,7 @@ drive a recording stand-in pipeline that re-hashes what it receives, which is th
 documented without them.
 '''
 import hashlib
-from typing import Any, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 
 type_noise = Literal['stream', 'per_image_processor']
@@ -119,3 +119,66 @@ def initial_latents(
         dtype=_latent_dtype(pipeline),
     )
     return latents, [latent_sha256(latents[i]) for i in range(n)]
+
+
+# The encoding of the record below; bumped whenever its fields change meaning.
+PAIRING_SCHEMA_VERSION = 1
+
+
+def pairing_record(
+    keys: List[Dict[str, Any]],
+    scheduler_class: str,
+    scheduler_config: Dict[str, Any],
+    generation_kwargs: Dict[str, Any],
+    latent_hash_schema_version: int = LATENT_HASH_SCHEMA_VERSION,
+) -> Dict[str, Any]:
+    '''The record of what one generation call did: every image's key and initial-latent hash, the
+    scheduler, and the effective generation arguments.
+
+    Each key holds ``prompt_index`` (position in the call's prompt list), ``seed``, ``file_name`` and
+    ``initial_latent_sha256``, and may hold its own ``num_inference_steps`` where a capture records it
+    per key. ``generation_kwargs`` are the arguments the pipeline actually ran with, defaults resolved,
+    prompts and objects excluded. A consumer compares two such records key by key to certify that
+    two images started from the same input (`vision_unlearning.benchmarks.I_care.pairing`).
+    '''
+    return {
+        'schema_version': PAIRING_SCHEMA_VERSION,
+        'latent_hash_schema_version': latent_hash_schema_version,
+        'keys': [dict(key) for key in keys],
+        'scheduler_class': scheduler_class,
+        'scheduler_config': dict(scheduler_config),
+        'generation_kwargs': dict(generation_kwargs),
+    }
+
+
+def effective_generation_kwargs(pipeline: Any, call_kwargs: Dict[str, Any], batch_size: int) -> Dict[str, Any]:
+    '''The arguments a text-to-image pipeline call runs with, its own defaults resolved.
+
+    Covers what decides an image besides its prompt and initial latent: the step count, the guidance
+    scale, the resolution, the batch size and the dtype. A value the caller did not pass is read from
+    the pipeline's call signature (or, for the resolution, from the denoiser's sample size), which is
+    what the pipeline itself falls back to.
+    '''
+    import inspect
+    parameters = inspect.signature(type(pipeline).__call__).parameters
+
+    def default(name: str) -> Any:
+        parameter = parameters.get(name)
+        return None if parameter is None or parameter.default is inspect.Parameter.empty else parameter.default
+
+    side = pipeline.unet.config.sample_size * pipeline.vae_scale_factor
+    return {
+        'num_inference_steps': call_kwargs.get('num_inference_steps', default('num_inference_steps')),
+        'guidance_scale': call_kwargs.get('guidance_scale', default('guidance_scale')),
+        'height': call_kwargs.get('height', side),
+        'width': call_kwargs.get('width', side),
+        'batch_size': batch_size,
+        'dtype': str(_latent_dtype(pipeline)),
+    }
+
+
+def scheduler_identity(pipeline: Any) -> Tuple[str, Dict[str, Any]]:
+    '''The scheduler's class name and its configuration as plain JSON-ready values.'''
+    import json
+    config = json.loads(json.dumps(dict(pipeline.scheduler.config), default=str))
+    return type(pipeline.scheduler).__name__, config

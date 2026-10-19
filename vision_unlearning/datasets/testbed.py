@@ -9,6 +9,7 @@ from pydantic import BaseModel, model_validator, PrivateAttr
 from vision_unlearning.utils.logger import get_logger
 from vision_unlearning.artifact import Artifact, ArtifactNotAvailableError, DEFAULT_REMOTE_REPOSITORY_NAME, SingleFileArtifact
 from vision_unlearning.datasets.entity_names import canonical_entity, substitute_concept
+from vision_unlearning.utils.noise import type_noise
 
 
 logger = get_logger('testbed')
@@ -416,6 +417,13 @@ class GeneratedDataset(Artifact):
     artifact_kind: Optional[_type_artifact_kind] = None
     artifact_filename: Optional[str] = None
     model: _type_model = 'sd1.4'          # base image-generating model; sd1.4 → unchanged names
+    # How the baseline's initial noise is drawn (see vision_unlearning.utils.noise), and, when given,
+    # the producer's facts for the provenance.json generate_dataset writes beside the images. The
+    # defaults keep the historical generation. Under 'per_image_processor' only the baseline is
+    # produced here: an entity dataset under that convention comes from the session that trains its
+    # model, which records its own pairing, so this class refuses to produce one.
+    noise: type_noise = 'stream'
+    provenance: Optional[Dict[str, Any]] = None
     # base_folder, remote_repository_name, recompute_if_exists, upload_if_recomputed and
     # save_outputs are inherited from Artifact. save_outputs is unused here: image
     # generation writes the folder directly, so _persist_local is a no-op.
@@ -633,7 +641,7 @@ class GeneratedDataset(Artifact):
             logger.info("_compute_from_scratch: pipeline loaded; generating %d images", len(seeds) * len(prompts))
 
             filenames = [
-                f'off_{seed}_{prompt}.png'
+                get_generated_dataset_file('off', seed, prompt)
                 for seed in seeds
                 for prompt in prompts
             ]
@@ -647,6 +655,8 @@ class GeneratedDataset(Artifact):
                 seeds=seeds,
                 filenames=filenames,
                 batch_size=batch_size,
+                noise=self.noise,
+                provenance=self.provenance,
             )
 
         else:
@@ -657,6 +667,11 @@ class GeneratedDataset(Artifact):
             assert self.target is not None
             assert self.method is not None
             assert self.num_train_epochs is not None
+            if self.noise != 'stream' or self.provenance is not None:
+                raise ValueError(
+                    "an entity dataset under per-image noise is produced by the session that trains its "
+                    "model, which records its own pairing; it is not regenerated here."
+                )
 
             model_folder = get_unlearned_model_folder(
                 self.task, self.method, self.num_train_epochs, self.target, self.base_folder, self.model
@@ -675,7 +690,7 @@ class GeneratedDataset(Artifact):
                 )
 
             filenames = [
-                f'on_{seed}_{prompt}.png'
+                get_generated_dataset_file('on', seed, prompt)
                 for seed in seeds
                 for prompt in prompts
             ]

@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import random
 from dataclasses import dataclass
@@ -7,7 +9,14 @@ import torch
 from diffusers import AutoPipelineForText2Image
 from vision_unlearning.datasets.others import jsonl_dump
 from vision_unlearning.unlearner.lora import unlearn_lora
-from vision_unlearning.utils.noise import initial_latents, type_noise
+from vision_unlearning.utils.noise import (
+    LATENT_HASH_SCHEMA_VERSION,
+    effective_generation_kwargs,
+    initial_latents,
+    pairing_record,
+    scheduler_identity,
+    type_noise,
+)
 
 
 @dataclass(frozen=True)
@@ -87,6 +96,7 @@ def generate_dataset(
     crops_coords_top_left: Optional[Tuple[int, int]] = None,
     runtime: Optional[GenerationRuntime] = None,
     noise: type_noise = 'stream',
+    provenance: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, str]]:
     '''
     Generate images for the given prompts and save them to output_path.
@@ -154,6 +164,14 @@ def generate_dataset(
         an image depends on its seed alone and not on its position, its batch or the card; the
         latents are passed to the pipeline as ``latents=``, and each metadata record gains ``seed``
         and ``initial_latent_sha256``, the hash of the exact tensor handed over. Requires `seeds`.
+    @param provenance: when given, ``provenance.json`` is written into `output_path`: these fields
+        (whatever the caller knows -- the code commit, the card, the hashes of pinned inputs), plus
+        what this call itself did: the seeds, the ordered prompt list and its sha256, the batch size,
+        the noise convention, and a ``pairing`` object holding every image's key, file name and
+        initial-latent hash, the scheduler's class and configuration, and the effective generation
+        arguments (`vision_unlearning.utils.noise.pairing_record`). Requires
+        ``noise='per_image_processor'``, the only convention whose latents can be hashed. None (the
+        default) writes nothing new.
 
     The four Stable Diffusion XL conditioning arguments and every field of `runtime` follow the same
     rule as height/width and variant: an argument that is not asked for is not passed at all, so a
@@ -174,6 +192,12 @@ def generate_dataset(
     if (height is None) != (width is None):
         raise ValueError(
             f"height and width must be given together or not at all; got height={height}, width={width}."
+        )
+
+    if provenance is not None and noise != 'per_image_processor':
+        raise ValueError(
+            "provenance records every image's initial latent, which only noise='per_image_processor' "
+            "builds and hashes; the 'stream' convention draws inside the pipeline."
         )
 
     if noise != 'stream' and seeds is None:
@@ -246,6 +270,7 @@ def generate_dataset(
     _apply_runtime(pipeline, runtime)
 
     metadata: List[Dict[str, str]] = []
+    pairing_keys: List[Dict[str, Any]] = []
 
     if seeds is not None:
         # --- seeded generation mode ---
@@ -311,6 +336,10 @@ def generate_dataset(
                         if batch_hashes is not None:
                             record["seed"] = str(seed)
                             record["initial_latent_sha256"] = batch_hashes[i]
+                            pairing_keys.append({
+                                "prompt_index": idx, "seed": seed, "file_name": image_name,
+                                "initial_latent_sha256": batch_hashes[i],
+                            })
                         metadata.append(record)
         finally:
             # Restore deterministic algorithms setting to avoid affecting other code -- but only if
@@ -343,5 +372,24 @@ def generate_dataset(
 
     # Save metadata at the end
     jsonl_dump(metadata, os.path.join(output_path, "metadata.jsonl"))
+
+    if provenance is not None:
+        assert seeds is not None  # guaranteed by the noise check above
+        scheduler_class, scheduler_config = scheduler_identity(pipeline)
+        record_out: Dict[str, Any] = {
+            **provenance,
+            "seeds": list(seeds),
+            "prompts_ordered": list(prompts),
+            "prompt_list_sha256": hashlib.sha256(json.dumps(list(prompts)).encode("utf-8")).hexdigest(),
+            "batch_size": batch_size,
+            "noise": noise,
+            "pairing": pairing_record(
+                pairing_keys, scheduler_class, scheduler_config,
+                effective_generation_kwargs(pipeline, call_kwargs, batch_size),
+                LATENT_HASH_SCHEMA_VERSION,
+            ),
+        }
+        with open(os.path.join(output_path, "provenance.json"), "w", encoding="utf-8") as handle:
+            json.dump(record_out, handle, indent=1)
 
     return metadata

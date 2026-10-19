@@ -39,6 +39,7 @@ import torch
 from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
 from vision_unlearning.benchmarks.I_care.prompts import evaluation_prompts
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -98,12 +99,10 @@ def _parse_args() -> argparse.Namespace:
         "--batch-size-inference",
         type=int,
         default=None,
-        help="Images generated per forward pass, for BOTH the baseline and the per-entity "
-             "passes. generate_dataset draws one noise tensor per batch, so this decides the "
-             "initial noise of every image: a baseline built at one size and per-entity "
-             "images built at another are not paired, whatever the seeds say. Left unset the "
-             "historical behaviour applies -- baseline at 1, per-entity from free memory -- "
-             "which is exactly that mismatch.",
+        help="Images generated per forward pass. The batch shape changes the kernels' "
+             "arithmetic and so the pixels, even with the noise fixed. Left unset, --baseline "
+             "uses the benchmark's configuration.GENERATION_BATCH_SIZE, and the per-entity pass "
+             "keeps its historical size chosen from free memory.",
     )
     parser.add_argument(
         "--limit-prompts",
@@ -112,10 +111,28 @@ def _parse_args() -> argparse.Namespace:
         help="Cap the number of prompts per entity (default: no cap).",
     )
     parser.add_argument(
-        "--upload-if-recomputed",
+        "--upload",
         action="store_true",
         default=False,
-        help="Upload generated baseline to HuggingFace after computation (baseline mode only).",
+        help="Baseline mode only: upload the complete baseline folder -- every image, "
+             "metadata.jsonl and provenance.json -- and check every file by content. Only the "
+             "benchmark's current corpus may be written to; any other --repository is refused "
+             "at start-up.",
+    )
+    parser.add_argument(
+        "--repository",
+        default=DEFAULT_REMOTE_REPOSITORY_NAME,
+        help=f"HuggingFace dataset repository to read from and upload to (default: {DEFAULT_REMOTE_REPOSITORY_NAME}).",
+    )
+    parser.add_argument(
+        "--pins",
+        default=None,
+        help="Baseline mode: the run's pins.json, whose sha256 is recorded in provenance.json.",
+    )
+    parser.add_argument(
+        "--freeze",
+        default=None,
+        help="Baseline mode: the run's environment freeze, whose sha256 is recorded in provenance.json.",
     )
     parser.add_argument(
         "--base-folder",
@@ -148,17 +165,20 @@ def run_baseline(
     task: Literal["scenes", "breeds", "people"],
     seeds: List[int],
     replace_if_exists: bool,
-    upload_if_recomputed: bool,
+    upload: bool,
     base_folder: str,
     ledger: Optional[RunLedger] = None,
     batch_size_inference: Optional[int] = None,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
+    pins_path: Optional[str] = None,
+    freeze_path: Optional[str] = None,
 ) -> None:
     """Generate method-agnostic baseline images (original SD, no LoRA).
 
-    ``batch_size_inference`` defaults to 1 only because that is what this pass has always
-    used. It is not a neutral default: the per-entity pass picks its own size from free
-    memory, so the two passes have been drawing different noise, and every paired metric
-    computed from them has been comparing images that do not share a starting point.
+    Under the benchmark's convention (``configuration.GENERATION_NOISE``, batch
+    ``configuration.GENERATION_BATCH_SIZE`` unless ``batch_size_inference`` overrides it), and
+    with a ``provenance.json`` beside the images recording what produced them and every image's
+    initial-latent hash, which is what every session's images are later paired against.
     """
     from vision_unlearning.utils.logger import get_logger, setup_loggers
     from vision_unlearning.datasets.testbed import (
@@ -180,19 +200,26 @@ def run_baseline(
         task, len(prompts), len(seeds), len(prompts) * len(seeds),
     )
 
+    from vision_unlearning.benchmarks.I_care.configuration import GENERATION_BATCH_SIZE, GENERATION_NOISE
+    from vision_unlearning.benchmarks.I_care.provenance import producer_facts
+
+    batch_size = GENERATION_BATCH_SIZE if batch_size_inference is None else batch_size_inference
     ds = GeneratedDataset(
         task=task,
         base_folder=base_folder,
         recompute_if_exists=replace_if_exists,
-        upload_if_recomputed=upload_if_recomputed,
+        remote_repository_name=repository,
+        noise=GENERATION_NOISE,
+        provenance=producer_facts(
+            precision='float16', pins_path=pins_path, freeze_path=freeze_path,
+            producer='pipeline_04 --baseline', task=task,
+        ),
     )
     logger.info("Target folder: %s", ds.folder_path)
 
     import time
     t0 = time.time()
-    batch_size = 1 if batch_size_inference is None else batch_size_inference
-    logger.info("Baseline batch size: %s%s", batch_size,
-                "" if batch_size_inference is not None else " (historical default, not pinned)")
+    logger.info("Baseline batch size: %s, noise: %s", batch_size, GENERATION_NOISE)
     result_folder = ds.compute(seeds=seeds, prompts=prompts, batch_size=batch_size)
     elapsed = time.time() - t0
     n_images = len(seeds) * len(prompts)
@@ -200,6 +227,14 @@ def run_baseline(
         "ALL DONE. folder=%s  elapsed=%.1f s  (avg %.2f s/image)",
         result_folder, elapsed, elapsed / n_images if n_images else 0.0,
     )
+    if upload:
+        from vision_unlearning.benchmarks.I_care.upload import remote_path_of, upload_folder
+        from vision_unlearning.datasets.testbed import get_generated_dataset_file
+        expected = [get_generated_dataset_file('off', seed, prompt) for seed in seeds for prompt in prompts]
+        expected += ['metadata.jsonl', 'provenance.json']
+        digests = upload_folder(result_folder, remote_path_of(result_folder, base_folder), repository,
+                                os.getenv("HF_TOKEN") or None, expected_files=expected)
+        logger.info("Uploaded and checked by content: %d files of %s", len(digests), result_folder)
     if ledger is not None:
         ledger.record(f"GeneratedDatasetBaseline for {task}", status="ok")
 
@@ -601,6 +636,10 @@ def main() -> None:
 
     args = _parse_args()
     task: Literal["scenes", "breeds", "people"] = args.task  # type: ignore[assignment]
+    if args.upload:
+        # Before the model is loaded: an upload aimed somewhere forbidden stops here.
+        from vision_unlearning.benchmarks.I_care.upload import assert_upload_allowed
+        assert_upload_allowed(args.repository)
 
     ledger: Optional[RunLedger] = None
     if not args.no_ledger:
@@ -613,10 +652,13 @@ def main() -> None:
                 task=task,
                 seeds=args.seeds,
                 replace_if_exists=args.replace_if_exists,
-                upload_if_recomputed=args.upload_if_recomputed,
+                upload=args.upload,
                 base_folder=args.base_folder,
                 batch_size_inference=args.batch_size_inference,
                 ledger=ledger,
+                repository=args.repository,
+                pins_path=args.pins,
+                freeze_path=args.freeze,
             )
         else:
             if args.method is None:

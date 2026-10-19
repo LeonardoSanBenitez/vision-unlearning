@@ -8,7 +8,7 @@ content and changed noise both raise the distance -- so the check here is on the
 image, and the output distance is reported beside it as a diagnostic with no stop rule.
 
 The record this reads is the ``pairing`` object a producer writes into a generated folder's
-``provenance.json`` (see :func:`pairing_record`): one entry per ``(prompt index, seed)`` key with the
+``provenance.json`` (see :func:`vision_unlearning.utils.noise.pairing_record`): one entry per ``(prompt index, seed)`` key with the
 file name and the hash of the initial latent the pipeline was handed
 (:mod:`vision_unlearning.utils.noise`), the scheduler's class and configuration, and the effective
 generation arguments.
@@ -36,7 +36,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 
-PAIRING_SCHEMA_VERSION = 1
+from vision_unlearning.utils.noise import PAIRING_SCHEMA_VERSION, pairing_record  # noqa: F401  (the record's single definition)
 
 # The schedulers a paired route may run, with the configuration values each must have. A scheduler
 # that draws noise after the initial latent would make the latent hash an incomplete record of the
@@ -54,28 +54,6 @@ Key = Tuple[int, int]
 
 class PairingFailure(RuntimeError):
     """A generated folder or capture does not share its inputs with the baseline. Stop and diagnose."""
-
-
-def pairing_record(
-    keys: Sequence[Mapping[str, Any]],
-    scheduler_class: str,
-    scheduler_config: Mapping[str, Any],
-    generation_kwargs: Mapping[str, Any],
-    latent_hash_schema_version: int,
-) -> Dict[str, Any]:
-    """The ``pairing`` object a producer records: keys, scheduler, effective arguments, versions.
-
-    Each key holds ``prompt_index``, ``seed``, ``file_name`` and ``initial_latent_sha256``, and may
-    hold its own ``num_inference_steps`` where captures record it per key.
-    """
-    return {
-        'schema_version': PAIRING_SCHEMA_VERSION,
-        'latent_hash_schema_version': latent_hash_schema_version,
-        'keys': [dict(key) for key in keys],
-        'scheduler_class': scheduler_class,
-        'scheduler_config': dict(scheduler_config),
-        'generation_kwargs': dict(generation_kwargs),
-    }
 
 
 def assert_scheduler_allowed(scheduler_class: str, scheduler_config: Mapping[str, Any]) -> None:

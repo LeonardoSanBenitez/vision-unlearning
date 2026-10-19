@@ -339,3 +339,53 @@ def test_an_unseeded_evaluation_passes_no_latents() -> None:
     original, unlearned = ImagePipeline(), ImagePipeline()
     _evaluate(None, original, unlearned)
     assert original.received_hashes == [] and unlearned.received_hashes == []
+
+
+# -- provenance.json written by generate_dataset -------------------------------------------------
+
+
+class ProvenancePipeline(RecordingPipeline):
+    """A stand-in whose call signature carries the defaults the real pipelines resolve from."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scheduler = type('PNDMScheduler', (), {'config': {'skip_prk_steps': True, 'num_train_timesteps': 1000}})()
+
+    def __call__(self, prompts: List[str], latents: Optional[torch.Tensor] = None, generator: Any = None,  # type: ignore[override]
+                 num_inference_steps: int = 50, guidance_scale: float = 7.5, **kwargs: Any) -> Any:
+        return super().__call__(prompts, latents=latents, generator=generator, **kwargs)
+
+
+def test_generate_dataset_records_exactly_what_it_ran() -> None:
+    """The pairing keys hold the hashes the pipeline received; the arguments are the resolved ones."""
+    pipeline = ProvenancePipeline()
+    with tempfile.TemporaryDirectory() as folder:
+        _generate(pipeline, folder, seeds=[42, 43], batch_size=2, noise='per_image_processor',
+                  provenance={'commit': 'abc123', 'card_model': 'cpu'})
+        with open(os.path.join(folder, 'provenance.json'), encoding='utf-8') as handle:
+            record = json.load(handle)
+    from vision_unlearning.benchmarks.I_care.provenance import prompt_list_sha256
+    assert record['commit'] == 'abc123' and record['seeds'] == [42, 43] and record['batch_size'] == 2
+    assert record['prompt_list_sha256'] == prompt_list_sha256(record['prompts_ordered'])
+    pairing = record['pairing']
+    assert [key['initial_latent_sha256'] for key in pairing['keys']] == pipeline.received_hashes
+    assert [(key['prompt_index'], key['seed']) for key in pairing['keys']] == [(i, s) for s in (42, 43) for i in range(5)]
+    assert pairing['scheduler_class'] == 'PNDMScheduler' and pairing['scheduler_config']['skip_prk_steps'] is True
+    assert pairing['generation_kwargs'] == {'num_inference_steps': 50, 'guidance_scale': 7.5, 'height': 512,
+                                            'width': 512, 'batch_size': 2, 'dtype': 'torch.float16'}
+
+
+def test_a_provenance_without_per_image_noise_is_refused() -> None:
+    with tempfile.TemporaryDirectory() as folder:
+        with pytest.raises(ValueError, match="only noise='per_image_processor'"):
+            _generate(ProvenancePipeline(), folder, seeds=[42], provenance={'commit': 'x'})
+
+
+def test_an_entity_dataset_is_not_regenerated_under_per_image_noise(tmp_path: Any) -> None:
+    """Under the benchmark convention, session images come from the session that trains the model."""
+    from vision_unlearning.datasets.testbed import GeneratedDataset
+    dataset = GeneratedDataset(task='people', target='x', method='uce', num_train_epochs=0,
+                               artifact_kind='partial_weights', artifact_filename='w.safetensors',
+                               base_folder=str(tmp_path), noise='per_image_processor')
+    with pytest.raises(ValueError, match='produced by the session'):
+        dataset._compute_from_scratch([42], ['An image of x'])

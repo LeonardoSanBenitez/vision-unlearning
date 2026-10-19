@@ -209,8 +209,15 @@ all_prompts = [
 # After this call, GeneratedDataset.get_off_image_path() and evaluate_all_seeds()
 # can safely assume the shared baseline folder exists locally.
 logger.info("Ensuring shared baseline is available for task=%s ...", task)
-_baseline_ds = GeneratedDataset(task=task, base_folder=base_folder, remote_repository_name=repository)  # type: ignore[arg-type]
-_baseline_ds.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
+# Should the baseline have to be produced here, it is produced under the benchmark's convention, with
+# its provenance.json, exactly as pipeline_04 --baseline produces it.
+from vision_unlearning.benchmarks.I_care.configuration import GENERATION_BATCH_SIZE, GENERATION_NOISE  # noqa: E402
+from vision_unlearning.benchmarks.I_care.provenance import producer_facts  # noqa: E402
+_baseline_ds = GeneratedDataset(
+    task=task, base_folder=base_folder, remote_repository_name=repository, noise=GENERATION_NOISE,  # type: ignore[arg-type]
+    provenance=producer_facts(precision='float16', producer='pipeline_06 (baseline fallback)', task=task),
+)
+_baseline_ds.compute(seeds=generate_dataset_seeds, prompts=all_prompts, batch_size=GENERATION_BATCH_SIZE)
 logger.info("Shared baseline ready: %s", _baseline_ds.folder_path)
 
 
