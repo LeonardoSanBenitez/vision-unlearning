@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 
 # Model constants
 EMBEDDING_MODEL = "dinov2_vits14"
+# The DINOv2 code revision every embedding is computed with. torch.hub otherwise loads the
+# repository's current default branch, which can change under a running campaign.
+DINOV2_HUB_REFERENCE = "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8"
 EMBEDDING_DIM = 384
 
 
@@ -63,7 +66,7 @@ def load_dino_model(
     logger.info("Using device: %s", device)
 
     logger.info("Loading DINOv2 %s ...", model_name)
-    dino_model = torch.hub.load("facebookresearch/dinov2", model_name)
+    dino_model = torch.hub.load(DINOV2_HUB_REFERENCE, model_name)
     dino_model = dino_model.to(device)  # type: ignore[attr-defined]
     dino_model.eval()  # type: ignore[attr-defined]
     logger.info("DINOv2 loaded.")

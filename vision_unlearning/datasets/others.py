@@ -296,6 +296,12 @@ def split_dataset_taras_breeds(downloaded_folder: str, dataset_forget_name: str,
     return class_to_number
 
 
+# The breeds image source, pinned: cloning the default branch would make the images depend on
+# when the clone happened.
+TARAS_BREEDS_URL = "https://github.com/AtharvaTaras/Dog-Breeds-Dataset"
+TARAS_BREEDS_COMMIT = "7164ba68ce2902e680f92432094a3e028a878dbe"
+
+
 def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> None:
     '''
     Do not perform splits
@@ -305,7 +311,15 @@ def download_dataset_taras_breeds(dataset_base_path: str, cache_folder: str) -> 
 
     if not os.path.exists(dataset_base_path):
         if not os.path.exists(cache_folder):
-            subprocess.run(["git", "clone", "https://github.com/AtharvaTaras/Dog-Breeds-Dataset", cache_folder], check=True)
+            subprocess.run(["git", "clone", TARAS_BREEDS_URL, cache_folder], check=True)
+            subprocess.run(["git", "-C", cache_folder, "checkout", "--quiet", TARAS_BREEDS_COMMIT], check=True)
+        head = subprocess.run(["git", "-C", cache_folder, "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+        if head != TARAS_BREEDS_COMMIT:
+            raise ValueError(
+                f"{cache_folder} is at commit {head}, not the pinned {TARAS_BREEDS_COMMIT}; the images it "
+                f"holds may differ. Check out the pinned commit or delete the folder to clone it again."
+            )
 
         # Convert all to jpg
         for root, dirs, files in os.walk(cache_folder):
