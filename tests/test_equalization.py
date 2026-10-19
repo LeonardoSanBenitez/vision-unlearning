@@ -219,3 +219,23 @@ def test_the_retain_diagnostics() -> None:
     result = retain_diagnostics([-0.5, -4.0, 1.0, -3.1], route_noise=1.0)
     assert result['damaged'] == 2 and result['bleed_rate'] == pytest.approx(0.5)
     assert math.isclose(result['mean_receiver_clip_diff'], -6.6 / 4)
+
+
+# -- the panels -----------------------------------------------------------------------------------
+
+
+def test_the_panels_are_disjoint_where_they_must_be_and_repeatable() -> None:
+    from vision_unlearning.benchmarks.I_care.equalization import draw_panels
+    entities = [f'entity {k}' for k in range(100)]
+    panels = draw_panels('people', entities)
+    assert len(panels['calibration']) == 5 and len(panels['confirmation']) == 25 and len(panels['readout_receivers']) == 20
+    assert not set(panels['calibration']) & set(panels['confirmation'])
+    assert not set(panels['calibration']) & set(panels['readout_receivers'])
+    assert draw_panels('people', entities) == panels
+    assert draw_panels('scenes', entities) != panels
+
+
+def test_a_duplicate_entity_is_refused() -> None:
+    from vision_unlearning.benchmarks.I_care.equalization import draw_panels
+    with pytest.raises(ValueError, match='duplicate'):
+        draw_panels('people', ['a', 'a'] + [str(k) for k in range(40)])

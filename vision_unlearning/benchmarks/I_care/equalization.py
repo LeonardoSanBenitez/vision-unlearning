@@ -359,3 +359,34 @@ def retain_diagnostics(receiver_clip_diffs: Sequence[float], route_noise: float)
         'bleed_rate': damaged / len(values),
         'damage_threshold': threshold,
     }
+
+
+# -- the panels ----------------------------------------------------------------------------------
+
+#: The seed every task's panels are drawn with, fixed before any calibration session runs.
+PANEL_SEED = 20261019
+CALIBRATION_SIZE = 5
+CONFIRMATION_SIZE = 25
+READOUT_RECEIVERS = 20
+
+
+def draw_panels(task: str, entities: Sequence[str], seed: int = PANEL_SEED) -> Dict[str, List[str]]:
+    """The task's calibration and confirmation entities and its read-out receivers, drawn at random.
+
+    Drawn from all of the task's entities (in the metadata's order) with a generator seeded to
+    ``seed`` and the task name, so the three tasks get independent draws and the draw can be
+    repeated by anyone: five calibration entities; 25 confirmation entities from the rest; 20
+    read-out receivers from the entities that are not calibration targets. The three methods share
+    them. Membership says nothing about an entity's quality: no entity is drawn by a score.
+    """
+    import random
+    if len(set(entities)) != len(entities):
+        raise ValueError('the entity list holds a duplicate')
+    if len(entities) < CALIBRATION_SIZE + CONFIRMATION_SIZE:
+        raise ValueError(f'{len(entities)} entities cannot hold both panels')
+    rng = random.Random(f'{seed}:{task}')
+    calibration = rng.sample(list(entities), CALIBRATION_SIZE)
+    rest = [entity for entity in entities if entity not in calibration]
+    confirmation = rng.sample(rest, CONFIRMATION_SIZE)
+    receivers = rng.sample(rest, READOUT_RECEIVERS)
+    return {'calibration': calibration, 'confirmation': confirmation, 'readout_receivers': receivers}
