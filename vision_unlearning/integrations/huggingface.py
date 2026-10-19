@@ -13,6 +13,18 @@ from vision_unlearning.utils.logger import get_logger
 logger = get_logger('integrations')
 
 
+def hub_offline() -> bool:
+    '''
+    Whether HuggingFace Hub access is switched off with the HF_HUB_OFFLINE environment variable.
+
+    Read at call time, with the Hub's own truth values ("1", "ON", "YES", "TRUE", any case), so a
+    variable set after import is honoured. Code that asks "is this on the Hub?" must answer "no"
+    in offline mode rather than look: the answer would be true, and the download that follows is
+    refused by the Hub client, so a computable artifact fails instead of being computed.
+    '''
+    return os.environ.get('HF_HUB_OFFLINE', '').strip().upper() in {'1', 'ON', 'YES', 'TRUE'}
+
+
 def get_hf_token_from_env() -> Optional[str]:
     '''
     Read the HF_TOKEN environment variable, normalizing falsy values to None.

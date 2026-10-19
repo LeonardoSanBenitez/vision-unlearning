@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from vision_unlearning.integrations.huggingface import (
     get_hf_token_from_env,
+    hub_offline,
     huggingface_dataset_file_download,
     huggingface_dataset_file_exists,
     huggingface_dataset_file_upload,
@@ -206,6 +207,10 @@ class SingleFileArtifact(Artifact):
         return os.path.exists(self._get_data_path_local())
 
     def _exists_remote(self, hf_token: Optional[str]) -> bool:
+        # Offline, nothing is on the Hub as far as the cascade is concerned: looking would find
+        # the file and the download would then be refused, instead of computing it.
+        if hub_offline():
+            return False
         try:
             return huggingface_dataset_file_exists(
                 self.remote_repository_name,

@@ -786,7 +786,10 @@ class GeneratedDataset(Artifact):
         # silently trigger a from-scratch regeneration.
         from vision_unlearning.integrations.huggingface import (  # noqa: PLC0415
             huggingface_dataset_exists,
+            hub_offline,
         )
+        if hub_offline():
+            return False
         return huggingface_dataset_exists(
             self.remote_repository_name,
             self.hf_config_name,
