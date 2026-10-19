@@ -1,8 +1,8 @@
 """Planning spike: is a CLIP-based "the base model generates this entity recognisably" rule usable?
 
-Declared spike (CONTRIBUTING.md section 1.7): planning input, never evidence. It reads the FIRST corpus's
-baseline images, whose noise convention the regeneration replaces, so its numbers only tell us whether a
-rule of this shape leaves enough entities per task; the rule itself is computed on the new baseline in S3.
+A planning probe, not evidence. It reads the first corpus's baseline images, whose noise convention the
+regenerated corpus replaces, so its numbers only say whether a rule of this shape leaves enough entities
+per task; the rule itself is computed on the regenerated baseline.
 
 For every baseline image of a task it scores the image against all 100 generation prompts of that task with
 the scorer `pipeline_06` uses (CLIP ViT-B/16; score = 100 * max(cosine, 0), as torchmetrics' CLIPScore),
@@ -12,7 +12,7 @@ then reports per task:
   - how many entities pass "own prompt in the top K in at least M of the 4 seeds" for a few (K, M);
   - the floor 0.5 x mean specificity over random five-entity panels drawn from the passing entities.
 
-Usage (from the zoo root):
+Usage:
   python <this file> --images-root <folder holding generated_{task}_baseline/> --output <json>
 The images are the files `off_{seed}_{prompt}.png`; the prompt is read from the file name.
 """
