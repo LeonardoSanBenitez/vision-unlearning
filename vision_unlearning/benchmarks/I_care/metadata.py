@@ -49,6 +49,39 @@ def _interference_per_pair_filename(
     return f'interferences_caused_by_{task}_{index}_{method}_{num_train_epochs}{model_segment(model)}.json'
 
 
+# Control sessions: forget an entity of ANOTHER task while retaining this task's entities, and are
+# measured on this task's receivers. Their per-pair files carry their own prefix, so nothing that reads
+# the regular sessions -- by index, or by the regular prefix -- can pick one up.
+CONTROL_INTERFERENCE_PREFIX = 'control_interferences_caused_by_'
+
+
+def control_session_entity(emitter_task: type_task, emitter: str) -> str:
+    """The name a control session's model, image and embedding folders use in place of an entity.
+
+    It can never equal an entity of any task: it starts with ``control from``.
+    """
+    from vision_unlearning.datasets.entity_names import canonical_entity
+    return f'control from {emitter_task} {canonical_entity(emitter_task, emitter)}'
+
+
+def get_control_interference_per_pair_path(
+    task: type_task,
+    emitter_task: type_task,
+    emitter: str,
+    method: type_unlearning_algorithm,
+    num_train_epochs: int,
+    base_folder: str = 'assets',
+    model: type_model = 'sd1.4',
+) -> str:
+    """Where a control session's per-pair file lives: beside the regular ones, under its own prefix."""
+    if emitter_task == task:
+        raise ValueError('a control session forgets an entity of another task')
+    from vision_unlearning.datasets.entity_names import canonical_entity
+    name = (f'{CONTROL_INTERFERENCE_PREFIX}{task}_from_{emitter_task}_{canonical_entity(emitter_task, emitter)}'
+            f'_{method}_{num_train_epochs}{model_segment(model)}.json')
+    return os.path.join(base_folder, 'datasets', name)
+
+
 def get_interference_per_pair_path(
     task: Literal['scenes', 'objects', 'breeds', 'people'],
     index: int,
