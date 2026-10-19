@@ -15,8 +15,9 @@ has on disk -- not what it intended to load -- and writes it beside the run:
 ``conda.txt``
     ``conda list --explicit``, when conda is on the path.
 ``sbom.json``
-    A CycloneDX software bill of materials of the environment (``cyclonedx-py environment``), when
-    that tool is installed.
+    A CycloneDX software bill of materials of the running interpreter's environment, written by
+    ``cyclonedx-py environment``. The tool may live in another environment (``--sbom-tool``), so that
+    installing it does not change the environment it describes.
 
 Every ``provenance.json`` of the campaign records the sha256 of ``pins.json`` and ``freeze.txt``, so
 an artifact names the exact inputs it came from.
@@ -103,7 +104,7 @@ def git_head(folder: Optional[str]) -> Optional[str]:
 
 def _run_to_file(command: Sequence[str], path: str) -> bool:
     """Run a command and write its standard output to `path`; False if it is unavailable or fails."""
-    if shutil.which(command[0]) is None and command[0] != sys.executable:
+    if shutil.which(command[0]) is None and not os.path.isfile(command[0]):
         return False
     result = subprocess.run(list(command), capture_output=True, text=True)
     if result.returncode != 0:
@@ -121,6 +122,7 @@ def capture(
     scenes_archives: Sequence[str] = (),
     allow_missing: bool = False,
     freeze_command: Optional[Sequence[str]] = None,
+    sbom_tool: str = 'cyclonedx-py',
 ) -> Dict[str, Any]:
     """Write ``pins.json`` and the freeze files into `output_dir`; return the pins."""
     os.makedirs(output_dir, exist_ok=True)
@@ -130,7 +132,7 @@ def capture(
     conda_path = os.path.join(output_dir, 'conda.txt')
     has_conda = _run_to_file(['conda', 'list', '--explicit'], conda_path)
     sbom_path = os.path.join(output_dir, 'sbom.json')
-    has_sbom = _run_to_file(['cyclonedx-py', 'environment', '--output-format', 'JSON'], sbom_path)
+    has_sbom = _run_to_file([sbom_tool, 'environment', '--output-format', 'JSON', sys.executable], sbom_path)
 
     pins: Dict[str, Any] = {
         'huggingface': {role: hub_commit(hf_cache, folder) for role, folder in HUB_REPOSITORIES.items()},
@@ -183,10 +185,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument('--breeds-clone', default=None, help='the breeds source clone, whose HEAD is recorded')
     parser.add_argument('--scenes-archive', action='append', default=[], help='a scenes source archive to hash; repeatable')
     parser.add_argument('--allow-missing', action='store_true', help='record a missing pin as null instead of failing')
+    parser.add_argument('--sbom-tool', default='cyclonedx-py',
+                        help='the cyclonedx-py executable, possibly of another environment (default: cyclonedx-py on the path)')
     args = parser.parse_args(argv)
     try:
         pins = capture(args.output_dir, args.hf_cache, args.torch_hub, args.breeds_clone,
-                       args.scenes_archive, args.allow_missing)
+                       args.scenes_archive, args.allow_missing, sbom_tool=args.sbom_tool)
     except MissingPin as exc:
         print(f'capture_pins: {exc}', file=sys.stderr)
         return 1
