@@ -9,6 +9,8 @@ files.
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -43,7 +45,10 @@ class FakeHub:
         self.lfs_suffixes = lfs_suffixes
 
     def _store(self, local: str, remote: str) -> None:
-        self.stored[remote] = local
+        # A copy of the bytes as uploaded, so a later change to the local file does not change them.
+        snapshot = os.path.join(tempfile.mkdtemp(), os.path.basename(local))
+        shutil.copyfile(local, snapshot)
+        self.stored[remote] = snapshot
 
     def upload_file(self, path_or_fileobj: str, path_in_repo: str, **kwargs: Any) -> None:
         self.calls.append(f"upload_file {kwargs['repo_id']} {path_in_repo}")
@@ -133,6 +138,22 @@ def test_a_remote_file_whose_bytes_differ_is_reported(tmp_path: Any) -> None:
     with pytest.raises(UploadMismatch, match='datasets/x/1.png'):
         upload_folder(folder, 'datasets/x', CAMPAIGN_REPOSITORY, 'token', ['0.png', '1.png'],
                       api=FakeHub(corrupt='datasets/x/1.png'))
+
+
+def test_a_local_file_changed_after_its_upload_is_reported(tmp_path: Any) -> None:
+    """Fails on the code before: nothing could re-check a published file without uploading it again."""
+    hub = FakeHub()
+    image = tmp_path / 'probe.png'
+    image.write_bytes(bytes(range(256)))
+    upload_file(str(image), 'scratch/probe.png', CAMPAIGN_REPOSITORY, 'token', api=hub)
+    assert upload.remote_mismatches([(str(image), 'scratch/probe.png')], CAMPAIGN_REPOSITORY, 'token', api=hub) == []
+    data = bytearray(image.read_bytes())
+    data[100] ^= 0x01
+    image.write_bytes(bytes(data))
+    problems = upload.remote_mismatches([(str(image), 'scratch/probe.png')], CAMPAIGN_REPOSITORY, 'token', api=hub)
+    assert len(problems) == 1 and problems[0].startswith('scratch/probe.png: remote sha256')
+    assert upload.remote_mismatches([(str(image), 'scratch/absent.png')], CAMPAIGN_REPOSITORY, 'token', api=hub) == [
+        'scratch/absent.png: not on the remote']
 
 
 def test_a_file_stored_in_git_is_checked_by_its_blob_id(tmp_path: Any) -> None:

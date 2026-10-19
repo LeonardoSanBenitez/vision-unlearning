@@ -101,7 +101,7 @@ def _mismatches(local: Dict[str, Dict[str, str]], remote_entries: Iterable[Any])
     for path, record in sorted(local.items()):
         entry = remote.get(path)
         if entry is None:
-            problems.append(f'{path}: not on the remote after the upload')
+            problems.append(f'{path}: not on the remote')
             continue
         lfs = getattr(entry, 'lfs', None)
         if lfs is not None:
@@ -142,6 +142,23 @@ def upload_file(
     if problems:
         raise UploadMismatch('; '.join(problems))
     return {path: record['sha256'] for path, record in local.items()}
+
+
+def remote_mismatches(
+    pairs: Sequence[Sequence[str]],
+    repository: str,
+    token: Optional[str],
+    api: Any = None,
+) -> List[str]:
+    """Check local files against the repository's record of them, uploading nothing.
+
+    `pairs` are ``(local path, remote path)``. Returns one line per remote path whose Large File
+    Storage sha256 or git blob id differs from the local file's, or that is not on the remote; an
+    empty list when every file agrees. Reading needs no permission, so no repository is refused.
+    """
+    local = _local_records([(str(a), str(b).replace(os.sep, '/')) for a, b in pairs])
+    entries = _api(token, api).get_paths_info(repository, sorted(local), repo_type='dataset', expand=False)
+    return _mismatches(local, entries)
 
 
 def upload_folder(
