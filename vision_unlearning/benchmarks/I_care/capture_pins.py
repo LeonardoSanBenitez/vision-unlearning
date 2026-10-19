@@ -44,6 +44,9 @@ HUB_REPOSITORIES: Dict[str, str] = {
     'people_source': 'datasets--bitmind--lfw',
 }
 DINOV2_CHECKPOINT = 'dinov2_vits14_pretrain.pth'
+#: The DINOv2 code commit embeddings.DINOV2_HUB_REFERENCE names; torch.hub caches it as
+#: facebookresearch_dinov2_<commit>. A test holds the two equal.
+DINOV2_COMMIT = '7764ea0f912e53c92e82eb78a2a1631e92725fc8'
 
 
 class MissingPin(RuntimeError):
@@ -90,14 +93,18 @@ def hub_commit(hf_cache: str, repository_folder: str) -> Optional[str]:
     return found[0] if len(found) == 1 else None
 
 
-def dinov2_hashes(torch_hub: str) -> Dict[str, Optional[str]]:
-    """The sha256 of the cached DINOv2 code checkout and of its checkpoint, None where absent."""
-    checkouts = sorted(name for name in os.listdir(torch_hub) if name.startswith('facebookresearch_dinov2')) \
-        if os.path.isdir(torch_hub) else []
+def dinov2_hashes(torch_hub: str, commit: str = DINOV2_COMMIT) -> Dict[str, Optional[str]]:
+    """The sha256 of the cached DINOv2 checkout at the pinned commit and of its checkpoint.
+
+    Only the checkout torch.hub made for that commit counts; another cached ref (``main``) is not the
+    code the benchmark loads. None where absent.
+    """
+    checkout = f'facebookresearch_dinov2_{commit}'
+    present = os.path.isdir(os.path.join(torch_hub, checkout))
     checkpoint = os.path.join(torch_hub, 'checkpoints', DINOV2_CHECKPOINT)
     return {
-        'dinov2_checkout': checkouts[-1] if checkouts else None,
-        'dinov2_code_sha256': sha256_tree(os.path.join(torch_hub, checkouts[-1])) if checkouts else None,
+        'dinov2_checkout': checkout if present else None,
+        'dinov2_code_sha256': sha256_tree(os.path.join(torch_hub, checkout)) if present else None,
         'dinov2_checkpoint_sha256': _sha256_file(checkpoint) if os.path.isfile(checkpoint) else None,
     }
 

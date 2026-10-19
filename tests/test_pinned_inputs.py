@@ -44,7 +44,8 @@ def _fixture_caches(tmp_path: Any) -> Any:
         refs.mkdir(parents=True)
         (refs / 'main').write_text(f'commit-of-{role}\n')
     hub = tmp_path / 'torchhub'
-    code = hub / 'facebookresearch_dinov2_7764ea0f'
+    code = hub / f'facebookresearch_dinov2_{capture_pins.DINOV2_COMMIT}'
+    (hub / 'facebookresearch_dinov2_main').mkdir(parents=True)
     code.mkdir(parents=True)
     (code / 'hubconf.py').write_text('dependencies = []\n')
     (hub / 'checkpoints').mkdir()
@@ -69,7 +70,7 @@ def test_the_capture_writes_every_field(tmp_path: Any, monkeypatch: pytest.Monke
     with open(tmp_path / 'out' / 'pins.json', encoding='utf-8') as handle:
         assert json.load(handle) == pins
     assert pins['huggingface'] == {role: f'commit-of-{role}' for role in capture_pins.HUB_REPOSITORIES}
-    assert pins['torch_hub']['dinov2_checkout'] == 'facebookresearch_dinov2_7764ea0f'
+    assert pins['torch_hub']['dinov2_checkout'] == f'facebookresearch_dinov2_{capture_pins.DINOV2_COMMIT}'
     assert all(len(pins['torch_hub'][k]) == 64 for k in ('dinov2_code_sha256', 'dinov2_checkpoint_sha256'))
     assert list(pins['sources']['scenes_archives_sha256']) == ['SUNAttributeDB.tar.gz']
     assert all(pins[k] for k in ('freeze_sha256', 'conda_sha256', 'sbom_sha256'))
@@ -82,7 +83,7 @@ def test_the_code_hash_follows_the_code(tmp_path: Any, monkeypatch: pytest.Monke
     _fake_tools(monkeypatch)
     hf, hub, _ = _fixture_caches(tmp_path)
     before = capture_pins.capture(str(tmp_path / 'a'), str(hf), str(hub))['torch_hub']['dinov2_code_sha256']
-    (hub / 'facebookresearch_dinov2_7764ea0f' / 'hubconf.py').write_text('dependencies = ["torch"]\n')
+    (hub / f'facebookresearch_dinov2_{capture_pins.DINOV2_COMMIT}' / 'hubconf.py').write_text('dependencies = ["torch"]\n')
     after = capture_pins.capture(str(tmp_path / 'b'), str(hf), str(hub))['torch_hub']['dinov2_code_sha256']
     assert before != after
 
@@ -109,3 +110,8 @@ def test_a_repository_loaded_by_commit_is_pinned_by_its_only_snapshot(tmp_path: 
     assert capture_pins.hub_commit(str(tmp_path), 'datasets--bitmind--lfw') == '274dfbca'
     (tmp_path / 'datasets--bitmind--lfw' / 'snapshots' / 'another').mkdir()
     assert capture_pins.hub_commit(str(tmp_path), 'datasets--bitmind--lfw') is None
+
+
+def test_the_capture_and_the_loader_name_the_same_dinov2_commit() -> None:
+    assert _source('vision_unlearning/benchmarks/I_care/embeddings.py').count(
+        f'facebookresearch/dinov2:{capture_pins.DINOV2_COMMIT}') == 1
