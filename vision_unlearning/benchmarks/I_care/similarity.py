@@ -1113,12 +1113,19 @@ class Similarity(SingleFileArtifact):
         labels: List[str] = [e['name'] for e in metadata_filtered]
 
         if self.similarity_metric == 'clip':
-            raise ArtifactNotAvailableError(
-                "CLIP similarity matrix not found locally or in HuggingFace Hub. "
-                "Recomputing from scratch requires a GPU with CLIP/SD 1.4 and is not "
-                "supported here.  Either upload the precomputed matrix to HF or "
-                "run pipeline_02 with --similarity clip on a GPU machine."
-            )
+            # The CLIP text score between the two entities' canonical names, with the scorer the
+            # benchmark has always used for it (CLIP ViT-B/16 through torchmetrics' clip_score,
+            # 100 * max(cosine, 0)). The score is symmetric, so each unordered pair is scored once.
+            from vision_unlearning.datasets.entity_names import canonical_entity
+            from vision_unlearning.metrics.text_and_text import MetricTextTextSimilarity
+            scorer = MetricTextTextSimilarity(metrics=['clip_text'])
+            names = {label: canonical_entity(cast(type_entity_task, self.task), label) for label in labels}
+            df_similarities = pd.DataFrame(index=labels, columns=labels, dtype=float)
+            for i, emitter in enumerate(labels):
+                for receiver in labels[i:]:
+                    value = scorer.score(names[emitter], names[receiver])['clip_text']
+                    df_similarities.loc[emitter, receiver] = value
+                    df_similarities.loc[receiver, emitter] = value
 
         elif self.similarity_metric == 'jacc':
             # The partial checkpoint lives next to the canonical file.

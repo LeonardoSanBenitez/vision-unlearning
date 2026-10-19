@@ -2,9 +2,9 @@
 
 Supports five similarity metrics (``--similarity`` flag):
 
-    clip          CLIP-space cosine similarity.  The RT downloads the matrix from
-                  HuggingFace when available; a from-scratch recompute requires a
-                  GPU with a CLIP/SD model and is intentionally not wired here.
+    clip          CLIP text score between the two entities' canonical names (CLIP
+                  ViT-B/16, 100 * max(cosine, 0)). Read locally or from HuggingFace when
+                  present, computed otherwise; a card makes it fast but is not required.
     dino          DINOv2-ViT-S/14 cosine similarity computed from the method-agnostic
                   baseline embedding file (``embeddings_{task}_original.json``).
                   CPU-only.
@@ -107,26 +107,10 @@ def run_clip(
     base_folder: str,
     upload: bool = False,
 ) -> None:
-    """Download or fall through to the CLIP similarity matrix for a task.
-
-    The RT downloads from HuggingFace when available; if the matrix is not
-    present locally or on HF it raises ArtifactNotAvailableError with instructions
-    for the GPU path.
-    """
-    import vision_unlearning.benchmarks.I_care as vb
+    """Resolve the CLIP text similarity matrix for a task: local, HuggingFace, or computed."""
     logger.info("CLIP similarity matrix for task=%s — calling RT.compute()...", task)
-    try:
-        resolve_matrix(task, "clip", base_folder, upload)
-        logger.info("CLIP similarity matrix for task=%s OK.", task)
-    except vb.ArtifactNotAvailableError as exc:
-        logger.error(
-            "CLIP similarity matrix for task=%s: %s\n"
-            "A from-scratch CLIP recompute requires a GPU with CLIP/SD 1.4 loaded, "
-            "which is not supported in this pipeline.  Either:\n"
-            "  1. Run the original calculate_similarity_clip on the GPU machine, or\n"
-            "  2. Make sure the matrix is uploaded to HuggingFace so the RT can download it.",
-            task, exc,
-        )
+    resolve_matrix(task, "clip", base_folder, upload)
+    logger.info("CLIP similarity matrix for task=%s OK.", task)
 
 
 def run_dino(

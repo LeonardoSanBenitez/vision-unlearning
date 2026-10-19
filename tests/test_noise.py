@@ -389,3 +389,32 @@ def test_an_entity_dataset_is_not_regenerated_under_per_image_noise(tmp_path: An
                                base_folder=str(tmp_path), noise='per_image_processor')
     with pytest.raises(ValueError, match='produced by the session'):
         dataset._compute_from_scratch([42], ['An image of x'])
+
+
+# -- the CLIP text similarity, computable again -----------------------------------------------
+
+
+def test_the_clip_text_similarity_is_computed_from_canonical_names(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fails on the code before: computing the clip matrix from scratch raised."""
+    import math
+    from vision_unlearning.benchmarks.I_care import similarity as similarity_module
+    from vision_unlearning.metrics.text_and_text import MetricTextTextSimilarity
+
+    seen: List[Any] = []
+
+    def score(self: Any, a: str, b: str) -> Any:
+        seen.append((a, b))
+        va, vb = [float(len(a)), float(sum(map(ord, a)) % 7 + 1)], [float(len(b)), float(sum(map(ord, b)) % 7 + 1)]
+        cosine = (va[0] * vb[0] + va[1] * vb[1]) / (math.hypot(*va) * math.hypot(*vb))
+        return {'clip_text': 100 * max(cosine, 0.0)}
+    monkeypatch.setattr(MetricTextTextSimilarity, 'score', score)
+    monkeypatch.setattr(similarity_module.MetadataFiltered, 'compute', lambda self: [{'name': n} for n in ('abbey', 'badlands', 'office')])
+    rows = similarity_module.Similarity(task='scenes', similarity_metric='clip', base_folder=str(tmp_path))._compute_from_scratch()
+    matrix = {row['emitter']: row for row in rows}
+    assert [row['emitter'] for row in rows] == ['abbey', 'badlands', 'office']
+    for a in matrix:
+        assert matrix[a][a] == pytest.approx(100.0)
+        for b in matrix:
+            assert matrix[a][b] == matrix[b][a]
+    assert ('an abbey scene', 'a badlands scene') in seen
+    assert len(seen) == 6  # each unordered pair once, with the diagonal

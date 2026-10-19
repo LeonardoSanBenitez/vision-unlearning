@@ -1812,18 +1812,8 @@ class TestSimilarityArtifact:
             json.dump(matrix, f)
         assert sim.compute() == matrix
 
-    def test_clip_recompute_raises(
-        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            _artifact_mod, 'huggingface_dataset_file_exists', lambda *a, **k: False
-        )
-        monkeypatch.setattr(_rt_mod.MetadataFiltered, "compute", lambda self: [{'name': 'Alice'}])
-        sim = _rt_mod.Similarity(
-            task='people', similarity_metric='clip', base_folder=str(tmp_path)
-        )
-        with pytest.raises(ArtifactNotAvailableError):
-            sim.compute()
+    # The clip matrix is computable from scratch again (from the entities' canonical names); its
+    # computation is covered in the heavy tier, tests/test_noise.py, because it needs torchmetrics.
 
     def test_unet_latent_remote_path(self) -> None:
         sim = _rt_mod.Similarity(task='breeds', similarity_metric='unet_latent')
