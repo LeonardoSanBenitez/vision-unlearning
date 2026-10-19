@@ -205,6 +205,21 @@ class SalUn(Unlearner):
                     'erase more.'
     )
     max_train_steps: Optional[int] = Field(None, description='If set, stop after this many optimizer steps regardless of the epoch count.')
+    save_at_epochs: List[int] = Field(
+        default_factory=list,
+        description='Epochs after which the trained tensors are also saved, each into '
+                    "`output_dir/epoch_<E>/` under the usual weight filename. One run to the largest "
+                    'epoch then yields the model of every smaller one: the learning rate is constant, '
+                    'so the tensors after epoch E of a longer run are exactly those of a run stopped '
+                    'at E. Each value must lie in [1, num_train_epochs].'
+    )
+    allow_tf32: bool = Field(
+        default=False,
+        description='Let the fine-tune use TensorFloat-32 inside matrix products on cards that support '
+                    'it (a 10-bit mantissa for the products, full precision everywhere else). Off by '
+                    "default, which leaves torch's own settings untouched (matrix products in full "
+                    'precision unless the process changed it). Restored to the previous settings afterwards.'
+    )
     learning_rate: float = Field(default=1e-5, description='The initial learning rate for Adam.')
     seed: int = Field(default=42, description='Seed for the mask stage, the sampled timesteps and the sampling noise.')
 
@@ -545,9 +560,32 @@ class SalUn(Unlearner):
 
         unet.train()
         total = self._total_steps(forget_loader)
+        steps_per_epoch = len(forget_loader)
+        bad = [epoch for epoch in self.save_at_epochs if not 1 <= epoch <= self.num_train_epochs]
+        if bad:
+            raise ValueError(f'save_at_epochs {bad} lie outside [1, num_train_epochs={self.num_train_epochs}]')
         retain_batches = self._cycle(retain_loader)
-        step = 0
         losses: List[float] = []
+        tf32_before = (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32)
+        if self.allow_tf32:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        try:
+            self._fit_loop(pipeline, unet, trained, device_mask, optimizer, scheduler, generator,
+                           forget_loader, retain_batches, total, steps_per_epoch, losses)
+        finally:
+            torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32 = tf32_before
+
+        unet.eval()
+        return {name: parameter.detach().cpu().contiguous() for name, parameter in trained.items()}
+
+    def _fit_loop(
+        self, pipeline: Any, unet: Any, trained: Dict[str, Any], device_mask: Dict[str, torch.Tensor],
+        optimizer: Any, scheduler: Any, generator: torch.Generator, forget_loader: Any,
+        retain_batches: Any, total: int, steps_per_epoch: int, losses: List[float],
+    ) -> None:
+        '''The optimizer steps of `_fit`, saving the tensors after every epoch in `save_at_epochs`.'''
+        step = 0
         while step < total:
             for forget_batch in forget_loader:
                 if step >= total:
@@ -577,9 +615,13 @@ class SalUn(Unlearner):
                 step += 1
                 if step % 10 == 0 or step == total:
                     logger.info(f'step {step}/{total} forget {forget_value:.6f} retain {retain_value:.6f}')
-
-        unet.eval()
-        return {name: parameter.detach().cpu().contiguous() for name, parameter in trained.items()}
+                if step % steps_per_epoch == 0 and step // steps_per_epoch in self.save_at_epochs:
+                    epoch = step // steps_per_epoch
+                    self._save_weights(
+                        {name: parameter.detach().cpu().contiguous() for name, parameter in trained.items()},
+                        folder=os.path.join(self.output_dir, f'epoch_{epoch}'),
+                        num_train_epochs=epoch,
+                    )
 
     def _retain_loss(self, pipeline: Any, batch: Dict[str, torch.Tensor], generator: torch.Generator, scheduler: Any) -> torch.Tensor:
         '''The ordinary diffusion loss on a retain batch under its own captions.'''
@@ -720,12 +762,19 @@ class SalUn(Unlearner):
     ##########################################
     # Artifacts
     ##########################################
-    def _save_weights(self, tensors: Dict[str, torch.Tensor]) -> None:
-        '''Save only the modified denoiser tensors, keyed by their name in the denoiser.'''
-        os.makedirs(self.output_dir, exist_ok=True)
+    def _save_weights(
+        self, tensors: Dict[str, torch.Tensor], folder: Optional[str] = None, num_train_epochs: Optional[int] = None,
+    ) -> None:
+        '''Save only the modified denoiser tensors, keyed by their name in the denoiser.
+
+        Into `output_dir` unless `folder` is given; the recorded epoch count is the run's unless
+        `num_train_epochs` says the tensors are an earlier epoch's.
+        '''
+        folder = self.output_dir if folder is None else folder
+        os.makedirs(folder, exist_ok=True)
         save_file(
             tensors,
-            os.path.join(self.output_dir, SALUN_WEIGHTS_FILENAME),
+            os.path.join(folder, SALUN_WEIGHTS_FILENAME),
             metadata={
                 'base_model_id': self.pretrained_model_name_or_path,
                 'train_method': self.train_method,
@@ -734,12 +783,12 @@ class SalUn(Unlearner):
                 'mask_precision': self.mask_precision,
                 'mask_guidance': str(self.mask_guidance),
                 'alpha': str(self.alpha),
-                'num_train_epochs': str(self.num_train_epochs),
+                'num_train_epochs': str(self.num_train_epochs if num_train_epochs is None else num_train_epochs),
                 'learning_rate': str(self.learning_rate),
                 'seed': str(self.seed),
             },
         )
-        logger.info(f'Saved {len(tensors)} SalUn weight tensors to {self.output_dir}')
+        logger.info(f'Saved {len(tensors)} SalUn weight tensors to {folder}')
 
     def _save_mask(self, mask: Dict[str, torch.Tensor], context: Dict[str, Any]) -> None:
         """Save the saliency mask beside the weights, with the cut that produced it.

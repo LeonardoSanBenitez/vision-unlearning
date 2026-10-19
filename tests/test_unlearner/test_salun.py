@@ -626,3 +626,52 @@ def test_a_bare_class_name_on_disk_would_be_conditioned_on_verbatim() -> None:
     )
 
     assert tokenizer.seen == [['Mark_Philippoussis'], ['An image of a child']]
+
+
+# ---------------------------------------------------------------- saving at requested epochs
+#
+# Fails on the code before: SalUn saved once, at the end, so sweeping its epoch dial cost one run
+# per value. With a constant learning rate the tensors after epoch E of a longer run ARE the run
+# stopped at E, which is what this pins -- on the real `_fit`, not on a copy of its loop.
+
+def _fit_for(epochs: int, tmp_path: Any, **overrides: Any) -> Dict[str, torch.Tensor]:
+    latent_size, cross_dim = 8, 16
+    unet = _tiny_unet(latent_size, cross_dim)
+    pipeline = _StubPipeline(unet, latent_size, cross_dim)
+    unlearner = _unlearner(device='cpu', train_method='xattn', num_train_epochs=epochs, learning_rate=0.05,
+                           output_dir=str(tmp_path), **overrides)
+    mask = {name: torch.ones_like(unet.get_parameter(name), dtype=torch.bool)
+            for name in unlearner._select_parameter_names(unet)}
+    return unlearner._fit(pipeline, mask, [_batch(), _batch()], [_batch()])
+
+
+def test_the_tensors_saved_at_epoch_two_of_three_are_a_two_epoch_run(tmp_path: Any) -> None:
+    from safetensors.torch import load_file
+    three = _fit_for(3, tmp_path / 'three', save_at_epochs=[2])
+    two = _fit_for(2, tmp_path / 'two')
+    saved = load_file(str(tmp_path / 'three' / 'epoch_2' / SALUN_WEIGHTS_FILENAME))
+    assert set(saved) == set(two)
+    assert all(torch.equal(saved[name], two[name]) for name in two)
+    assert any(not torch.equal(three[name], two[name]) for name in two), 'the third epoch changed nothing'
+
+
+def test_an_epoch_outside_the_run_is_refused(tmp_path: Any) -> None:
+    with pytest.raises(ValueError, match='save_at_epochs'):
+        _fit_for(2, tmp_path, save_at_epochs=[3])
+
+
+def test_tensorfloat32_is_on_during_the_fit_and_restored_after(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from vision_unlearning.unlearner import salun as salun_module
+    seen = []
+    original = salun_module.SalUn._fit_loop
+
+    def recording(self: Any, *args: Any, **kwargs: Any) -> None:
+        seen.append((torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32))
+        original(self, *args, **kwargs)
+    monkeypatch.setattr(salun_module.SalUn, '_fit_loop', recording)
+    before = (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32)
+    _fit_for(1, tmp_path / 'on', allow_tf32=True)
+    _fit_for(1, tmp_path / 'off')
+    assert seen[0] == (True, True)
+    assert seen[1] == before
+    assert (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32) == before
