@@ -31,11 +31,13 @@ import argparse
 import gc
 import json
 import os
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, cast
 
 import dotenv
 import torch
 
+from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task  # noqa: E402
+from vision_unlearning.datasets.testbed import get_generated_dataset_file  # noqa: E402
 from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY
 from vision_unlearning.benchmarks.I_care.prompts import evaluation_prompts
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
@@ -191,7 +193,7 @@ def run_baseline(
 
     metadata_filtered = get_metadata_filtered(task, base_folder=base_folder)
     prompts: List[str] = [
-        f"An image of {get_target_overwrite(task, 'distil', m['name'])[0]}"
+        generation_prompt(cast(type_entity_task, task), m['name'])
         for m in metadata_filtered
     ]
 
@@ -532,7 +534,7 @@ def run_normal(
 
         # Generate dataset
         prompts_gen = [
-            f"An image of {get_target_overwrite(task, method, m['name'])[0]}"
+            generation_prompt(cast(type_entity_task, task), m['name'])
             for m in metadata_filtered
         ]
         if limit_prompts is not None:
@@ -551,7 +553,7 @@ def run_normal(
             )
             for seed in seeds:
                 for lora_state in ["on", "off"]:
-                    filenames = [f"{lora_state}_{seed}_{p}.png" for p in prompts_gen]
+                    filenames = [get_generated_dataset_file(lora_state, seed, p) for p in prompts_gen]  # type: ignore[arg-type]
                     artifact_kind = ALGORITHM_REGISTRY[method].artifact_kind
                     if lora_state == "off":
                         _generate_baseline_pass(

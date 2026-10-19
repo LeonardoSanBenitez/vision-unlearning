@@ -52,6 +52,7 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, 
 import pandas as pd
 from pydantic import BaseModel
 
+from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task
 from vision_unlearning.benchmarks.I_care.configuration import ALGORITHM_REGISTRY, unlearning_algorithm_to_epochs
 from vision_unlearning.benchmarks.I_care.metadata import (
     get_embedding_hf_path,
@@ -349,7 +350,7 @@ def annotate_local_existence(
             if item.task not in prompts_by_task:
                 task_t = cast(_type_task, item.task)
                 prompts_by_task[item.task] = [
-                    f"An image of {get_target_overwrite(task_t, cast(_type_method, 'distil'), m['name'])[0]}"
+                    generation_prompt(cast(type_entity_task, task_t), m['name'])
                     for m in metadata_by_task[item.task]
                 ]
             item.local_exists = exists_unlearned_dataset(item.local_path, seeds, prompts_by_task[item.task])

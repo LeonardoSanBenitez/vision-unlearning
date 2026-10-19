@@ -42,6 +42,7 @@ try:
 except ImportError:
     shap = None  # type: ignore[assignment]
 
+from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task  # noqa: E402
 from vision_unlearning.integrations.huggingface import (
     get_hf_token_from_env,
     huggingface_dataset_file_exists,
@@ -1422,15 +1423,14 @@ class ResultTemplateMetricSimilarityAlignmentMulti(ResultTemplate):
             # Resolve the shared baseline folder once (local -> HuggingFace), rather than
             # rebuilding a raw path per entity per seed.
             all_prompts = [
-                f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}"
+                generation_prompt(cast(type_entity_task, self.task), name)
                 for name in labels
             ]
             baseline_folder = GeneratedDataset(
                 task=self.task, base_folder=self.base_folder, model=self.model,
             ).compute(baseline_seeds, all_prompts)
             for entity in labels:
-                target_name = get_target_overwrite(self.task, self.unlearning_algorithm, entity)[0]
-                entity_prompt = f"An image of {target_name}"
+                entity_prompt = generation_prompt(cast(type_entity_task, self.task), entity)
                 clip_scores: List[float] = []
                 for seed in baseline_seeds:
                     img_path = os.path.join(
@@ -2428,7 +2428,7 @@ class ResultTemplateImplicitAssociationTest(ResultTemplate):
         ent_list: List[str] = [e['name'] for e in metadata_filtered]
         # Build: metadata_name → expected prompt string
         meta_to_prompt: Dict[str, str] = {
-            name: f"An image of {get_target_overwrite(task, unlearning_algorithm, name)[0]}"  # type: ignore[arg-type]
+            name: generation_prompt(cast(type_entity_task, task), name)  # type: ignore[arg-type]
             for name in ent_list
         }
 
@@ -3371,7 +3371,7 @@ class ResultTemplateVisualSummaryBase(ResultTemplate):
             task=self.task, base_folder=self.base_folder,
         ).compute()
         return [
-            f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, m['name'])[0]}"
+            generation_prompt(cast(type_entity_task, self.task), m['name'])
             for m in metadata_filtered
         ]
 
@@ -3411,7 +3411,7 @@ class ResultTemplateVisualSummaryBase(ResultTemplate):
         for state in ['off', 'on']:
             for name in displayed_entities:
                 prompt = (
-                    f"An image of {get_target_overwrite(self.task, self.unlearning_algorithm, name)[0]}"
+                    generation_prompt(cast(type_entity_task, self.task), name)
                 )
                 img_path = os.path.join(
                     folder_for_state[state],

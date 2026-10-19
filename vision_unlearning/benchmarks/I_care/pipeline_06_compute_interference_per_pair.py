@@ -5,11 +5,12 @@ import math
 import os
 import shutil
 import sys
-from typing import Literal, Optional, get_args
+from typing import Literal, Optional, get_args, cast
 
 import matplotlib.pyplot as plt
 from PIL import Image
 
+from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task  # noqa: E402
 from vision_unlearning.metrics import MetricQuality, MetricImageImage, MetricImageTextSimilarity
 from vision_unlearning.benchmarks.I_care.embeddings import load_dino_model, compute_dino_image_similarity
 from vision_unlearning.utils.logger import get_logger, setup_loggers
@@ -197,7 +198,7 @@ metadata_filtered = get_metadata_filtered(task, base_folder=base_folder)
 # generate_dataset_limit_prompts only restricts per-entity prompt evaluation, NOT
 # the baseline or completeness checks.
 all_prompts = [
-    f"An image of {get_target_overwrite(task, method, m['name'])[0]}"
+    generation_prompt(cast(type_entity_task, task), m['name'])
     for m in metadata_filtered
 ]
 

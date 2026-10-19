@@ -178,6 +178,8 @@ def run_act(
         get_metadata_filtered,
         get_target_overwrite,
     )
+    from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task
+    from typing import cast
     from typing import Any, Dict
 
     fingerprint_path = get_act_fingerprints_path(task, MODEL_SHORT_NAME, base_folder)
@@ -218,7 +220,7 @@ def run_act(
         )
         entity_names = [e["name"] for e in metadata_filtered]
         entity_prompts: Dict[str, str] = {
-            name: f"An image of {get_target_overwrite(task, 'distil', name)[0]}"
+            name: generation_prompt(cast(type_entity_task, task), name)
             for name in entity_names
         }
 

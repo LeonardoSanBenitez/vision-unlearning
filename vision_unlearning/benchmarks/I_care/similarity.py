@@ -24,8 +24,9 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
+from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task  # noqa: E402
 from vision_unlearning.artifact import ArtifactNotAvailableError, SingleFileArtifact
-from vision_unlearning.datasets.testbed import MetadataFiltered, get_target_overwrite
+from vision_unlearning.datasets.testbed import MetadataFiltered, get_generated_dataset_file, get_target_overwrite
 from vision_unlearning.benchmarks.I_care.metadata import BaselineEmbeddings
 from vision_unlearning.benchmarks.I_care.configuration import (
     GENERATE_DATASET_SEEDS,
@@ -228,7 +229,7 @@ class UnetLatentSimilarity(BaseModel):
             task=self.task, base_folder=self.base_folder,
         ).compute()
         return [
-            (e['name'], f"An image of {get_target_overwrite(self.task, 'distil', e['name'])[0]}")
+            (e['name'], generation_prompt(cast(type_entity_task, self.task), e['name']))
             for e in metadata_filtered
         ]
 
@@ -537,7 +538,7 @@ class UnetLatentSimilarity(BaseModel):
         """The baseline image the benchmark already generated for this (prompt, seed)."""
         return os.path.join(
             self.base_folder, 'datasets', f'generated_{self.task}_baseline',
-            f'off_{seed}_{prompt}.png',
+            get_generated_dataset_file('off', seed, prompt),
         )
 
     def _read_baseline_image(self, prompt: str, seed: int) -> np.ndarray:
@@ -1158,7 +1159,7 @@ class Similarity(SingleFileArtifact):
             # result; entity_names.generation_prompt is the direct way to build this string.
             ent_list = [e['name'] for e in metadata_filtered]
             meta_to_prompt: Dict[str, str] = {
-                name: f"An image of {get_target_overwrite(self.task, 'distil', name)[0]}"
+                name: generation_prompt(cast(type_entity_task, self.task), name)
                 for name in ent_list
             }
 

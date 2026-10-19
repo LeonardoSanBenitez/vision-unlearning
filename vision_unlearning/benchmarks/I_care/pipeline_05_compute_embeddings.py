@@ -26,8 +26,9 @@ import logging
 import os
 import shutil
 import sys
-from typing import Any, Callable, Dict, List, Literal, Optional, get_args
+from typing import Any, Callable, Dict, List, Literal, Optional, get_args, cast
 
+from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task  # noqa: E402
 from vision_unlearning.datasets.testbed import (
     get_target_preprocessed,
     get_target_overwrite,
@@ -639,7 +640,7 @@ if __name__ == "__main__":
     # get_target_overwrite()[0] returns e.g. "George W Bush" for people task.
     # This matches the prompted_entity and prompt values in existing embedding JSONs.
     prompts: List[str] = [
-        f"An image of {get_target_overwrite(task, method, m['name'])[0]}"
+        generation_prompt(cast(type_entity_task, task), m['name'])
         for m in metadata_filtered
     ]
 
