@@ -707,6 +707,7 @@ class ESD(Unlearner):
             metric_clip=MetricImageTextSimilarity(metrics=['clip']),
             compute_runtimes=self.compute_runtimes,
             plot_show=self.plot_show,
+            noise_seed=self.evaluation_noise_seed,
         )
 
         eval_result, eval_images = evaluator.evaluate()

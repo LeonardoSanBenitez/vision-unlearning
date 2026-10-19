@@ -18,6 +18,7 @@ import pytest
 _HEAVY_TEST_FILES = [
     "test_epoch_checkpoint_hook.py",
     "test_data_generation.py",
+    "test_noise.py",
     "test_gradient_weighting.py",
     "test_model_management.py",
     "test_testbed.py",

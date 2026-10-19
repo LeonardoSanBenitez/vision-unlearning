@@ -1893,10 +1893,12 @@ def _write_unet_latent_cache(
         'metadata': {
             'task': task, 'model': 'sd1.4', 'model_name': 'CompVis/stable-diffusion-v1-4',
             'seeds': list(seeds), 'num_inference_steps': num_inference_steps,
-            'batch_size': 1, 'dtype': 'float16', 'captured_at': '2026-08-06T00:00:00+00:00',
+            'batch_size': _sim_mod.GENERATION_BATCH_SIZE, 'dtype': 'float16',
+            'captured_at': '2026-08-06T00:00:00+00:00',
             'aggregation': 'mean over seeds, flatten C order, L2-normalise',
             'seeding_scheme': (
-                _sim_mod.CANONICAL_SEEDING_SCHEME if seeding_scheme is None else seeding_scheme
+                _sim_mod.SEEDING_SCHEMES[_sim_mod.GENERATION_NOISE]
+                if seeding_scheme is None else seeding_scheme
             ),
             'prompts_ordered': (
                 [entity['prompt'] for entity in entities]
@@ -2130,7 +2132,9 @@ class TestUnetLatentSimilarity:
 
         assert list(reloaded.keys()) == ['zulu', 'alpha', 'mike']
         assert metadata['seeds'] == [42, 43, 44, 45]
-        assert metadata['seeding_scheme'] == _sim_mod.CANONICAL_SEEDING_SCHEME
+        assert metadata['seeding_scheme'] == _sim_mod.PER_IMAGE_SEEDING_SCHEME
+        assert metadata['noise'] == 'per_image_processor'
+        assert metadata['batch_size'] == 8
         assert metadata['prompts_ordered'] == prompts
         assert metadata['latent_shape'] == [4, 2, 3]
         assert metadata['baseline_verification']['n_checked'] == 12

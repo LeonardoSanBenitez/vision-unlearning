@@ -13,6 +13,7 @@ from vision_unlearning.benchmarks.configuration import (
     LSpec,
     UnlearningAlgorithmSpec,
 )
+from vision_unlearning.utils.noise import type_noise
 
 # domain_unlearning_algorithm (pretty names) is derived from ALGORITHM_REGISTRY, defined
 # further down alongside the other declarative registries (Mp/S/L/UnlearningAlgorithm).
@@ -832,6 +833,16 @@ task_to_attributes_of_interest = {
 # exact list -- a partial list makes the completeness count disagree and triggers a spurious
 # regeneration (see GeneratedDataset.exists).
 GENERATE_DATASET_SEEDS: List[int] = [42, 43, 44, 45]
+
+# How every I-CARE image's initial noise is drawn, and the batch size every I-CARE image is generated
+# at. Both are part of what makes an image a pair of another: the noise convention decides which
+# latent an image starts from (see vision_unlearning.utils.noise), and the batch size changes the
+# kernels' arithmetic and so the pixels, by about 0.6 of 255 on an A40 even when the noise is fixed.
+# Every I-CARE route that generates or captures an image reads these two values from here, so the
+# baseline, the sessions and both captures cannot disagree. The library's own `generate_dataset`
+# keeps its historical defaults; these apply to the benchmark only.
+GENERATION_NOISE: type_noise = 'per_image_processor'
+GENERATION_BATCH_SIZE: int = 8
 
 
 # The method's hyperparameter is specially problematic to map/find, because i initially thought it should

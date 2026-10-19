@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, ConfigDict
 from huggingface_hub.repocard_data import EvalResult
 from vision_unlearning.utils.logger import get_logger
@@ -33,6 +33,14 @@ class Unlearner(BaseModel, ABC):
     # Set it True from a notebook, where blocking is exactly what you want. The figures are returned
     # from `evaluate()` either way, so leaving it off costs nothing but the window.
     plot_show: bool = False
+
+    # The seed of the final evaluation's initial noise. None (the default) keeps the historical
+    # behaviour: every image of the evaluation draws fresh, unseeded noise, so two evaluations of one
+    # model differ and the original and unlearned images of a prompt start from different latents.
+    # Given a seed, every image starts from that seed's latent, drawn on the processor by
+    # `vision_unlearning.utils.noise`, so the evaluation is reproducible and each original/unlearned
+    # comparison is made between images that differ only by the edit.
+    evaluation_noise_seed: Optional[int] = None
 
     @abstractmethod
     def train(self) -> List[EvalResult]:

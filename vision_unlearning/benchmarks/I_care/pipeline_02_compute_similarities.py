@@ -170,7 +170,7 @@ def run_act(
 
     from vision_unlearning.utils.mechanistic_interpretability import (
         SD_MODEL_NAME as MI_SD_MODEL_NAME,
-        compute_act_fingerprints_for_task,
+        capture_act_fingerprints,
         get_act_fingerprints_path,
         save_act_fingerprints,
     )
@@ -222,22 +222,37 @@ def run_act(
             for name in entity_names
         }
 
-        fingerprints = compute_act_fingerprints_for_task(
-            task=task,
+        # The benchmark's noise convention and batch size, so every entity's capture starts from
+        # the latent its baseline images started from (configuration.GENERATION_NOISE).
+        from vision_unlearning.benchmarks.I_care.configuration import (
+            GENERATION_BATCH_SIZE,
+            GENERATION_NOISE,
+        )
+        names = list(entity_prompts)
+        vectors, latent_hashes = capture_act_fingerprints(
             pipeline=pipeline,
-            entity_prompts=entity_prompts,
-            device=resolved_device,
+            prompts=[entity_prompts[name] for name in names],
             n_steps=n_steps,
             seeds=seeds,
+            device=resolved_device,
+            noise=GENERATION_NOISE,
+            batch_size=GENERATION_BATCH_SIZE,
         )
         save_act_fingerprints(
-            fingerprints=fingerprints,
+            fingerprints=dict(zip(names, vectors)),
             task=task,
             model=MODEL_SHORT_NAME,
             base_folder=base_folder,
             n_steps=n_steps,
             seeds=seeds,
             model_name=MI_SD_MODEL_NAME,
+            noise=GENERATION_NOISE,
+            batch_size=GENERATION_BATCH_SIZE,
+            entity_prompts=entity_prompts,
+            initial_latent_sha256={
+                name: {str(seed): latent_hash for seed, latent_hash in latent_hashes[index].items()}
+                for index, name in enumerate(names)
+            },
         )
         logger.info("Activation fingerprints saved to %s.", fingerprint_path)
     else:

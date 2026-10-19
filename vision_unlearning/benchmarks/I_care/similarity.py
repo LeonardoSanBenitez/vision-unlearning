@@ -29,22 +29,32 @@ from vision_unlearning.datasets.testbed import MetadataFiltered, get_target_over
 from vision_unlearning.benchmarks.I_care.metadata import BaselineEmbeddings
 from vision_unlearning.benchmarks.I_care.configuration import (
     GENERATE_DATASET_SEEDS,
+    GENERATION_BATCH_SIZE,
+    GENERATION_NOISE,
     type_task,
     type_model,
     type_s,
     model_segment,
 )
+from vision_unlearning.utils.noise import LATENT_HASH_SCHEMA_VERSION, type_noise
 
 SD_MODEL_NAME = "CompVis/stable-diffusion-v1-4"
 
-# How the final-denoised-latent capture consumes randomness: one torch.Generator per seed,
-# advanced across the whole prompt list in order -- the seeded branch of
-# ``vision_unlearning/utils/data_generation.py::generate_dataset``, which is what produced every
-# baseline image in the benchmark. Recorded in every cache and re-checked on every read, because
-# a cache captured under any other scheme holds different tensors under the same filename.
+# How the final-denoised-latent capture consumes randomness, one description per noise convention of
+# ``vision_unlearning.utils.noise``. Recorded in every cache and re-checked on every read, because a
+# cache captured under another scheme holds different tensors under the same filename. The first is
+# the historical convention, under which the first corpus was generated; the name is kept because
+# caches written under it record exactly this string.
 CANONICAL_SEEDING_SCHEME = (
     'canonical: one generator per seed, advanced across the prompt list in order'
 )
+PER_IMAGE_SEEDING_SCHEME = (
+    'per image: one processor generator per image, seeded to the image seed'
+)
+SEEDING_SCHEMES: Dict[str, str] = {
+    'stream': CANONICAL_SEEDING_SCHEME,
+    'per_image_processor': PER_IMAGE_SEEDING_SCHEME,
+}
 
 # One 8-bit grey level. A captured latent, decoded, must agree with the baseline PNG the
 # benchmark already generated to better than this, as a mean absolute difference over [0, 1] RGB.
@@ -52,9 +62,11 @@ BASELINE_TOLERANCE = 1.0 / 255.0
 
 logger = logging.getLogger(__name__)
 
-# How many entities, in prompt order, the pre-bulk correctness gate covers. Three rather than one
-# because the first entity's noise is the first draw of its seed's stream either way: only an
-# entity after it can tell a correctly advancing generator apart from one re-created per prompt.
+# How many entities, in prompt order, the pre-bulk correctness gate covers, at least. Three rather
+# than one because under the 'stream' convention the first entity's noise is the first draw of its
+# seed's stream either way: only an entity after it can tell a correctly advancing generator apart
+# from one re-created per prompt. The gate covers a whole first batch when the batch is larger, so
+# that it generates exactly the batch the full capture and the baseline generate.
 VALIDATION_ENTITIES = 3
 
 # How often the bulk capture logs a progress line. At ~16 s per capture this is a line every ~2.7
@@ -125,23 +137,30 @@ class UnetLatentSimilarity(BaseModel):
     per-seed ``z_0``, flattened in C order and L2-normalised; the similarity between two
     entities is the cosine of their vectors.
 
-    The capture reproduces the benchmark's own image generation exactly: one generator per seed,
-    advanced across the whole prompt list in order, as ``generate_dataset`` does. Entity *k*'s
-    ``z_0`` is therefore the latent behind *that entity's* stored baseline image, so this metric
-    reads the same images the rest of the benchmark reads -- the ones interference is measured on,
-    and the ones ``dino`` embeds one step later.
+    The capture reproduces the benchmark's own image generation exactly: the same noise convention
+    (``noise``), the same batch size (``batch_size``), the prompt list in the same order and cut
+    into the same batches, as ``generate_dataset`` produced the baseline. Entity *k*'s ``z_0`` is
+    therefore the latent behind *that entity's* stored baseline image, so this metric reads the
+    same images the rest of the benchmark reads -- the ones interference is measured on, and the
+    ones ``dino`` embeds one step later.
 
-    Two consequences of that, both load bearing. The capture is **order-dependent**: reordering
-    or filtering the prompt list changes every entity's initial noise, so the ordered prompt list
-    is part of a cache's identity and is re-checked on every read. And the correct answer for
-    every capture is **already on disk**: each latent is decoded and compared against its
-    baseline PNG at capture time (:meth:`_verify_against_baseline`), which is what makes a wrong
-    generator state impossible to store silently.
+    Two consequences of that, both load bearing. The capture is **order-dependent**: the prompt
+    order decides which prompts share a batch, and under the ``'stream'`` convention also which
+    noise draw each entity receives, so the ordered prompt list is part of a cache's identity and
+    is re-checked on every read. And the correct answer for every capture is **already on disk**:
+    each latent is decoded, with its batch, and compared against its baseline PNG at capture time
+    (:meth:`_verify_against_baseline`), which is what makes a wrong generator state impossible to
+    store silently.
 
-    The nuisance term this accepts is named rather than hidden: entity *k*'s initial noise is the
-    *k*-th draw of the seed's stream, so a cosine between two entities mixes concept difference
-    with two different noise realisations. ``dino`` carries exactly the same term, which is what
-    makes the two comparable; the four-seed average is what reduces it.
+    The two conventions differ in one nuisance term, named rather than hidden. Under
+    ``'stream'`` entity *k*'s initial noise is the *k*-th draw of the seed's stream, so a cosine
+    between two entities mixes concept difference with two different noise realisations. Under
+    ``'per_image_processor'`` (the benchmark's convention, ``configuration.GENERATION_NOISE``)
+    every entity at a seed starts from the same latent, so that term is gone and the four-seed
+    average reduces a common one instead. ``dino`` carries the same term as this metric under
+    either convention, which is what makes the two comparable. Under ``'per_image_processor'``
+    the cache also records, per (entity, seed), the hash of the initial latent the pipeline was
+    handed, so the capture can be checked key by key against the baseline's own record.
 
     The per-(entity, seed) cache this class writes is deliberately **not** an
     :class:`~vision_unlearning.artifact.Artifact`: it is a local debug cache that exists so the
@@ -163,6 +182,16 @@ class UnetLatentSimilarity(BaseModel):
     # canonical image generation uses (it passes no num_inference_steps at all); stating it
     # here keeps the value the cache metadata records true of the call that was actually made.
     num_inference_steps: int = 50
+    # How the baseline images this capture is checked against were generated. Both are recorded in
+    # the cache and compared on every read; a value that differs from the baseline's makes every
+    # capture fail its baseline check, loudly, rather than produce latents for images that do not
+    # exist.
+    noise: type_noise = GENERATION_NOISE
+    batch_size: int = GENERATION_BATCH_SIZE
+
+    def seeding_scheme(self) -> str:
+        """The recorded description of this capture's noise convention."""
+        return SEEDING_SCHEMES[self.noise]
 
     @property
     def seeds(self) -> List[int]:
@@ -225,12 +254,14 @@ class UnetLatentSimilarity(BaseModel):
             'model_name': SD_MODEL_NAME,
             'seeds': list(self.seeds),
             'num_inference_steps': self.num_inference_steps,
-            'batch_size': 1,
+            'batch_size': self.batch_size,
             'dtype': 'float16',
             'latent_shape': list(latent_shape),
             'captured_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'aggregation': 'mean over seeds, flatten C order, L2-normalise',
-            'seeding_scheme': CANONICAL_SEEDING_SCHEME,
+            'seeding_scheme': self.seeding_scheme(),
+            'noise': self.noise,
+            'latent_hash_schema_version': LATENT_HASH_SCHEMA_VERSION,
             'prompts_ordered': list(prompts_ordered),
             'baseline_verification': dict(verification),
         }
@@ -275,6 +306,11 @@ class UnetLatentSimilarity(BaseModel):
                         str(seed): self._encode(entity['latents'][str(seed)])
                         for seed in self.seeds if str(seed) in entity['latents']
                     },
+                    'initial_latent_sha256': {
+                        str(seed): entity['initial_latent_sha256'][str(seed)]
+                        for seed in self.seeds
+                        if str(seed) in entity.get('initial_latent_sha256', {})
+                    },
                 }
                 for entity in entities.values()
             ],
@@ -297,6 +333,7 @@ class UnetLatentSimilarity(BaseModel):
                     seed: np.array(values, dtype=np.float16)
                     for seed, values in entity['latents'].items()
                 },
+                'initial_latent_sha256': dict(entity.get('initial_latent_sha256') or {}),
             }
         return payload['metadata'], entities
 
@@ -314,7 +351,8 @@ class UnetLatentSimilarity(BaseModel):
             'model': self.model,
             'seeds': self.seeds,
             'num_inference_steps': self.num_inference_steps,
-            'seeding_scheme': CANONICAL_SEEDING_SCHEME,
+            'seeding_scheme': self.seeding_scheme(),
+            'batch_size': self.batch_size,
         }
         for key, value in expected.items():
             if metadata.get(key) != value:
@@ -372,8 +410,8 @@ class UnetLatentSimilarity(BaseModel):
                 f"cannot resume: {self.cache_path_partial()} records a prompts_ordered list of "
                 f"{len(recorded)} prompts that is "
                 f"{'a reordering of' if reordered_only else 'not'} the {len(prompts_ordered)} "
-                f"prompts this run builds. The capture advances one generator across that list, so "
-                f"its order determines every entity's initial noise; delete the file to recapture."
+                f"prompts this run builds. The order decides which prompts share a batch, and under "
+                f"the 'stream' convention every entity's initial noise; delete the file to recapture."
             )
         verification = metadata.get('baseline_verification')
         if not isinstance(verification, dict) or 'n_checked' not in verification:
@@ -410,63 +448,90 @@ class UnetLatentSimilarity(BaseModel):
 
     def _run_seed(
         self, pipeline: Any, prompts: List[str], seed: int, device: str, output_type: str,
-    ) -> Iterator[Tuple[int, Any]]:
-        """One pipeline output per prompt, in order, under the canonical generation's RNG regime.
+    ) -> Iterator[Tuple[int, List[Any], List[Optional[str]]]]:
+        """The pipeline's outputs for one seed, batch by batch, under the baseline's RNG regime.
 
-        This mirrors ``generate_dataset``'s seeded branch line for line, and it is the only place
-        in this class that seeds anything: the global generators are seeded once **per seed**, not
-        once per prompt, and a single ``torch.Generator`` serves the whole prompt list. Entity *k*
-        therefore receives the *k*-th noise draw of that stream, which is the draw its stored
-        baseline image was generated from. Re-creating the generator inside the loop would hand
-        every entity the *first* draw instead -- the images would then agree for the first entity
-        and for no other, which is the failure :meth:`validate_capture` checks three entities to
-        catch.
+        This mirrors ``generate_dataset``'s seeded branch, and it is the only place in this class
+        that seeds anything. The global generators are seeded once **per seed**, the prompt list is
+        cut into batches of :attr:`batch_size` in order, exactly as the baseline was, and each
+        batch's initial noise follows :attr:`noise`:
 
-        Yields ``(prompt index, pipeline output)``; the index rather than the prompt, so nothing
-        downstream depends on prompts being unique.
+        * ``'per_image_processor'``: the latents are built by
+          :func:`vision_unlearning.utils.noise.initial_latents` and passed as ``latents=``, which is
+          the call ``generate_dataset`` makes, so every entity at a seed starts from the latent its
+          baseline image started from, and the hash of each latent handed over is returned.
+        * ``'stream'``: a single ``torch.Generator`` on the device serves the whole prompt list, so
+          entity *k* receives the *k*-th noise draw of that stream. Re-creating the generator inside
+          the loop would hand every entity the *first* draw instead -- the images would then agree
+          for the first entity and for no other, which is the failure :meth:`validate_capture`
+          checks three entities to catch. No hash is returned.
+
+        Yields ``(index of the batch's first prompt, outputs, hashes)``; indices rather than
+        prompts, so nothing downstream depends on prompts being unique.
         """
         import torch
-        # SEEDING SITE, PAIRED: the five lines below duplicate the seeded branch of
-        # vision_unlearning/utils/data_generation.py::generate_dataset deliberately, because a
-        # captured latent is only the latent behind a stored baseline image while the two agree
-        # exactly. The duplication is intentional and must move as a pair: if the corpus is ever
-        # regenerated under a different seeding convention, change both or the capture silently
-        # stops corresponding to the images. The matching comment is at the other site.
+        from vision_unlearning.utils.noise import initial_latents
+        # SEEDING SITE, PAIRED with the seeded branch of
+        # vision_unlearning/utils/data_generation.py::generate_dataset: the global seeding, the
+        # batching and the 'stream' generator must move together with it, or this capture stops
+        # corresponding to the images it is checked against. The matching comment is at the other
+        # site.
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
         generator = torch.Generator(device=device).manual_seed(seed)
-        for index, prompt in enumerate(prompts):
+        for start in range(0, len(prompts), self.batch_size):
+            batch = prompts[start:start + self.batch_size]
+            hashes: List[Optional[str]]
+            noise_kwargs: Dict[str, Any]
+            if self.noise == 'per_image_processor':
+                latents, latent_hashes = initial_latents(pipeline, seed, len(batch))
+                hashes = list(latent_hashes)
+                noise_kwargs = {'latents': latents}
+            else:
+                hashes = [None] * len(batch)
+                noise_kwargs = {'generator': generator}  # advanced across the list, never re-created
             with torch.no_grad():
                 outputs = pipeline(
-                    [prompt],            # a one-element LIST: generate_dataset passes
-                                         # prompts[start:start + 1] with batch_size=1, and
-                                         # mirroring the call shape removes one place the two
-                                         # paths could differ
-                    generator=generator,  # advanced across the list, never re-created
+                    batch,
                     num_inference_steps=self.num_inference_steps,
                     output_type=output_type,
+                    **noise_kwargs,
                 ).images
-            yield index, outputs[0]
+            yield start, [outputs[i] for i in range(len(batch))], hashes
 
     def _capture_seed(
         self, pipeline: Any, prompts: List[str], seed: int, device: str,
-    ) -> Iterator[Tuple[int, np.ndarray]]:
-        """Every ``z_0`` for one seed, in prompt order, as a ``(4, 64, 64)`` float16 array."""
+    ) -> Iterator[Tuple[int, List[np.ndarray], List[Optional[str]]]]:
+        """Every ``z_0`` for one seed, batch by batch, each a ``(4, 64, 64)`` float16 array."""
         import torch
-        for index, latent in self._run_seed(pipeline, prompts, seed, device, "latent"):
-            z0: np.ndarray = latent.detach().to(torch.float16).cpu().numpy()
-            assert z0.ndim == 3 and z0.shape[0] == 4, f"unexpected latent shape {z0.shape}"
-            yield index, z0
+        for start, latents, hashes in self._run_seed(pipeline, prompts, seed, device, "latent"):
+            batch: List[np.ndarray] = []
+            for latent in latents:
+                z0: np.ndarray = latent.detach().to(torch.float16).cpu().numpy()
+                assert z0.ndim == 3 and z0.shape[0] == 4, f"unexpected latent shape {z0.shape}"
+                batch.append(z0)
+            yield start, batch, hashes
+
+    def _capture_seed_all(
+        self, pipeline: Any, prompts: List[str], seed: int, device: str,
+    ) -> Dict[int, np.ndarray]:
+        """Every ``z_0`` for one seed, keyed by prompt index."""
+        captured: Dict[int, np.ndarray] = {}
+        for start, batch, _ in self._capture_seed(pipeline, prompts, seed, device):
+            for offset, z0 in enumerate(batch):
+                captured[start + offset] = z0
+        return captured
 
     def _generate_seed(
         self, pipeline: Any, prompts: List[str], seed: int, device: str,
     ) -> Iterator[Tuple[int, np.ndarray]]:
         """Every decoded image for one seed, in prompt order, as a float array in ``[0, 1]``."""
-        for index, image in self._run_seed(pipeline, prompts, seed, device, "pil"):
-            yield index, np.asarray(image, dtype=np.float64) / 255.0
+        for start, images, _ in self._run_seed(pipeline, prompts, seed, device, "pil"):
+            for offset, image in enumerate(images):
+                yield start + offset, np.asarray(image, dtype=np.float64) / 255.0
 
     def baseline_image_path(self, prompt: str, seed: int) -> str:
         """The baseline image the benchmark already generated for this (prompt, seed)."""
@@ -486,27 +551,35 @@ class UnetLatentSimilarity(BaseModel):
         return np.asarray(Image.open(path).convert('RGB'), dtype=np.float64) / 255.0
 
     def _verify_against_baseline(
-        self, pipeline: Any, z0: np.ndarray, prompt: str, seed: int, device: str,
-    ) -> float:
-        """Decode ``z_0`` and compare it with the baseline PNG the benchmark already generated.
+        self, pipeline: Any, z0s: List[np.ndarray], prompts: List[str], seed: int, device: str,
+    ) -> List[float]:
+        """Decode a batch of ``z_0`` and compare each with the baseline PNG already generated.
 
-        Returns the mean absolute difference over ``[0, 1]`` RGB and raises above
+        The batch is decoded in one call, because that is how the pipeline decoded it when the
+        baseline was generated: decoding the same latents at another batch shape changes the
+        decoder's arithmetic and therefore its pixels.
+
+        Returns one mean absolute difference over ``[0, 1]`` RGB per latent and raises above
         :data:`BASELINE_TOLERANCE`. This is the whole justification for capturing the way the
         canonical generation does: the correct answer for every capture is already in the
         repository, so a wrong generator state -- from a changed prompt order, a different step
-        count, a driver change -- cannot survive a single iteration. One decode (~0.2 s) against a
-        ~15 s denoise, so it runs on every capture rather than on a sample.
+        count, a driver change -- cannot survive a single batch. One decode against a whole
+        denoise, so it runs on every capture rather than on a sample.
         """
-        decoded = self._decode_latent(pipeline, z0, device)
-        difference = float(np.mean(np.abs(decoded - self._read_baseline_image(prompt, seed))))
-        if difference >= BASELINE_TOLERANCE:
-            raise ValueError(
-                f"the captured latent for prompt {prompt!r} at seed {seed} decodes to an image "
-                f"that differs from {self.baseline_image_path(prompt, seed)} by {difference} "
-                f"(tolerance {BASELINE_TOLERANCE}). The capture is not reproducing the "
-                f"benchmark's own generation; nothing downstream would be comparable with it."
-            )
-        return difference
+        if len(z0s) != len(prompts):
+            raise ValueError(f"{len(z0s)} latents for {len(prompts)} prompts")
+        differences: List[float] = []
+        for decoded, prompt in zip(self._decode_latents(pipeline, z0s, device), prompts):
+            difference = float(np.mean(np.abs(decoded - self._read_baseline_image(prompt, seed))))
+            if difference >= BASELINE_TOLERANCE:
+                raise ValueError(
+                    f"the captured latent for prompt {prompt!r} at seed {seed} decodes to an image "
+                    f"that differs from {self.baseline_image_path(prompt, seed)} by {difference} "
+                    f"(tolerance {BASELINE_TOLERANCE}). The capture is not reproducing the "
+                    f"benchmark's own generation; nothing downstream would be comparable with it."
+                )
+            differences.append(difference)
+        return differences
 
     @staticmethod
     def _resource_sample() -> str:
@@ -583,8 +656,9 @@ class UnetLatentSimilarity(BaseModel):
     def capture(self, device: str) -> None:
         """Capture ``z_0`` for every (entity, seed) and write the cache.
 
-        Iterates seed-major, prompt-minor, exactly as ``generate_dataset`` does, and verifies
-        every latent against its stored baseline image before storing it.
+        Iterates seed-major, prompt-minor, in batches of :attr:`batch_size`, exactly as
+        ``generate_dataset`` does, and verifies every latent against its stored baseline image
+        before storing it.
 
         **Resumption is at seed granularity, and deliberately no finer.** Restoring the generator
         to the state it had part-way through a prompt list means either replaying its draws or
@@ -633,27 +707,35 @@ class UnetLatentSimilarity(BaseModel):
                         "unet_latent capture: seed %s of %s, %s prompts | %s",
                         seed, list(remaining), len(prompts), self._resource_sample(),
                     )
-                    for index, z0 in self._capture_seed(pipeline, prompts, seed, device):
-                        name, prompt = entity_prompts[index]
-                        difference = self._verify_against_baseline(
-                            pipeline, z0, prompt, seed, device,
+                    for start, batch, hashes in self._capture_seed(pipeline, prompts, seed, device):
+                        batch_prompts = prompts[start:start + len(batch)]
+                        differences = self._verify_against_baseline(
+                            pipeline, batch, batch_prompts, seed, device,
                         )
-                        verification['n_checked'] += 1
-                        verification['max_mean_abs_difference'] = max(
-                            verification['max_mean_abs_difference'], difference,
-                        )
-                        entities.setdefault(name, {'name': name, 'prompt': prompt, 'latents': {}})
-                        entities[name]['latents'][str(seed)] = z0
+                        for offset, (z0, difference, latent_hash) in enumerate(
+                                zip(batch, differences, hashes)):
+                            name, prompt = entity_prompts[start + offset]
+                            verification['n_checked'] += 1
+                            verification['max_mean_abs_difference'] = max(
+                                verification['max_mean_abs_difference'], difference,
+                            )
+                            entity = entities.setdefault(
+                                name, {'name': name, 'prompt': prompt, 'latents': {}},
+                            )
+                            entity['latents'][str(seed)] = z0
+                            if latent_hash is not None:
+                                entity.setdefault('initial_latent_sha256', {})[str(seed)] = latent_hash
                         # A progress line often enough that a hung run is distinguishable from a
-                        # working one without waiting for the next checkpoint, which is 100
-                        # captures (~27 min) away. The running maximum is on every line because it
-                        # is the number the whole capture scheme rests on: if it ever leaves 0, that
-                        # is visible in the log at the capture it happened, not only at the end.
-                        if (index + 1) % PROGRESS_EVERY == 0 or index + 1 == len(prompts):
+                        # working one without waiting for the next checkpoint, which is a whole
+                        # seed away. The running maximum is on every line because it is the number
+                        # the whole capture scheme rests on: if it ever leaves 0, that is visible
+                        # in the log at the batch it happened, not only at the end.
+                        done = start + len(batch)
+                        if done // PROGRESS_EVERY != start // PROGRESS_EVERY or done == len(prompts):
                             logger.info(
                                 "  seed %s: %s/%s captured, %s verified against their baseline "
                                 "images, maximum difference %s (tolerance %s) | %s",
-                                seed, index + 1, len(prompts), verification['n_checked'],
+                                seed, done, len(prompts), verification['n_checked'],
                                 verification['max_mean_abs_difference'], BASELINE_TOLERANCE,
                                 self._resource_sample(),
                             )
@@ -686,12 +768,14 @@ class UnetLatentSimilarity(BaseModel):
     def validate_capture(self, device: str, output_dir: str) -> Dict[str, float]:
         """The correctness gate for the capture, run before any bulk pass (GPU required).
 
-        It covers the first :data:`VALIDATION_ENTITIES` entities in prompt order across **all**
-        seeds, rather than the first entity alone. That is the point of the gate: with one
-        generator advanced across the prompt list, an entity *after* the first is exactly what
-        distinguishes a correctly advancing generator from one re-created per prompt, so "entity 2
-        disagrees with its baseline image while entity 1 agrees" is the specific signature to
-        catch. The checks are ordered cheapest-first, because each protects the next.
+        It covers the first ``max(VALIDATION_ENTITIES, batch_size)`` entities in prompt order
+        across **all** seeds, rather than the first entity alone, and so generates exactly the
+        first batch the bulk capture and the baseline generate. Under the ``'stream'`` convention
+        that is the point of the gate: with one generator advanced across the prompt list, an
+        entity *after* the first is exactly what distinguishes a correctly advancing generator from
+        one re-created per prompt, so "entity 2 disagrees with its baseline image while entity 1
+        agrees" is the specific signature to catch. The checks are ordered cheapest-first, because
+        each protects the next.
 
         Returns the measured differences it asserts on, and saves every image it compared to
         ``output_dir`` so a human can look at them. The measurements are written to disk even when
@@ -702,7 +786,7 @@ class UnetLatentSimilarity(BaseModel):
 
         os.makedirs(output_dir, exist_ok=True)
         all_entity_prompts = self.entity_prompts()
-        entity_prompts = all_entity_prompts[:VALIDATION_ENTITIES]
+        entity_prompts = all_entity_prompts[:max(VALIDATION_ENTITIES, self.batch_size)]
         prompts = [prompt for _, prompt in entity_prompts]
         first_seed = self.seeds[0]
         measurements: Dict[str, float] = {}
@@ -714,9 +798,9 @@ class UnetLatentSimilarity(BaseModel):
             # bit-identical. Replaying a seed's pass is also exactly how an interrupted capture
             # resumes (capture() checkpoints at seed boundaries), so this is the resume check too.
             started = time.time()
-            pass_a = dict(self._capture_seed(pipeline, prompts, first_seed, device))
+            pass_a = self._capture_seed_all(pipeline, prompts, first_seed, device)
             measurements['seconds_per_capture'] = float((time.time() - started) / len(prompts))
-            pass_b = dict(self._capture_seed(pipeline, prompts, first_seed, device))
+            pass_b = self._capture_seed_all(pipeline, prompts, first_seed, device)
             measurements['determinism_max_abs_difference'] = max(
                 float(np.max(np.abs(pass_a[index].astype(np.float64)
                                     - pass_b[index].astype(np.float64))))
@@ -732,27 +816,31 @@ class UnetLatentSimilarity(BaseModel):
             # is the check the whole capture scheme exists to make possible.
             captured: Dict[int, Dict[int, np.ndarray]] = {first_seed: pass_a}
             for seed in self.seeds[1:]:
-                captured[seed] = dict(self._capture_seed(pipeline, prompts, seed, device))
+                captured[seed] = self._capture_seed_all(pipeline, prompts, seed, device)
             started = time.time()
             worst = 0.0
             for seed in self.seeds:
-                for index, (name, prompt) in enumerate(entity_prompts):
-                    difference = self._verify_against_baseline(
-                        pipeline, captured[seed][index], prompt, seed, device,
+                for start in range(0, len(prompts), self.batch_size):
+                    indices = list(range(start, min(start + self.batch_size, len(prompts))))
+                    differences = self._verify_against_baseline(
+                        pipeline, [captured[seed][i] for i in indices],
+                        [prompts[i] for i in indices], seed, device,
                     )
-                    measurements[f'baseline_mean_abs_difference_seed_{seed}_entity_{index}'] = (
-                        difference
-                    )
-                    worst = max(worst, difference)
+                    for index, difference in zip(indices, differences):
+                        measurements[f'baseline_mean_abs_difference_seed_{seed}_entity_{index}'] = (
+                            difference
+                        )
+                        worst = max(worst, difference)
             measurements['baseline_max_mean_abs_difference'] = worst
             measurements['seconds_per_verification'] = float(
                 (time.time() - started) / (len(self.seeds) * len(prompts)),
             )
 
-            # 3. The cache format itself: the RELOADED latent must be bit-identical and must still
-            # decode to the baseline image. The round-trip file is deleted afterwards -- a stray
+            # 3. The cache format itself: the RELOADED latents must be bit-identical and must still
+            # decode to the baseline images. The round-trip file is deleted afterwards -- a stray
             # cache-shaped document beside the report is exactly what the previous capture left
             # behind and had to be hunted down before it could be mistaken for the real cache.
+            first_batch = list(range(min(self.batch_size, len(prompts))))
             round_trip_path = os.path.join(output_dir, 'validate_capture_roundtrip.json')
             try:
                 self._write_cache(
@@ -783,13 +871,14 @@ class UnetLatentSimilarity(BaseModel):
                 np.array_equal(reloaded[name]['latents'][str(first_seed)], pass_a[index])
                 for index, (name, _) in enumerate(entity_prompts)
             ), "the JSON round trip changed a latent"
-            measurements['reloaded_baseline_mean_abs_difference'] = self._verify_against_baseline(
-                pipeline, reloaded[entity_prompts[0][0]]['latents'][str(first_seed)],
-                entity_prompts[0][1], first_seed, device,
-            )
+            measurements['reloaded_baseline_mean_abs_difference'] = max(self._verify_against_baseline(
+                pipeline,
+                [reloaded[entity_prompts[i][0]]['latents'][str(first_seed)] for i in first_batch],
+                [prompts[i] for i in first_batch], first_seed, device,
+            ))
 
-            # 4. Skipping the decode does not change the stream: run the same three prompts with
-            # the pipeline's own image output and compare those images with the baselines. If
+            # 4. Skipping the decode does not change the noise: run the same prompts with the
+            # pipeline's own image output and compare those images with the baselines. If
             # output_type="latent" perturbed the generator, this would agree and check 2 would not
             # -- or the other way round -- so the two together pin the capture to the canonical
             # generation rather than merely to itself.
@@ -829,29 +918,34 @@ class UnetLatentSimilarity(BaseModel):
 
             # Every decoded latent, saved for viewing.
             for seed in self.seeds:
-                for index, (name, _) in enumerate(entity_prompts):
-                    decoded = self._decode_latent(pipeline, captured[seed][index], device)
-                    Image.fromarray((decoded * 255).round().astype(np.uint8)).save(
-                        os.path.join(output_dir, f'decoded_seed{seed}_entity{index}_{name}.png'),
+                for start in range(0, len(prompts), self.batch_size):
+                    indices = list(range(start, min(start + self.batch_size, len(prompts))))
+                    decoded_batch = self._decode_latents(
+                        pipeline, [captured[seed][i] for i in indices], device,
                     )
+                    for index, decoded in zip(indices, decoded_batch):
+                        name = entity_prompts[index][0]
+                        Image.fromarray((decoded * 255).round().astype(np.uint8)).save(
+                            os.path.join(output_dir, f'decoded_seed{seed}_entity{index}_{name}.png'),
+                        )
         finally:
             self._set_determinism(False)
             with open(os.path.join(output_dir, 'validate_capture.json'), 'w', encoding='utf-8') as f:
                 json.dump(measurements, f, indent=2)
         return measurements
 
-    def _decode_latent(self, pipeline: Any, latent: np.ndarray, device: str) -> np.ndarray:
-        """Decode one ``z_0`` through the pipeline's VAE, as a float array in [0, 1]."""
+    def _decode_latents(self, pipeline: Any, latents: List[np.ndarray], device: str) -> List[np.ndarray]:
+        """Decode a batch of ``z_0`` through the pipeline's VAE in one call, each in [0, 1]."""
         import torch
-        tensor = torch.from_numpy(latent.astype(np.float16)).unsqueeze(0).to(
+        tensor = torch.from_numpy(np.stack([latent.astype(np.float16) for latent in latents])).to(
             device=device, dtype=pipeline.vae.dtype,
         )
         with torch.no_grad():
             decoded = pipeline.vae.decode(
                 tensor / pipeline.vae.config.scaling_factor, return_dict=False,
             )[0]
-        image = pipeline.image_processor.postprocess(decoded.detach(), output_type='pil')[0]
-        return np.asarray(image, dtype=np.float64) / 255.0
+        images = pipeline.image_processor.postprocess(decoded.detach(), output_type='pil')
+        return [np.asarray(image, dtype=np.float64) / 255.0 for image in images]
 
     # -- consumer side (CPU only) --------------------------------------------
 

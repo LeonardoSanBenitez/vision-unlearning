@@ -14,6 +14,7 @@ from huggingface_hub.repocard_data import EvalResult
 
 from vision_unlearning.metrics import MetricImageTextSimilarity, MetricPaintingStyle
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.utils.noise import initial_latents
 if is_wandb_available():
     from vision_unlearning.integrations.wandb import wandb_log_image
 from vision_unlearning.integrations.tensorboard import tensorboard_log_image
@@ -38,6 +39,19 @@ class EvaluatorTextToImage(BaseModel):
     # appears only on a desktop. The figure is rendered with `fig.canvas.draw()` and returned in the
     # images mapping either way, so passing False loses nothing but the window.
     plot_show: bool = True
+    # None (the default) is the historical behaviour: every generated image draws fresh, unseeded
+    # noise. Given a seed, every image -- original, learned and unlearned, for every prompt -- starts
+    # from that seed's initial latent, drawn on the processor (`vision_unlearning.utils.noise`), so
+    # two evaluations of one model return the same scores and each comparison is between images
+    # that share their starting noise.
+    noise_seed: Optional[int] = None
+
+    def _noise_kwargs(self, pipeline: StableDiffusionPipeline) -> Dict[str, torch.Tensor]:
+        '''The `latents=` argument for one image of `pipeline`, or nothing when no seed is set.'''
+        if self.noise_seed is None:
+            return {}
+        latents, _ = initial_latents(pipeline, self.noise_seed, 1)
+        return {"latents": latents}
 
     def evaluate(self) -> Tuple[List[EvalResult], Dict[str, Image.Image]]:
         # TODO: batch inference for speed; Something similar to how it is done in `generate_dataset` (maybe even call that function saving to tempo folder)
@@ -63,10 +77,10 @@ class EvaluatorTextToImage(BaseModel):
                 t0 = time.time()
                 # Generate images
                 if self.pipeline_original is not None:
-                    image_original = self.pipeline_original(prompt).images[0]  # type: ignore
+                    image_original = self.pipeline_original(prompt, **self._noise_kwargs(self.pipeline_original)).images[0]  # type: ignore
                 if self.pipeline_learned is not None:
-                    image_learned = self.pipeline_learned(prompt).images[0]  # type: ignore
-                image_unlearned = self.pipeline_unlearned(prompt).images[0]  # type: ignore
+                    image_learned = self.pipeline_learned(prompt, **self._noise_kwargs(self.pipeline_learned)).images[0]  # type: ignore
+                image_unlearned = self.pipeline_unlearned(prompt, **self._noise_kwargs(self.pipeline_unlearned)).images[0]  # type: ignore
                 latencies.append((time.time() - t0) / 3)
 
                 # Compute metrics

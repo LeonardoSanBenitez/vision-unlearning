@@ -7,6 +7,7 @@ import torch
 from diffusers import AutoPipelineForText2Image
 from vision_unlearning.datasets.others import jsonl_dump
 from vision_unlearning.unlearner.lora import unlearn_lora
+from vision_unlearning.utils.noise import initial_latents, type_noise
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ def generate_dataset(
     target_size: Optional[Tuple[int, int]] = None,
     crops_coords_top_left: Optional[Tuple[int, int]] = None,
     runtime: Optional[GenerationRuntime] = None,
+    noise: type_noise = 'stream',
 ) -> List[Dict[str, str]]:
     '''
     Generate images for the given prompts and save them to output_path.
@@ -145,6 +147,13 @@ def generate_dataset(
     @param runtime: how the pipeline is built and how much memory it may use -- see
         `GenerationRuntime`.  When None (the default) every setting is the historical one, so a call
         that omits it behaves exactly as it did before this parameter existed.
+    @param noise: how each image's initial noise is drawn in seeded mode -- see
+        `vision_unlearning.utils.noise`. ``'stream'`` (the default) is the historical behaviour: one
+        generator per seed on `device`, advanced across the prompt list. ``'per_image_processor'``
+        draws every image's latent from its own processor generator seeded to the image's seed, so
+        an image depends on its seed alone and not on its position, its batch or the card; the
+        latents are passed to the pipeline as ``latents=``, and each metadata record gains ``seed``
+        and ``initial_latent_sha256``, the hash of the exact tensor handed over. Requires `seeds`.
 
     The four Stable Diffusion XL conditioning arguments and every field of `runtime` follow the same
     rule as height/width and variant: an argument that is not asked for is not passed at all, so a
@@ -165,6 +174,12 @@ def generate_dataset(
     if (height is None) != (width is None):
         raise ValueError(
             f"height and width must be given together or not at all; got height={height}, width={width}."
+        )
+
+    if noise != 'stream' and seeds is None:
+        raise ValueError(
+            f"noise={noise!r} draws each image's latent from its seed, so it needs seeds; the legacy "
+            f"unseeded mode (seeds=None) has no seed to draw from."
         )
 
     # Kept empty unless the caller asked for an explicit resolution, so that every call which does
@@ -253,12 +268,11 @@ def generate_dataset(
         try:
             for seed_idx, seed in enumerate(seeds):
                 # Seed all global RNG sources for full determinism.
-                # SEEDING SITE, PAIRED: these five lines and the generator below are duplicated
-                # deliberately in benchmarks/I_care/similarity.py::UnetLatentSimilarity._run_seed,
-                # which captures the final denoised latent of these very images and verifies each
-                # capture against the image written here. The two must move together: changing the
-                # seeding convention on this side alone leaves that capture computing latents for
-                # images that no longer exist. The matching comment is at the other site.
+                # SEEDING SITE, PAIRED: benchmarks/I_care/similarity.py::UnetLatentSimilarity._run_seed
+                # repeats this global seeding and the batching below, because it captures the final
+                # denoised latent of these very images and verifies each capture against the image
+                # written here. The per-image noise itself lives in one place, utils/noise.py, and both
+                # call it; the global seeding and the 'stream' generator are what must move together.
                 random.seed(seed)
                 np.random.seed(seed)
                 torch.manual_seed(seed)
@@ -269,9 +283,18 @@ def generate_dataset(
 
                 for start in range(0, len(prompts), batch_size):
                     batch_prompts = prompts[start:start + batch_size]
+                    noise_kwargs: Dict[str, Any]
+                    batch_hashes: Optional[List[str]] = None
+                    if noise == 'per_image_processor':
+                        latents, batch_hashes = initial_latents(
+                            pipeline, seed, len(batch_prompts), height=height, width=width,
+                        )
+                        noise_kwargs = {"latents": latents}
+                    else:
+                        noise_kwargs = {"generator": generator}
                     batch_outputs = pipeline(  # type: ignore
                         batch_prompts,
-                        generator=generator,
+                        **noise_kwargs,
                         **call_kwargs,
                     ).images
 
@@ -284,7 +307,11 @@ def generate_dataset(
                         else:
                             image_name = f"{seed}_{prompt_text}.png"
                         image.save(os.path.join(output_path, image_name), "PNG")
-                        metadata.append({"file_name": image_name, "text": prompt_text})
+                        record = {"file_name": image_name, "text": prompt_text}
+                        if batch_hashes is not None:
+                            record["seed"] = str(seed)
+                            record["initial_latent_sha256"] = batch_hashes[i]
+                        metadata.append(record)
         finally:
             # Restore deterministic algorithms setting to avoid affecting other code -- but only if
             # this call is what turned it on, so that a caller who deliberately runs without it is
