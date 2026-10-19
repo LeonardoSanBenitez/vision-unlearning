@@ -7,6 +7,7 @@ inputs it ran with.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from typing import Any, Dict, List
 
@@ -94,6 +95,31 @@ def test_the_command_exits_one_on_problems_and_zero_when_clean(tmp_path: Any, ca
     expected.write_text('\n'.join(EXPECTED + ['people/uce/9']) + '\n')
     assert _main(['check', '--ledger', path, '--expected', str(expected)]) == 1
     assert 'missing: people/uce/9' in capsys.readouterr().out
+
+
+def _routes(tmp_path: Any, **changes: Dict[str, Any]) -> str:
+    routes: Dict[str, Any] = {
+        'route_partial_weights': {'pairing': 'paired', 'mean_abs': 0.0},
+        'route_adapter': {'pairing': 'paired', 'mean_abs': 0.0},
+        'route_partial_weights_short': {'pairing': 'paired', 'mean_abs': 0.05},
+    }
+    routes.update(changes)
+    path = tmp_path / 'routes.json'
+    path.write_text(json.dumps(routes))
+    return str(path)
+
+
+def test_a_drift_is_admitted_only_on_route_agreement(tmp_path: Any) -> None:
+    """Fails on the code before: nothing wrote a drift record, and nothing asked for its evidence."""
+    drifted = _clean(tmp_path)
+    drifted[2]['commit'] = 'c2'
+    path = _ledger(tmp_path, [dict(r) for r in drifted])
+    for bad in ({'route_adapter': {'pairing': 'FAILED: another latent', 'mean_abs': 0.0}},
+                {'route_partial_weights': {'pairing': 'paired', 'mean_abs': 0.4}}):
+        assert _main(['drift', '--ledger', path, '--commit', 'c2', '--reason', 'r', '--routes', _routes(tmp_path, **bad)]) == 1
+        assert any(p.startswith('drift: people/uce/1') for p in check(path, EXPECTED))
+    assert _main(['drift', '--ledger', path, '--commit', 'c2', '--reason', 'docs only', '--routes', _routes(tmp_path)]) == 0
+    assert check(path, EXPECTED) == []
 
 
 def test_a_record_without_fields_is_written_exactly_as_before(tmp_path: Any) -> None:

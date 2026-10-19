@@ -257,6 +257,47 @@ def check(
     return problems
 
 
+#: The routes whose outputs must equal the baseline's for a drift to be admitted; the short-final-batch
+#: route is held to pairing only, its last batch having another shape than the baseline's.
+DRIFT_EXACT_ROUTES = ('route_partial_weights', 'route_adapter')
+DRIFT_PAIRED_ROUTES = DRIFT_EXACT_ROUTES + ('route_partial_weights_short',)
+
+
+def admit_drift(
+    ledger_path: str,
+    commit: str,
+    reason: str,
+    routes_path: str,
+    pins_sha256: Optional[str] = None,
+    freeze_sha256: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Append a ``drift`` record admitting `commit` (and new pinned inputs, if given) into a campaign.
+
+    The evidence is the route-agreement result (``ablations/regeneration_rehearsal/route_agreement.py``)
+    run at that commit against the campaign's baseline: every route in :data:`DRIFT_PAIRED_ROUTES` is
+    paired, and every route in :data:`DRIFT_EXACT_ROUTES` reproduces the baseline's images exactly.
+    Raises ValueError, writing nothing, otherwise. Returns the record's fields.
+    """
+    with open(routes_path, encoding="utf-8") as handle:
+        routes = json.load(handle)
+    problems = [f"{route}: {routes.get(route, {}).get('pairing', 'absent')}" for route in DRIFT_PAIRED_ROUTES
+                if routes.get(route, {}).get("pairing") != "paired"]
+    problems += [f"{route}: mean absolute difference {routes[route].get('mean_abs')} to the baseline" for route in DRIFT_EXACT_ROUTES
+                 if route in routes and routes[route].get("mean_abs") != 0.0]
+    if problems:
+        raise ValueError(f"{commit} cannot be admitted: {'; '.join(problems)}")
+    fields: Dict[str, Any] = {
+        "session": "campaign", "attempt": 0, "commit": commit, "pins_sha256": pins_sha256,
+        "freeze_sha256": freeze_sha256, "reason": reason, "routes_sha256": _sha256(routes_path),
+        "routes": {route: {"pairing": routes[route]["pairing"], "mean_abs": routes[route].get("mean_abs")}
+                   for route in DRIFT_PAIRED_ROUTES},
+    }
+    ledger = RunLedger(ledger_path)
+    ledger.record(f"drift admitted: {commit}", "drift", fields=fields)
+    ledger.close()
+    return fields
+
+
 def _main(argv: Optional[List[str]] = None) -> int:
     description = (
         "check: read a campaign ledger and report every reason its record cannot be trusted -- a "
@@ -274,7 +315,27 @@ def _main(argv: Optional[List[str]] = None) -> int:
                      help="a file with one expected session key per line, spelled as fields['session'] is")
     run.add_argument("--base-folder", default=None,
                      help="re-hash every live ok output below this folder; omitted, outputs are not re-hashed")
+    drift = sub.add_parser(
+        "drift", help="admit a later commit or pinned inputs into a campaign",
+        description="Append a drift record admitting a commit (and, if given, new pins.json and freeze hashes), "
+                    "only when the route-agreement result run at that commit shows every route paired and the "
+                    "full-batch routes reproducing the baseline exactly. Exit status: 0 admitted, 1 refused "
+                    "(nothing written), 2 bad arguments.")
+    drift.add_argument("--ledger", required=True)
+    drift.add_argument("--commit", required=True, help="the commit the campaign is to run from now on")
+    drift.add_argument("--reason", required=True, help="why the commit changed, and what its diff touches")
+    drift.add_argument("--routes", required=True, help="routes.json written by route_agreement.py at that commit")
+    drift.add_argument("--pins-sha256", default=None)
+    drift.add_argument("--freeze-sha256", default=None)
     args = parser.parse_args(argv)
+    if args.command == "drift":
+        try:
+            fields = admit_drift(args.ledger, args.commit, args.reason, args.routes, args.pins_sha256, args.freeze_sha256)
+        except ValueError as exc:
+            print(f"refused: {exc}")
+            return 1
+        print(f"admitted: {fields['commit']} ({json.dumps(fields['routes'])})")
+        return 0
     with open(args.expected, encoding="utf-8") as handle:
         expected = [line.strip() for line in handle if line.strip()]
     problems = check(args.ledger, expected, args.base_folder)
