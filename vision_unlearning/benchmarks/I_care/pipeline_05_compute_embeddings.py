@@ -761,6 +761,7 @@ if __name__ == "__main__":
             target=target_hf_name, method=method, num_train_epochs=num_train_epochs,
             artifact_kind=ALGORITHM_REGISTRY[method].artifact_kind,
             artifact_filename=ALGORITHM_REGISTRY[method].artifact_filename,
+            base_folder=base_folder,
         )
         dataset_folder = ds_entity.folder_path
 
