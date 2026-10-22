@@ -34,6 +34,7 @@ from vision_unlearning.benchmarks.I_care.pairing import ACT_STEPS, PairingFailur
 from vision_unlearning.benchmarks.I_care.provenance import producer_facts, read_provenance
 from vision_unlearning.datasets.entity_names import generation_prompt, type_entity_task
 from vision_unlearning.datasets.testbed import GeneratedDataset, get_generated_dataset_file
+from vision_unlearning.utils.determinism import set_determinism
 
 
 def _verdict(candidate: Dict[str, Any], baseline: Dict[str, Any], prompts: List[str], seeds: List[int], check_class: str,
@@ -117,7 +118,7 @@ def main() -> None:
     entity_prompts = list(zip(names, prompts))
     entities: Dict[str, Dict[str, Any]] = {}
     differences: List[float] = []
-    capture._set_determinism(True)
+    set_determinism(True)
     try:
         for seed in seeds:
             for start, batch, hashes in capture._capture_seed(latent_pipeline, prompts, seed, 'cuda'):
@@ -127,7 +128,7 @@ def main() -> None:
                     entities.setdefault(name, {'name': name, 'prompt': prompts[start + offset], 'latents': {}})
                     entities[name].setdefault('initial_latent_sha256', {})[str(seed)] = latent_hash
     finally:
-        capture._set_determinism(False)
+        set_determinism(False)
     latent = capture._pairing_record(latent_pipeline, entities, entity_prompts)
     assert latent is not None
     result['unet_latent'] = {'verified_against_baseline_images': len(differences),

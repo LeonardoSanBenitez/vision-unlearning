@@ -23,6 +23,7 @@ assert os.getenv('HF_TOKEN'), "HF_TOKEN environment variable must be set and non
 
 from vision_unlearning.benchmarks.I_care.configuration import type_unlearning_algorithm  # noqa: E402
 from vision_unlearning.benchmarks.I_care.session_config import (  # noqa: E402
+    TRAINING_SEED,
     assert_split_captions_ready,
     session_hyperparameters,
 )
@@ -48,6 +49,7 @@ from vision_unlearning.datasets.testbed import (  # noqa: E402
 )
 from vision_unlearning.unlearner.loaders import get_partial_weights_loader  # noqa: E402
 from vision_unlearning.utils.data_generation import generate_dataset  # noqa: E402
+from vision_unlearning.utils.determinism import seed_training  # noqa: E402
 from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME  # noqa: E402
 from vision_unlearning.benchmarks.I_care.configuration import (  # noqa: E402
     GENERATE_DATASET_SEEDS,
@@ -212,10 +214,6 @@ _parser.add_argument("--pins", default=None,
                      help="The run's pins.json, whose sha256 every provenance.json records.")
 _parser.add_argument("--freeze", default=None,
                      help="The run's environment freeze, whose sha256 every provenance.json records.")
-_parser.add_argument("--full-precision", action="store_true", default=False,
-                     help="Train in float32 instead of the method's reference precision (SPARE bfloat16 "
-                          "mixed precision, SalUn TensorFloat-32), to measure what that precision changes. "
-                          "Refused for UCE.")
 _parser.add_argument("--uce-guide-concepts", default=None,
                      help="UCE only: the concept the edit pushes the entity towards. Left unset it is "
                           "the task's substitute concept. Set to the task name ('people', 'breeds', "
@@ -294,7 +292,6 @@ for index in range(index_start, index_start + max_identities):
         uce_guide_concepts=uce_guide_concepts,
         retained_entities=[m['name'] for m in metadata_filtered if m['name'] != target] if method == 'uce' else None,
         uce_erase_scale_override=_args.uce_erase_scale,
-        full_precision=_args.full_precision,
     )
     if uce_guide_concepts is not None:
         logger.info('UCE guide concept set by the caller to %r (default: the substitute concept)', uce_guide_concepts)
@@ -353,12 +350,18 @@ for index in range(index_start, index_start + max_identities):
     ):
         logger.info(f"Overwritting the entity '{target}' by '{target_overwrite}'")
         logger.info(hyperparameters)
+        # Deterministic kernels and seeded global generators, so a session retrained on the same card
+        # model reproduces its weights byte for byte. The global seeding is what reaches draws a
+        # trainer does not seed itself: SalUn's data loaders shuffle, and its random flip draws, from
+        # torch's global generator.
+        seed_training(TRAINING_SEED)
         eval_results = unlearner.train()
         logger.info('Evaluation metrics:\n' + pd.DataFrame([{'Name': r.metric_name, 'Value': r.metric_value} for r in eval_results]).to_markdown())
         write_provenance(output_dir, producer_facts(
             precision=str(hyperparameters['mixed_precision'] if hyperparameters.get('mixed_precision') not in (None, 'no')
                           else ('tf32' if hyperparameters.get('allow_tf32') else 'float32')),
             pins_path=_args.pins, freeze_path=_args.freeze, producer='pipeline_03',
+            deterministic_algorithms=torch.are_deterministic_algorithms_enabled(), training_seed=TRAINING_SEED,
             task=task, method=method, entity=target, num_train_epochs=num_train_epochs,
             configuration={k: v for k, v in hyperparameters.items() if isinstance(v, (str, int, float, bool, list, type(None)))},
         ))

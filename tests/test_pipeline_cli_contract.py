@@ -236,3 +236,30 @@ def test_every_generated_dataset_follows_the_base_folder_flag(script_name: str) 
         f'{script_name} declares --base-folder but builds GeneratedDataset without base_folder at '
         f'line(s) {missing}, so that dataset is read from the default ./assets instead.'
     )
+
+
+def _is_call_to(node: ast.AST, name: str) -> bool:
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+
+
+def _calls_unlearner_train(statement: ast.stmt) -> bool:
+    return isinstance(statement, (ast.Assign, ast.Expr)) and any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'train'
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == 'unlearner'
+        for node in ast.walk(statement)
+    )
+
+
+def test_training_runs_under_the_determinism_regime() -> None:
+    """Fails on the code before: pipeline_03 trained without deterministic kernels and without seeding
+    the global generators, so two trainings of one session on one card produced different weights;
+    SalUn's data order and flips are drawn from torch's global generator. The regime must be entered
+    in the same block as the training call, before it."""
+    tree = ast.parse(_read('vision_unlearning/benchmarks/I_care/pipeline_03_unlearn_model.py'))
+    blocks = [body for node in ast.walk(tree) for body in [getattr(node, 'body', None)] if isinstance(body, list)]
+    training = [(body, index) for body in blocks for index, statement in enumerate(body)
+                if _calls_unlearner_train(statement)]
+    assert len(training) == 1, f'expected one unlearner.train() call, found {len(training)}'
+    body, index = training[0]
+    assert any(isinstance(statement, ast.Expr) and _is_call_to(statement.value, 'seed_training')
+               for statement in body[:index]), 'unlearner.train() is not preceded by seed_training(...)'

@@ -17,7 +17,7 @@ subtly wrong. Four properties are pinned, and each one is paired with the mutati
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 import torch
@@ -675,3 +675,57 @@ def test_tensorfloat32_is_on_during_the_fit_and_restored_after(tmp_path: Any, mo
     assert seen[0] == (True, True)
     assert seen[1] == before
     assert (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32) == before
+
+
+# ---------------------------------------------------------------- the order of the training data
+#
+# Fails on the code before: nothing on SalUn's path seeded torch's global generator, which its
+# loaders shuffle from and its random flip draws from, so two trainings of one session saw the
+# images in different orders and orientations and trained different weights -- every trained file
+# differed between two trainings on one card. `seed_training` is what I-CARE's `pipeline_03` calls
+# before training. The test drives the real `_dataloaders`, on an image folder small enough to load
+# in a second.
+
+def _image_folder(folder: Any, count: int) -> str:
+    import json
+    from PIL import Image
+
+    folder.mkdir()
+    with open(folder / 'metadata.jsonl', 'w', encoding='utf-8') as handle:
+        for index in range(count):
+            name = f'{index}.png'
+            # A horizontal ramp, so a flipped image differs from the unflipped one.
+            pixels = bytes(20 * index + 10 * x for _ in range(8) for x in range(8) for _ in range(3))
+            Image.frombytes('RGB', (8, 8), pixels).save(folder / name)
+            handle.write(json.dumps({'file_name': name, 'text': f'An image of entity {index}'}) + '\n')
+    return str(folder)
+
+
+def _first_epoch(unlearner: SalUn) -> List[torch.Tensor]:
+    forget, _ = unlearner._dataloaders(_RecordingTokenizer())
+    return [batch['pixel_values'] for batch in forget]
+
+
+def test_seeded_training_sees_the_data_in_the_same_order_and_orientation(tmp_path: Any) -> None:
+    from vision_unlearning.utils.determinism import seed_training, set_determinism
+
+    unlearner = _unlearner(
+        dataset_forget_name=_image_folder(tmp_path / 'forget', 8),
+        dataset_retain_name=_image_folder(tmp_path / 'retain', 8),
+        cache_dir=str(tmp_path / 'cache'), resolution=8, random_flip=True,
+        per_device_train_batch_size=1, dataloader_num_workers=0,
+    )
+    try:
+        seed_training(42)
+        first = _first_epoch(unlearner)
+        seed_training(42)
+        second = _first_epoch(unlearner)
+        unseeded = _first_epoch(unlearner)
+    finally:
+        set_determinism(False)
+
+    assert len(first) == len(second) == 8
+    assert all(torch.equal(a, b) for a, b in zip(first, second))
+    # One chance in 8! x 2^8 of a false failure here, about one in ten million.
+    assert any(not torch.equal(a, b) for a, b in zip(first, unseeded)), \
+        'an unseeded epoch repeated the seeded one, so this test cannot see the defect'

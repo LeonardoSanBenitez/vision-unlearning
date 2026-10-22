@@ -216,7 +216,7 @@ def test_confirmation_never_changes_the_calibration_label() -> None:
 
 
 def test_the_retain_diagnostics() -> None:
-    result = retain_diagnostics([-0.5, -4.0, 1.0, -3.1], route_noise=1.0)
+    result = retain_diagnostics([-0.5, -4.0, 1.0, -3.1], run_to_run_spread=1.0)
     assert result['damaged'] == 2 and result['bleed_rate'] == pytest.approx(0.5)
     assert math.isclose(result['mean_receiver_clip_diff'], -6.6 / 4)
 

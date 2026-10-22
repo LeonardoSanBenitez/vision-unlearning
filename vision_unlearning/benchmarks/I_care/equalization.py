@@ -341,16 +341,18 @@ def confirm(calibration: Selection, confirmation_effects: Mapping[str, Optional[
 # -- diagnostics, never eligibility rules ---------------------------------------------------------
 
 
-def retain_diagnostics(receiver_clip_diffs: Sequence[float], route_noise: float) -> Dict[str, float]:
+def retain_diagnostics(receiver_clip_diffs: Sequence[float], run_to_run_spread: float) -> Dict[str, float]:
     """The retain side of one setting, reported and never tuned.
 
     ``receiver_clip_diffs`` are the stored ``clip_diff`` values (``on - off``, negative is damage) of
-    the read-out receivers; ``route_noise`` is the output difference of an unedited model between
-    the baseline and session routes. A receiver is damaged when its ``clip_diff`` is below
-    ``-3 * route_noise``; the bleed rate is the fraction of receivers damaged.
+    the read-out receivers. ``run_to_run_spread`` is how far a receiver's ``clip_diff`` moves when the
+    same session is trained twice without the determinism regime: the mean absolute difference per
+    receiver between two such trainings, for the method being diagnosed. It is in ``clip_diff``
+    units, as the threshold it sets must be. A receiver is damaged when its ``clip_diff`` is below
+    ``-3 * run_to_run_spread``; the bleed rate is the fraction of receivers damaged.
     """
     values = [_finite(value, 'a receiver clip_diff') for value in receiver_clip_diffs]
-    threshold = -3 * _finite(route_noise, 'the route noise')
+    threshold = -3 * _finite(run_to_run_spread, 'the run-to-run spread')
     damaged = sum(1 for value in values if value < threshold)
     return {
         'mean_receiver_clip_diff': sum(values) / len(values),

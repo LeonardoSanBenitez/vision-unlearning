@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 
 from vision_unlearning.utils.logger import get_logger
+from vision_unlearning.utils.determinism import set_determinism
 from vision_unlearning.utils.noise import type_noise
 
 logger = get_logger('mechanistic_interpretability')
@@ -94,20 +95,6 @@ def _per_sample_means(hidden: Any, batch_size: int) -> np.ndarray:
     grouped = hidden.detach().float().reshape(rows // batch_size, batch_size, *hidden.shape[1:])
     result: np.ndarray = grouped.mean(dim=(0, 2)).cpu().numpy()
     return result  # [batch_size, dim]
-
-
-def _set_determinism(enabled: bool) -> None:
-    """The determinism regime of ``generate_dataset``, applied identically to the capture."""
-    import torch
-    if not torch.cuda.is_available():
-        return
-    if enabled:
-        os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
-        torch.use_deterministic_algorithms(True)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-    else:
-        torch.use_deterministic_algorithms(False)
 
 
 def capture_act_fingerprints(
@@ -179,7 +166,7 @@ def capture_act_fingerprints(
     handles: List[Any] = [
         attn2_modules[name].register_forward_hook(_make_hook(name)) for name in attn2_names
     ]
-    _set_determinism(True)
+    set_determinism(True)
     try:
         for seed in seeds:
             random.seed(seed)
@@ -208,7 +195,7 @@ def capture_act_fingerprints(
     finally:
         for h in handles:
             h.remove()
-        _set_determinism(False)
+        set_determinism(False)
 
     fingerprints: List[np.ndarray] = []
     for index, prompt in enumerate(prompts):

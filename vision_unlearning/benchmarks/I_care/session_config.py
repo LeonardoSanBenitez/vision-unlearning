@@ -50,6 +50,11 @@ _LORA_METHODS = ('distil', 'munba')
 #: coarse read-out compares original and unlearned images that start from the same latent.
 EVALUATION_NOISE_SEED = GENERATE_DATASET_SEEDS[0]
 
+#: The one training seed of every session (a binding choice: one training run per session). The
+#: trainers seed their own generators with it, and `pipeline_03` seeds the global generators with it
+#: under `vision_unlearning.utils.determinism.seed_training`.
+TRAINING_SEED = 42
+
 
 def session_hyperparameters(
     task: type_task,
@@ -66,7 +71,6 @@ def session_hyperparameters(
     uce_guide_concepts: Optional[str] = None,
     retained_entities: Optional[Sequence[str]] = None,
     uce_erase_scale_override: Optional[float] = None,
-    full_precision: bool = False,
 ) -> Dict[str, Any]:
     """Return the hyperparameters of one unlearning session.
 
@@ -88,9 +92,6 @@ def session_hyperparameters(
         from their retain splits. The target is refused if present.
     @param uce_erase_scale_override: UCE only: the strength dial, for equalization's sweep. None
         uses the task's value in ``configuration.uce_erase_scale``.
-    @param full_precision: train in float32 instead of the reference's reduced precision (SPARE's
-        bfloat16 mixed precision, SalUn's TensorFloat-32), to measure what the reduced precision
-        changes. Refused for UCE, which does not train.
     @raises NotImplementedError: the method has no configuration here.
     """
     forget_prompts, retain_prompts = evaluation_prompts(task, entity)
@@ -124,12 +125,6 @@ def session_hyperparameters(
     else:
         raise NotImplementedError(f'no session configuration for method {method!r}')
 
-    if full_precision:
-        if method == 'uce':
-            raise ValueError('UCE is a closed-form edit; it has no training precision to change')
-        for name, value in (('mixed_precision', 'no'), ('allow_tf32', False)):
-            if name in hyperparameters:
-                hyperparameters[name] = value
     return hyperparameters
 
 
@@ -193,8 +188,9 @@ def _salun(
     only the cross-attention tensors are trained, which is ESD's choice -- its training script ships
     in SalUn's diffusion directory -- when erasure must be specific to the prompt, as it is here; and
     the batch is 1 rather than 8, because on forget sets of 5, 20 and 35 images a batch of 8 cuts the
-    updates per epoch five- to sevenfold at the same epoch dial. The fine-tune runs with
-    TensorFloat-32 matrix products.
+    updates per epoch five- to sevenfold at the same epoch dial. The fine-tune runs in full precision,
+    without TensorFloat-32 matrix products: reduced precision moved SPARE's results beyond the spread
+    between two ordinary trainings, so neither trained method uses one.
     """
     return {
         'pretrained_model_name_or_path': model_base_name,
@@ -212,7 +208,8 @@ def _salun(
         # workers must pickle the transform; a nested function cannot be
         'dataloader_num_workers': 0,
         'per_device_train_batch_size': 1,
-        'allow_tf32': True,
+        'allow_tf32': False,
+        'seed': TRAINING_SEED,
         'device': device,
     }
 
@@ -233,7 +230,8 @@ def _lora(
     learning rate 1e-4, constant, no warm-up; LoRA rank 4, alpha 8, dropout 0.2, Gaussian
     initialisation; batch 4; Adam betas 0.9 and 0.999, epsilon 1e-8, weight decay 1e-2; horizontal
     flip. The paper is silent on gradient clipping and the target modules, so those are the library
-    defaults (1.0; the four attention projections). It trains in bfloat16 mixed precision. Munba is
+    defaults (1.0; the four attention projections). It trains in full precision, not the bfloat16 mixed
+    precision it offers, which moved its results beyond the spread between two ordinary trainings. Munba is
     not on the benchmark's method axis and keeps the settings it was run with.
     """
     settings: Dict[str, Any] = {
@@ -259,7 +257,7 @@ def _lora(
         'target_modules': ['to_k', 'to_q', 'to_v', 'to_out.0'],
         'lora_alpha': 4,
         'lora_dropout': 0.2,
-        'seed': 42,
+        'seed': TRAINING_SEED,
     }
 
     if method == 'distil':
@@ -280,7 +278,6 @@ def _lora(
             'adam_weight_decay': 1e-2,
             'per_device_train_batch_size': 4,
             'gradient_accumulation_steps': 1,
-            'mixed_precision': 'bf16',
         })
     elif method == 'munba' and task == 'scenes':
         settings.update({

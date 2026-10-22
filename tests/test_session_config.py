@@ -161,7 +161,8 @@ class TestSalun:
             'random_flip': True,
             'dataloader_num_workers': 0,
             'per_device_train_batch_size': 1,
-            'allow_tf32': True,
+            'allow_tf32': False,
+            'seed': 42,
             'device': 'cuda',
             'evaluation_noise_seed': 42,
         }
@@ -210,7 +211,7 @@ class TestTheAdapterTrainers:
         expected.update({
             'learning_rate': 1e-4, 'lora_r': 4, 'lora_alpha': 8, 'lora_dropout': 0.2, 'max_grad_norm': 1.0,
             'adam_beta1': 0.9, 'adam_beta2': 0.999, 'adam_epsilon': 1e-8, 'adam_weight_decay': 1e-2,
-            'per_device_train_batch_size': 4, 'gradient_accumulation_steps': 1, 'mixed_precision': 'bf16',
+            'per_device_train_batch_size': 4, 'gradient_accumulation_steps': 1,
         })
         assert _config(task, 'distil', entity) == expected
 
@@ -295,9 +296,9 @@ class TestTheReferenceConfigurations:
              'lora_alpha': 8, 'lora_dropout': 0.2, 'per_device_train_batch_size': 4, 'adam_beta1': 0.9,
              'adam_beta2': 0.999, 'adam_epsilon': 1e-8, 'adam_weight_decay': 1e-2, 'random_flip': True,
              'max_grad_norm': 1.0, 'target_modules': ['to_k', 'to_q', 'to_v', 'to_out.0'],
-             'mixed_precision': 'bf16'}
+             'mixed_precision': 'no'}
     SALUN = {'learning_rate': 1e-5, 'mask_threshold': 0.5, 'alpha': 0.5, 'mask_guidance': 7.5,
-             'train_method': 'xattn', 'per_device_train_batch_size': 1, 'allow_tf32': True}
+             'train_method': 'xattn', 'per_device_train_batch_size': 1, 'allow_tf32': False}
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
     def test_uce(self, task: str, entity: str) -> None:
@@ -320,13 +321,18 @@ class TestTheReferenceConfigurations:
     def test_every_evaluation_is_seeded(self, method: str) -> None:
         assert _config('people', method, 'Mark_Philippoussis')['evaluation_noise_seed'] == 42
 
-    def test_full_precision_trains_spare_and_salun_in_float32(self) -> None:
-        spare = _config('people', 'distil', 'Mark_Philippoussis', full_precision=True)
-        salun = _config('people', 'salun', 'Mark_Philippoussis', full_precision=True)
+    def test_both_trained_methods_train_at_full_precision(self) -> None:
+        '''Fails on the code before: SPARE trained in bfloat16 mixed precision and SalUn with
+        TensorFloat-32 matrix products, and reduced precision moved SPARE's results beyond the spread
+        between two ordinary trainings.'''
+        spare = _config('people', 'distil', 'Mark_Philippoussis')
+        salun = _config('people', 'salun', 'Mark_Philippoussis')
         assert spare['mixed_precision'] == 'no' and 'allow_tf32' not in spare
         assert salun['allow_tf32'] is False and 'mixed_precision' not in salun
-        with pytest.raises(ValueError, match='no training precision'):
-            _config('people', 'uce', 'Mark_Philippoussis', num_train_epochs=0, retained_entities=['x'], full_precision=True)
+
+    @pytest.mark.parametrize('method', ['salun', 'distil'])
+    def test_every_trained_method_uses_the_one_training_seed(self, method: str) -> None:
+        assert _config('people', method, 'Mark_Philippoussis')['seed'] == session_config.TRAINING_SEED
 
     def test_the_internal_record_path_is_gone_from_the_uce_docstring(self) -> None:
         assert 'tickets/' not in (session_config._uce.__doc__ or '')

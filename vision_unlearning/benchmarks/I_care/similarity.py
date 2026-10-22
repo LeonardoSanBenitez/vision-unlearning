@@ -37,6 +37,7 @@ from vision_unlearning.benchmarks.I_care.configuration import (
     type_s,
     model_segment,
 )
+from vision_unlearning.utils.determinism import set_determinism
 from vision_unlearning.utils.noise import LATENT_HASH_SCHEMA_VERSION, type_noise
 
 SD_MODEL_NAME = "CompVis/stable-diffusion-v1-4"
@@ -612,19 +613,6 @@ class UnetLatentSimilarity(BaseModel):
             )
         return sample
 
-    def _set_determinism(self, enabled: bool) -> None:
-        """The determinism regime of ``generate_dataset``, applied identically here."""
-        import torch
-        if not torch.cuda.is_available():
-            return
-        if enabled:
-            os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
-            torch.use_deterministic_algorithms(True)
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-        else:
-            torch.use_deterministic_algorithms(False)
-
     def _complete_seeds(
         self, entities: Dict[str, Dict[str, Any]], entity_prompts: List[Tuple[str, str]],
     ) -> List[int]:
@@ -709,7 +697,7 @@ class UnetLatentSimilarity(BaseModel):
                     f"verified is exactly what this scheme exists to avoid."
                 )
             pipeline = self._load_pipeline(device)
-            self._set_determinism(True)
+            set_determinism(True)
             try:
                 for seed in remaining:
                     logger.info(
@@ -759,7 +747,7 @@ class UnetLatentSimilarity(BaseModel):
                         seed, self.cache_path_partial(),
                     )
             finally:
-                self._set_determinism(False)
+                set_determinism(False)
 
         self._write_cache(
             self.cache_path(), self._in_metadata_order(entities, entity_prompts),
@@ -815,7 +803,7 @@ class UnetLatentSimilarity(BaseModel):
         measurements: Dict[str, float] = {}
 
         pipeline = self._load_pipeline(device)
-        self._set_determinism(True)
+        set_determinism(True)
         try:
             # 1. Determinism: one seed's pass, replayed from its first prompt, must come back
             # bit-identical. Replaying a seed's pass is also exactly how an interrupted capture
@@ -952,7 +940,7 @@ class UnetLatentSimilarity(BaseModel):
                             os.path.join(output_dir, f'decoded_seed{seed}_entity{index}_{name}.png'),
                         )
         finally:
-            self._set_determinism(False)
+            set_determinism(False)
             with open(os.path.join(output_dir, 'validate_capture.json'), 'w', encoding='utf-8') as f:
                 json.dump(measurements, f, indent=2)
         return measurements
