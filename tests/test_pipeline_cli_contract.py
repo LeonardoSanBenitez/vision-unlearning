@@ -18,6 +18,7 @@ interface.
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, Set
@@ -211,3 +212,27 @@ def test_the_session_script_never_chooses_the_generation_batch_from_memory() -> 
     section = _read('vision_unlearning/benchmarks/I_care/pipeline_03_unlearn_model.py')
     start = section.index('batch_size_inference = ')
     assert 'free_memory' not in section[start:start + 300]
+
+
+def _generated_dataset_calls_without_base_folder(script_name: str) -> list:
+    """Line numbers of ``GeneratedDataset(...)`` calls in a pipeline script that omit ``base_folder``."""
+    tree = ast.parse(_read(f'vision_unlearning/benchmarks/I_care/{script_name}'))
+    return [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'GeneratedDataset'
+        and 'base_folder' not in {keyword.arg for keyword in node.keywords}
+    ]
+
+
+@pytest.mark.parametrize('script_name', [
+    name for name in _pipeline_scripts() if '--base-folder' in _flags_declared_by(name)
+])
+def test_every_generated_dataset_follows_the_base_folder_flag(script_name: str) -> None:
+    """Fails on the code before for pipeline_05: its per-entity dataset was built without
+    ``base_folder``, so under any other ``--base-folder`` it looked for the session's images under
+    ``./assets``, called the session incomplete and skipped it, writing no embeddings."""
+    missing = _generated_dataset_calls_without_base_folder(script_name)
+    assert not missing, (
+        f'{script_name} declares --base-folder but builds GeneratedDataset without base_folder at '
+        f'line(s) {missing}, so that dataset is read from the default ./assets instead.'
+    )
