@@ -10,12 +10,17 @@ and writes into ``--output``:
 * ``people_baseline_seed42.png`` -- the 100 people baseline images at seed 42;
 * ``session_target_<entity>.png`` -- the target's prompt at every seed: baseline, then each method;
 * ``session_receivers_seed42.png`` -- the first receivers other than the target at seed 42: baseline,
-  then each method, with the session's per-pair scores in the subplot titles.
+  then each method, with the session's per-pair scores in the subplot titles;
+* ``training_runs_<method>.png`` -- with ``--pairs``, for each method whose session exists in both runs
+  of a pair: every receiver's ``clip_diff`` in one run against the other, one panel per pair, and
+  ``training_runs.md``, the table of every pair (Pearson correlation and mean absolute difference of the
+  receivers' ``clip_diff`` and ``dino_diff``, receivers with equal values, the target's ``clip_diff`` in
+  each run). A run is a folder under ``--s2`` whose ``assets/`` holds sessions of the same entity.
 
 Usage::
 
     python report_figures.py --s2 S2_FOLDER --assets REHEARSAL_ASSETS --output DIR \\
-        --methods uce distil salun --epochs 0 400 400 --index 0
+        --methods uce distil salun --epochs 0 400 400 --index 0 [--pairs RUN_A:RUN_B ...]
 
 Prints ``FIGURES <n>`` and ``FIGURES_DONE``.
 """
@@ -154,6 +159,66 @@ def session_receivers(assets: str, target: str, index: int, receivers: List[str]
     return path
 
 
+def _pearson(a: List[float], b: List[float]) -> float:
+    return float(np.corrcoef(np.asarray(a), np.asarray(b))[0, 1])
+
+
+def training_runs(s2: str, target: str, index: int, pairs: List[Tuple[str, str]], methods: List[Tuple[str, int]], output: str) -> List[str]:
+    """Each trained session against its retraining in another run: the receivers' scores, pair by pair."""
+    rows = ['| method | run A | run B | receivers | equal clip_diff | clip_diff Pearson | clip_diff mean absolute difference '
+            '| dino_diff Pearson | dino_diff mean absolute difference | target clip_diff A | target clip_diff B |',
+            '|---|---|---|---|---|---|---|---|---|---|---|']
+    written: List[str] = []
+    for method, epochs in methods:
+        found = []
+        for a, b in pairs:
+            paths = [get_interference_per_pair_path('people', index, method, epochs, base_folder=os.path.join(s2, run, 'assets'))  # type: ignore[arg-type]
+                     for run in (a, b)]
+            if all(os.path.exists(p) for p in paths):
+                scores = []
+                for p in paths:
+                    with open(p, encoding='utf-8') as handle:
+                        scores.append(json.load(handle))
+                found.append((a, b, scores[0], scores[1]))
+        if not found:
+            continue
+        columns = min(4, len(found))
+        lines = -(-len(found) // columns)
+        figure, axes = plt.subplots(lines, columns, figsize=(3.4 * columns, 3.6 * lines), squeeze=False)
+        for unused in axes.flat[len(found):]:
+            unused.axis('off')
+        for c, (a, b, first, second) in enumerate(found):
+            receivers = sorted(n for n in first if n != target)
+            x = [first[n]['clip_diff'] for n in receivers]
+            y = [second[n]['clip_diff'] for n in receivers]
+            dino_x = [first[n]['dino_diff'] for n in receivers]
+            dino_y = [second[n]['dino_diff'] for n in receivers]
+            equal = sum(1 for u, v in zip(x, y) if u == v)
+            clip_mad = float(np.mean(np.abs(np.asarray(x) - np.asarray(y))))
+            dino_mad = float(np.mean(np.abs(np.asarray(dino_x) - np.asarray(dino_y))))
+            axis = axes[c // columns][c % columns]
+            low, high = min(x + y), max(x + y)
+            axis.plot([low, high], [low, high], color='grey', linewidth=0.8)
+            axis.scatter(x, y, s=8)
+            axis.set_xlabel(f'{a}: receiver clip_diff', fontsize=8)
+            axis.set_ylabel(f'{b}: receiver clip_diff', fontsize=8)
+            axis.set_title(f'{a} against {b}\nPearson={_pearson(x, y):.3f} mean absolute difference={clip_mad:.3f}\n'
+                           f'equal={equal} of {len(receivers)}', fontsize=7)
+            axis.tick_params(labelsize=7)
+            rows.append(f'| {DISPLAY[method]} | {a} | {b} | {len(receivers)} | {equal} | {_pearson(x, y):.3f} | {clip_mad:.3f} '
+                        f'| {_pearson(dino_x, dino_y):.3f} | {dino_mad:.3f} | {first[target]["clip_diff"]:.2f} | {second[target]["clip_diff"]:.2f} |')
+        figure.suptitle(f'method={DISPLAY[method]} epochs={epochs} | target={canonical_entity("people", target)} | '
+                        f'points=receivers | line=equal values', fontsize=9)
+        figure.tight_layout()
+        path = os.path.join(output, f'training_runs_{DISPLAY[method]}.png')
+        figure.savefig(path, dpi=90)
+        plt.close(figure)
+        written.append(path)
+    with open(os.path.join(output, 'training_runs.md'), 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(rows) + '\n')
+    return written
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--s2', required=True)
@@ -163,9 +228,12 @@ def main() -> None:
     parser.add_argument('--epochs', nargs='+', type=int, default=[0, 400, 400])
     parser.add_argument('--index', type=int, default=0)
     parser.add_argument('--receivers', type=int, default=6)
+    parser.add_argument('--pairs', nargs='*', default=[], help='RUN_A:RUN_B, folders under --s2 holding assets/')
     args = parser.parse_args()
     if len(args.methods) != len(args.epochs):
         parser.error('one --epochs value per --methods value')
+    if any(pair.count(':') != 1 for pair in args.pairs):
+        parser.error('each --pairs value is RUN_A:RUN_B')
 
     os.makedirs(args.output, exist_ok=True)
     with open(os.path.join(args.assets, 'metadata_people_2_enriched_filtered.json'), encoding='utf-8') as handle:
@@ -177,6 +245,8 @@ def main() -> None:
     written.append(baseline_sheet(args.assets, names, args.output))
     written.append(session_target(args.assets, target, methods, args.output))
     written.append(session_receivers(args.assets, target, args.index, [n for n in names if n != target][:args.receivers], methods, args.output))
+    pairs = [(a, b) for a, b in (pair.split(':') for pair in args.pairs)]
+    written += training_runs(args.s2, target, args.index, pairs, methods, args.output)
     for path in written:
         print('FIGURE', path)
     print(f'FIGURES {len(written)}')
