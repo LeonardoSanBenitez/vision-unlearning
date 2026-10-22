@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import matplotlib
 matplotlib.use('Agg')
@@ -48,6 +48,11 @@ from vision_unlearning.datasets.testbed import (  # noqa: E402
 DISPLAY = {'distil': 'spare', 'uce': 'uce', 'salun': 'salun'}
 SEEDS = [42, 43, 44, 45]
 AMPLIFY = 20
+
+
+def _layout(figure: Any) -> None:
+    """Tight layout below a fixed band for the figure title, so the title never covers the first row."""
+    figure.tight_layout(rect=(0, 0, 1, 1 - 0.5 / figure.get_figheight()))
 
 
 def _image(path: str) -> np.ndarray:
@@ -85,16 +90,22 @@ def differing_images(s2: str, prompts: List[str], output: str) -> List[str]:
         rows.append(f'| {name} | {count} | {count - len(differing)} | {np.mean(values):.4f} | {max(values):.4f} |')
         if not differing:
             continue
-        figure, axes = plt.subplots(len(differing), 3, figsize=(9, 3.1 * len(differing)), squeeze=False)
-        for row, (prompt, a, b, value) in enumerate(differing):
+        # More than four differing images go into two groups of three columns, filled top to bottom, so
+        # the figure keeps a page's proportions.
+        groups = 2 if len(differing) > 4 else 1
+        lines = -(-len(differing) // groups)
+        figure, axes = plt.subplots(lines, 3 * groups, figsize=(9 * groups, 3.1 * lines), squeeze=False)
+        for unused in axes.flat:
+            unused.axis('off')
+        for position, (prompt, a, b, value) in enumerate(differing):
+            row, offset = position % lines, 3 * (position // lines)
             difference = np.clip(np.abs(a.astype(np.int16) - b.astype(np.int16)) * AMPLIFY, 0, 255).astype(np.uint8)
             for column, (picture, title) in enumerate(((a, f'reference\n{prompt}'), (b, f'{name}\nseed=42'),
                                                        (difference, f'absolute difference x{AMPLIFY}\nmean={value:.3f} on 0-255'))):
-                axes[row][column].imshow(picture)
-                axes[row][column].set_title(title, fontsize=8)
-                axes[row][column].axis('off')
+                axes[row][offset + column].imshow(picture)
+                axes[row][offset + column].set_title(title, fontsize=8)
         figure.suptitle(f'{name} | reference=baseline subset seed=42 | differing images={len(differing)}/{count}', fontsize=9)
-        figure.tight_layout()
+        _layout(figure)
         path = os.path.join(output, f'differing_images_{name}.png')
         figure.savefig(path, dpi=80)
         plt.close(figure)
@@ -112,7 +123,7 @@ def baseline_sheet(assets: str, names: List[str], output: str) -> str:
         axis.set_title(canonical_entity('people', name), fontsize=6)
         axis.axis('off')
     figure.suptitle(f'people baseline | seed=42 | entities={len(names)} | batch=8 | noise=per_image_processor', fontsize=10)
-    figure.tight_layout()
+    _layout(figure)
     path = os.path.join(output, 'people_baseline_seed42.png')
     figure.savefig(path, dpi=70)
     plt.close(figure)
@@ -131,7 +142,7 @@ def session_target(assets: str, target: str, methods: List[Tuple[str, int]], out
             axes[r][c].set_title(f'{label}\nseed={seed}', fontsize=8)
             axes[r][c].axis('off')
     figure.suptitle(f'target={canonical_entity("people", target)} | prompt="{prompt}" | rows=baseline then each method', fontsize=9)
-    figure.tight_layout()
+    _layout(figure)
     path = os.path.join(output, f'session_target_{target}.png')
     figure.savefig(path, dpi=70)
     plt.close(figure)
@@ -152,7 +163,7 @@ def session_receivers(assets: str, target: str, index: int, receivers: List[str]
             axes[r][c].set_title(f'{label} | {canonical_entity("people", name)}{second}', fontsize=7)
             axes[r][c].axis('off')
     figure.suptitle(f'target={canonical_entity("people", target)} | receivers={len(receivers)} | seed=42 | scores=mean over 4 seeds', fontsize=9)
-    figure.tight_layout()
+    _layout(figure)
     path = os.path.join(output, 'session_receivers_seed42.png')
     figure.savefig(path, dpi=70)
     plt.close(figure)
@@ -209,7 +220,7 @@ def training_runs(s2: str, target: str, index: int, pairs: List[Tuple[str, str]]
                         f'| {_pearson(dino_x, dino_y):.3f} | {dino_mad:.3f} | {first[target]["clip_diff"]:.2f} | {second[target]["clip_diff"]:.2f} |')
         figure.suptitle(f'method={DISPLAY[method]} epochs={epochs} | target={canonical_entity("people", target)} | '
                         f'points=receivers | line=equal values', fontsize=9)
-        figure.tight_layout()
+        _layout(figure)
         path = os.path.join(output, f'training_runs_{DISPLAY[method]}.png')
         figure.savefig(path, dpi=90)
         plt.close(figure)
