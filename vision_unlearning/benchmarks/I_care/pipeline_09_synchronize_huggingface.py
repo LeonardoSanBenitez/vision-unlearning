@@ -14,6 +14,8 @@ Stages (each maps to one artifact type; see the path table in CONTRIBUTING_ICARE
     generated-datasets       datasets/generated_{task}_{target_hf}_{method}_{epochs:03d}/  (folder)
     embeddings               datasets/embeddings_*.json  (baseline + per-entity)
     act-fingerprints         datasets/act_fingerprints_{task}_sd1.4.json
+    similarity               similarity_{s}_{task}.json for the five similarity metrics
+    baseline-competence      datasets/baseline_competence_{task}.json
     interference-per-pair    datasets/interferences_caused_by_{task}_{index}_{method}_{epochs}.json
     interference-per-entity  interference_per_entity_{task}.json
 
@@ -44,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from functools import partial
@@ -73,6 +76,8 @@ from vision_unlearning.datasets.testbed import (
 from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME
 from vision_unlearning.benchmarks.I_care.upload import assert_upload_allowed, upload_file, upload_folder
 from vision_unlearning.utils.mechanistic_interpretability import get_act_fingerprints_path
+from vision_unlearning.benchmarks.I_care.baseline_competence import competence_path
+from vision_unlearning.benchmarks.I_care.similarity import Similarity
 
 logging.basicConfig(
     format="[%(asctime)s] %(levelname)-8s %(message)s",
@@ -94,11 +99,14 @@ STAGES: List[str] = [
     "generated-datasets",
     "embeddings",
     "act-fingerprints",
+    "similarity",
+    "baseline-competence",
     "interference-per-pair",
     "interference-per-entity",
 ]
 
 ALL_TASKS: List[str] = ["breeds", "scenes", "people"]
+SIMILARITY_METRICS: List[str] = ["clip", "jacc", "dino", "act", "unet_latent"]
 ALL_METHODS: List[str] = ["uce", "munba", "distil"]
 
 
@@ -257,6 +265,24 @@ def enumerate_items(
                 kind="file",
                 local_path=get_act_fingerprints_path(task, SD_MODEL, base_folder=base_folder),
                 remote_path=to_hf_path(get_act_fingerprints_path(task, SD_MODEL, base_folder="")),
+            ))
+
+        if "similarity" in stages:
+            for metric in SIMILARITY_METRICS:
+                matrix = Similarity(task=task_t, similarity_metric=metric, base_folder=base_folder)  # type: ignore[arg-type]
+                items.append(SyncItem(
+                    stage="similarity", task=task, name=metric,
+                    kind="file",
+                    local_path=matrix._get_data_path_local(),
+                    remote_path=matrix._get_data_path_remote(),
+                ))
+
+        if "baseline-competence" in stages:
+            items.append(SyncItem(
+                stage="baseline-competence", task=task, name=f"baseline_competence_{task}",
+                kind="file",
+                local_path=competence_path(task, base_folder=base_folder),
+                remote_path=to_hf_path(competence_path(task, base_folder="")),
             ))
 
         if "interference-per-entity" in stages:
@@ -469,6 +495,15 @@ def synchronize(
 # Reporting
 # ---------------------------------------------------------------------------
 
+def exit_status(items: List[SyncItem]) -> int:
+    """1 when any upload of this run failed after its retries, else 0.
+
+    A failed item is recorded and the run goes on to the others, so the report shows everything at
+    once; the exit status is what lets a caller -- a campaign job above all -- stop on it.
+    """
+    return 1 if any(item.upload_error for item in items) else 0
+
+
 def build_report(items: List[SyncItem]) -> pd.DataFrame:
     """Per (stage, task, method) summary of expected / local / remote / uploaded / missing counts."""
     rows: List[Dict[str, Any]] = []
@@ -623,3 +658,10 @@ if __name__ == "__main__":
         if len(missing) > 50:
             print(f"  ... and {len(missing) - 50} more (full list in the status JSON)")
     write_status_json(items, report, status_path, args.repository)
+    failed = [i for i in items if i.upload_error]
+    if failed:
+        print("-" * 100)
+        print(f"UPLOAD FAILED for {len(failed)} item(s):")
+        for i in failed:
+            print(f"  {i.remote_path}: {i.upload_error}")
+    sys.exit(exit_status(items))

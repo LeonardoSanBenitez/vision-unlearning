@@ -1,4 +1,4 @@
-"""The check that closes one campaign session, and the ledger line that records it.
+"""The check that closes one campaign unit -- a session, or a task's baseline -- and its ledger line.
 
 A session is one unit: ``pipeline_03`` trains (or edits) and generates, ``pipeline_05`` embeds,
 ``pipeline_06`` scores. This runs after them and decides whether the session delivered, by its files:
@@ -16,6 +16,15 @@ producer facts (commit, card, the hashes of ``pins.json`` and the freeze), the d
 pairing verdict and the calibration flag, with status ``ok`` -- or ``failed`` and the reason, in which
 case it exits 1 so the queue stops. Run ``python -m vision_unlearning.benchmarks.I_care.session_check
 --help``.
+
+``--baseline`` closes a task's baseline instead (:func:`check_baseline`), the unit every session is later
+paired against: its ``seeds x prompts`` images and their pairing record (every key once, one latent per
+seed, every file named for its prompt and seed, an allowed scheduler), as many baseline embedding records,
+the ``act`` fingerprints and the ``unet_latent`` capture each certified against the baseline's inputs
+(classes ``act`` and ``unet_latent``) and the capture's own decode check covering every latent, the five
+similarity matrices complete and finite, and the competence file with a finite, positive ``f_min``. Its
+ledger key is ``{task}/baseline``. The ``unet_latent`` cache is a local debug cache, never published, so it
+is checked but not digested.
 """
 from __future__ import annotations
 
@@ -27,9 +36,11 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Sequence
 
+from vision_unlearning.benchmarks.I_care.baseline_competence import competence_path
 from vision_unlearning.benchmarks.I_care.configuration import GENERATE_DATASET_SEEDS
 from vision_unlearning.benchmarks.I_care.metadata import (
     PER_PAIR_METRICS,
+    BaselineEmbeddings,
     get_embedding_output_path,
     get_interference_per_pair_path,
     per_seed_path_of,
@@ -37,6 +48,8 @@ from vision_unlearning.benchmarks.I_care.metadata import (
 from vision_unlearning.benchmarks.I_care.pairing import PairingFailure, check
 from vision_unlearning.benchmarks.I_care.provenance import read_provenance
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
+from vision_unlearning.benchmarks.I_care.similarity import Similarity, UnetLatentSimilarity
+from vision_unlearning.utils.mechanistic_interpretability import get_act_fingerprints_path
 from vision_unlearning.datasets.entity_names import canonical_entity, generation_prompt, type_entity_task
 from vision_unlearning.datasets.testbed import (
     get_generated_dataset_file,
@@ -53,6 +66,15 @@ class SessionCheckFailure(RuntimeError):
 def session_key(task: str, method: str, epochs: int, index: int) -> str:
     """The key a session is known by in the ledger and the expected-session list."""
     return f'{task}/{method}/{epochs}/{index}'
+
+
+def baseline_key(task: str) -> str:
+    """The key a task's baseline is known by in the ledger and the expected-session list."""
+    return f'{task}/baseline'
+
+
+#: The similarity matrices a task's baseline unit holds.
+BASELINE_SIMILARITIES = ('clip', 'jacc', 'dino', 'act', 'unet_latent')
 
 
 def _sha256(path: str) -> str:
@@ -153,13 +175,130 @@ def check_session(
     return fields
 
 
+def _load(path: str) -> Any:
+    with open(path, encoding='utf-8') as handle:
+        return json.load(handle)
+
+
+def check_baseline(
+    task: type_entity_task,
+    entities: Sequence[str],
+    base_folder: str,
+    seeds: Optional[Sequence[int]] = None,
+) -> Dict[str, Any]:
+    """Count, certify and digest a task's baseline unit. Returns the ledger fields; raises on any failure.
+
+    `entities` are the task's metadata names in canonical order; `seeds` defaults to the benchmark's.
+    """
+    seeds = list(GENERATE_DATASET_SEEDS) if seeds is None else list(seeds)
+    prompts = [generation_prompt(task, name) for name in entities]
+    expected = len(seeds) * len(prompts)
+    folder = get_shared_baseline_folder(task, base_folder)
+    embeddings = BaselineEmbeddings(task=task, base_folder=base_folder)._get_data_path_local()  # type: ignore[arg-type]
+    act = get_act_fingerprints_path(task, 'sd1.4', base_folder)
+    latents = UnetLatentSimilarity(task=task, base_folder=base_folder).cache_path()  # type: ignore[arg-type]
+    matrices = {s: Similarity(task=task, similarity_metric=s, base_folder=base_folder)._get_data_path_local()  # type: ignore[arg-type]
+                for s in BASELINE_SIMILARITIES}
+    competence = competence_path(task, base_folder)
+    problems: List[str] = []
+    counts: Dict[str, int] = {}
+    pairing: Dict[str, str] = {}
+
+    present = set(os.listdir(folder)) if os.path.isdir(folder) else set()
+    counts['images'] = len({get_generated_dataset_file('off', s, p) for s in seeds for p in prompts} & present)
+    if counts['images'] != expected:
+        problems.append(f'{counts["images"]} of {expected} images in {folder}')
+
+    base: Optional[Dict[str, Any]] = None
+    try:
+        base = read_provenance(folder, prompts, seeds)['pairing']
+        check(base, base, prompts, seeds, 'image_pairs', file_name_of=get_generated_dataset_file,  # type: ignore[arg-type]
+              candidate_lora_state='off')
+        pairing['images'] = 'paired'
+    except (PairingFailure, FileNotFoundError, ValueError, KeyError) as exc:
+        pairing['images'] = f'failed: {exc}'
+        problems.append(f'baseline pairing record {pairing["images"]}')
+
+    try:
+        records = _load(embeddings)['embeddings']
+        covered = {(r['prompt'], int(r['seed'])) for r in records} & {(p, s) for p in prompts for s in seeds}
+        counts['embeddings'] = len(covered)
+        if len(records) != expected or counts['embeddings'] != expected:
+            problems.append(f'{len(records)} embedding records, {counts["embeddings"]} of {expected} images covered')
+    except (OSError, KeyError, ValueError, TypeError) as exc:
+        counts['embeddings'] = 0
+        problems.append(f'baseline embeddings unreadable: {exc}')
+
+    for name, path in (('act', act), ('unet_latent', latents)):
+        try:
+            record = _load(path)
+            if name == 'act':
+                counts['act_entities'] = len({r['entity'] for r in record['fingerprints']} & set(entities))
+                if counts['act_entities'] != len(entities):
+                    problems.append(f'{counts["act_entities"]} of {len(entities)} act fingerprints')
+            else:
+                counts['unet_latent_verified'] = int(record['metadata']['baseline_verification']['n_checked'])
+                if counts['unet_latent_verified'] != expected:
+                    problems.append(f'{counts["unet_latent_verified"]} of {expected} latents checked against their baseline image')
+            if base is None:
+                raise ValueError('no baseline pairing record to certify against')
+            check(record['metadata']['pairing'], base, prompts, seeds, name)  # type: ignore[arg-type]
+            pairing[name] = 'paired'
+        except (PairingFailure, OSError, KeyError, ValueError, TypeError) as exc:
+            pairing[name] = f'failed: {exc}'
+            problems.append(f'{name} {pairing[name]}')
+
+    counts['similarity_matrices'] = 0
+    for metric, path in matrices.items():
+        try:
+            rows = _load(path)
+            complete = [row['emitter'] for row in rows] == list(entities) and all(
+                isinstance(row.get(r), (int, float)) and math.isfinite(row[r]) for row in rows for r in entities)
+        except (OSError, KeyError, ValueError, TypeError) as exc:
+            problems.append(f'similarity {metric} unreadable: {exc}')
+            continue
+        if complete:
+            counts['similarity_matrices'] += 1
+        else:
+            problems.append(f'similarity {metric}: not a complete, finite {len(entities)}x{len(entities)} matrix in entity order')
+
+    summary: Dict[str, Any] = {}
+    try:
+        record = _load(competence)
+        counts['competence_entities'] = len(set(record['per_image']) & set(entities))
+        f_min = float(record['f_min'])
+        summary = {'f_min': f_min, 'recognised': record['screen']['recognised'], 'passes': record['screen']['passes']}
+        if counts['competence_entities'] != len(entities) or record['seeds'] != seeds:
+            problems.append(f'competence covers {counts["competence_entities"]} of {len(entities)} entities at seeds {record["seeds"]}')
+        if not (math.isfinite(f_min) and f_min > 0):
+            problems.append(f'competence f_min is {f_min}')
+    except (OSError, KeyError, ValueError, TypeError) as exc:
+        counts['competence_entities'] = 0
+        problems.append(f'competence unreadable: {exc}')
+
+    fields = {
+        'session': baseline_key(task),
+        'counts': counts,
+        'pairing': 'paired' if sorted(pairing) == ['act', 'images', 'unet_latent'] and set(pairing.values()) == {'paired'}
+                   else json.dumps(pairing),
+        'competence': summary,
+        'outputs': _digests([folder, embeddings, act, *matrices.values(), competence], base_folder),
+        'problems': problems,
+    }
+    if problems:
+        raise SessionCheckFailure('; '.join(problems), fields)
+    return fields
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog='python -m vision_unlearning.benchmarks.I_care.session_check',
                                      description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--task', required=True, choices=['people', 'scenes', 'breeds'])
-    parser.add_argument('--method', required=True)
-    parser.add_argument('--epochs', type=int, required=True)
-    parser.add_argument('--index', type=int, required=True, help="the target's index in the task metadata")
+    parser.add_argument('--baseline', action='store_true',
+                        help="check the task's baseline unit instead of a session; --method, --epochs and --index are then not taken")
+    parser.add_argument('--method', help='required unless --baseline')
+    parser.add_argument('--epochs', type=int, help='required unless --baseline')
+    parser.add_argument('--index', type=int, help="the target's index in the task metadata; required unless --baseline")
     parser.add_argument('--base-folder', default='assets')
     parser.add_argument('--ledger', required=True, help='the campaign ledger to append to')
     parser.add_argument('--attempt', type=int, required=True)
@@ -168,19 +307,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "default: the session's image folder's own")
     parser.add_argument('--calibration', action='store_true', help='mark the session as a calibration run')
     args = parser.parse_args(argv)
+    if not args.baseline and None in (args.method, args.epochs, args.index):
+        parser.error('--method, --epochs and --index are required unless --baseline')
 
     task = args.task
     with open(os.path.join(args.base_folder, f'metadata_{task}_2_enriched_filtered.json'), encoding='utf-8') as handle:
         receivers = [entity['name'] for entity in json.load(handle)]
-    entity = receivers[args.index]
-    key = session_key(task, args.method, args.epochs, args.index)
     ledger = RunLedger(args.ledger)
+    if args.baseline:
+        key = baseline_key(task)
+        images = get_shared_baseline_folder(task, args.base_folder)
+    else:
+        entity = receivers[args.index]
+        key = session_key(task, args.method, args.epochs, args.index)
+        images = get_generated_dataset_folder(task, args.method, args.epochs, canonical_entity(task, entity), args.base_folder)  # type: ignore[arg-type]
     try:
-        fields = check_session(task, args.method, args.epochs, args.index, entity, receivers, args.base_folder)
+        if args.baseline:
+            fields = check_baseline(task, receivers, args.base_folder)
+        else:
+            fields = check_session(task, args.method, args.epochs, args.index, entity, receivers, args.base_folder)
         status, message = 'ok', None
     except SessionCheckFailure as exc:
         fields, status, message = exc.args[1], 'failed', exc.args[0]
-    images = get_generated_dataset_folder(task, args.method, args.epochs, canonical_entity(task, entity), args.base_folder)  # type: ignore[arg-type]
     source = args.provenance_of or os.path.join(images, 'provenance.json')
     facts: Dict[str, Any] = {}
     if os.path.isfile(source):

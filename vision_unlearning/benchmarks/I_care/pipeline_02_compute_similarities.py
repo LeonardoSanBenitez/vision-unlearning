@@ -32,7 +32,8 @@ the local-cache / HuggingFace / compute-from-scratch chain automatically.
 ``--n-steps`` applies to ``act`` only.  ``unet_latent`` uses 50 denoising steps, the
 value the canonical image generation uses, and is not configurable here.
 
-``--upload`` uploads a matrix that this run computed.  It is ``upload_if_recomputed``, so a
+``--upload`` uploads a matrix that this run computed, to ``--repository``, which is checked at
+start-up: only the benchmark's current corpus may be written to.  It is ``upload_if_recomputed``, so a
 matrix already present locally is read rather than recomputed and nothing is uploaded; to
 publish an existing matrix, move it aside first so the resolve has to recompute it (the
 matrix is a deterministic function of its source data, so this is safe).  ``--validate-capture``
@@ -57,6 +58,8 @@ import logging
 import os
 from typing import List, Literal
 
+from vision_unlearning.artifact import DEFAULT_REMOTE_REPOSITORY_NAME
+
 logging.basicConfig(
     format="[%(asctime)s] %(levelname)-8s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -79,8 +82,9 @@ def resolve_matrix(
     similarity_metric: str,
     base_folder: str,
     upload: bool = False,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
-    """Resolve one similarity matrix through the RT (local -> HuggingFace -> compute).
+    """Resolve one similarity matrix through the RT (local -> `repository` -> compute).
 
     ``ResultTemplateSimilarityMatrix`` does not forward ``upload_if_recomputed`` to the
     ``Similarity`` artifact it reads, so an upload run resolves the artifact itself first —
@@ -92,12 +96,14 @@ def resolve_matrix(
             task=task,
             similarity_metric=similarity_metric,  # type: ignore[arg-type]
             base_folder=base_folder,
+            remote_repository_name=repository,
             upload_if_recomputed=True,
         ).compute()
     vb.ResultTemplateSimilarityMatrix(
         task=task,
         similarity_metric=similarity_metric,  # type: ignore[arg-type]
         base_folder=base_folder,
+        remote_repository_name=repository,
         upload_if_recomputed=upload,
     ).compute()
 
@@ -106,10 +112,11 @@ def run_clip(
     task: Literal["scenes", "breeds", "people"],
     base_folder: str,
     upload: bool = False,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
     """Resolve the CLIP text similarity matrix for a task: local, HuggingFace, or computed."""
     logger.info("CLIP similarity matrix for task=%s — calling RT.compute()...", task)
-    resolve_matrix(task, "clip", base_folder, upload)
+    resolve_matrix(task, "clip", base_folder, upload, repository)
     logger.info("CLIP similarity matrix for task=%s OK.", task)
 
 
@@ -117,10 +124,11 @@ def run_dino(
     task: Literal["scenes", "breeds", "people"],
     base_folder: str,
     upload: bool = False,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
     """Compute or download the DINOv2 similarity matrix for a task (CPU-only)."""
     logger.info("DINOv2 similarity matrix for task=%s — calling RT.compute()...", task)
-    resolve_matrix(task, "dino", base_folder, upload)
+    resolve_matrix(task, "dino", base_folder, upload, repository)
     logger.info("DINOv2 similarity matrix for task=%s OK.", task)
 
 
@@ -128,10 +136,11 @@ def run_jacc(
     task: Literal["scenes", "breeds", "people"],
     base_folder: str,
     upload: bool = False,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
     """Compute or download the Jaccard similarity matrix for a task (CPU-only)."""
     logger.info("Jaccard similarity matrix for task=%s — calling RT.compute()...", task)
-    resolve_matrix(task, "jacc", base_folder, upload)
+    resolve_matrix(task, "jacc", base_folder, upload, repository)
     logger.info("Jaccard similarity matrix for task=%s OK.", task)
 
 
@@ -143,6 +152,7 @@ def run_act(
     seeds: List[int] | None = None,
     replace_if_exists: bool = False,
     upload: bool = False,
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
     """Compute or download the activation-fingerprint similarity matrix for a task.
 
@@ -250,7 +260,7 @@ def run_act(
         )
 
     logger.info("Activation similarity matrix for task=%s — calling RT.compute()...", task)
-    resolve_matrix(task, "act", base_folder, upload)
+    resolve_matrix(task, "act", base_folder, upload, repository)
     logger.info("Activation similarity matrix for task=%s OK.", task)
 
 
@@ -261,6 +271,7 @@ def run_unet_latent(
     upload: bool = False,
     validate_capture: bool = False,
     report_dir: str = "reports/similarity_unet_latent",
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
 ) -> None:
     """Compute or download the final-denoised-latent similarity matrix for a task.
 
@@ -314,7 +325,7 @@ def run_unet_latent(
         )
 
     logger.info("Final-latent similarity matrix for task=%s — calling RT.compute()...", task)
-    resolve_matrix(task, "unet_latent", base_folder, upload)
+    resolve_matrix(task, "unet_latent", base_folder, upload, repository)
     logger.info("Final-latent similarity matrix for task=%s OK.", task)
 
 
@@ -384,6 +395,15 @@ def main() -> None:
         help="Upload a freshly computed similarity matrix to HuggingFace.",
     )
     parser.add_argument(
+        "--repository",
+        default=DEFAULT_REMOTE_REPOSITORY_NAME,
+        help=(
+            "HuggingFace dataset repository a matrix absent locally is read from and, with --upload, "
+            f"written to (default: {DEFAULT_REMOTE_REPOSITORY_NAME}). Uploads are refused at start-up "
+            "for every repository but the benchmark's current corpus."
+        ),
+    )
+    parser.add_argument(
         "--validate-capture",
         action="store_true",
         default=False,
@@ -401,6 +421,10 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    if args.upload:
+        # Before any compute: an upload aimed anywhere but the benchmark's current corpus stops here.
+        from vision_unlearning.benchmarks.I_care.upload import assert_upload_allowed
+        assert_upload_allowed(args.repository)
 
     task: Literal["scenes", "breeds", "people"] = args.task  # type: ignore[assignment]
     similarities: List[str] = (
@@ -411,11 +435,11 @@ def main() -> None:
     for similarity in similarities:
         logger.info("=== similarity=%s, task=%s ===", similarity, task)
         if similarity == "clip":
-            run_clip(task, args.base_folder, upload=args.upload)
+            run_clip(task, args.base_folder, upload=args.upload, repository=args.repository)
         elif similarity == "dino":
-            run_dino(task, args.base_folder, upload=args.upload)
+            run_dino(task, args.base_folder, upload=args.upload, repository=args.repository)
         elif similarity == "jacc":
-            run_jacc(task, args.base_folder, upload=args.upload)
+            run_jacc(task, args.base_folder, upload=args.upload, repository=args.repository)
         elif similarity == "act":
             run_act(
                 task=task,
@@ -425,6 +449,7 @@ def main() -> None:
                 seeds=args.seeds,
                 replace_if_exists=args.replace_if_exists,
                 upload=args.upload,
+                repository=args.repository,
             )
         elif similarity == "unet_latent":
             run_unet_latent(
@@ -434,6 +459,7 @@ def main() -> None:
                 upload=args.upload,
                 validate_capture=args.validate_capture,
                 report_dir=args.report_dir,
+                repository=args.repository,
             )
 
     logger.info("pipeline_02 done.")

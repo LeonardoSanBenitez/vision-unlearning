@@ -17,6 +17,7 @@ from vision_unlearning.benchmarks.I_care.pipeline_09_synchronize_huggingface imp
     annotate_remote_existence,
     build_report,
     enumerate_items,
+    exit_status,
     STAGES,
     synchronize,
     to_hf_path,
@@ -59,6 +60,18 @@ class TestEnumerateItems:
         assert len(by_stage["generated-datasets"]) == 4
         assert len(by_stage["embeddings"]) == 5             # 1 baseline + 2 entities x 2 methods
         assert len(by_stage["interference-per-pair"]) == 4
+        assert len(by_stage["similarity"]) == 5             # five metrics, one task
+        assert len(by_stage["baseline-competence"]) == 1
+
+    def test_similarity_matrices_and_competence_have_their_published_paths(self) -> None:
+        """Fails on the code before: neither stage existed, so nothing uploaded a matrix through the guard."""
+        items = _items(["similarity", "baseline-competence"], tasks=["scenes"])
+        assert sorted(i.remote_path for i in items) == sorted(
+            [f"similarity_{m}_scenes.json" for m in ("clip", "jacc", "dino", "act", "unet_latent")]
+            + ["datasets/baseline_competence_scenes.json"])
+        assert all(i.kind == "file" and i.method is None for i in items)
+        assert {i.local_path for i in items if i.stage == "similarity"} == {
+            os.path.join("assets", f"similarity_{m}_scenes.json") for m in ("clip", "jacc", "dino", "act", "unet_latent")}
 
     def test_epochs_resolved_from_configuration(self) -> None:
         items = _items(["embeddings"], methods=["distil"])
@@ -341,3 +354,14 @@ class TestReporting:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestExitStatus:
+    """Fails on the code before: a run whose uploads failed exited 0, so a campaign job could not stop on it."""
+
+    def test_a_failed_upload_makes_the_run_fail(self) -> None:
+        ok = SyncItem(stage="metadata", task="people", name="m", kind="file", local_path="a", remote_path="a")
+        bad = SyncItem(stage="metadata", task="people", name="n", kind="file", local_path="b", remote_path="b",
+                       upload_error="503")
+        assert exit_status([ok]) == 0
+        assert exit_status([ok, bad]) == 1

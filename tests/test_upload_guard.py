@@ -217,6 +217,7 @@ def test_each_repository_name_is_written_in_exactly_one_place() -> None:
 
 
 @pytest.mark.parametrize('script', [
+    'pipeline_02_compute_similarities.py',
     'pipeline_05_compute_embeddings.py',
     'pipeline_06_compute_interference_per_pair.py',
     'pipeline_08_run_all_rts.py',

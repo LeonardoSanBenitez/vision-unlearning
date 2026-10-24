@@ -12,6 +12,7 @@ Usage
 -----
     python pipeline_05_compute_embeddings.py --task people --method distil
     python pipeline_05_compute_embeddings.py --task people --method uce --max-identities 20
+    python pipeline_05_compute_embeddings.py --task people --baseline --no-upload   # the baseline only
     python pipeline_05_compute_embeddings.py --dry-run --task people --method distil
     python pipeline_05_compute_embeddings.py --help
 
@@ -327,8 +328,8 @@ def run_session(
     dataset_folder: str,
     progress: Dict[str, str],
     task: str,
-    method: str,
-    num_train_epochs: int,
+    method: Optional[str],
+    num_train_epochs: Optional[int],
     generate_dataset_seeds: List[int],
     prompts: List[str],
     metadata_filtered: List[Dict[str, Any]],
@@ -460,6 +461,66 @@ def run_session(
         raise
 
 
+def run_baseline_embeddings(
+    task: str,
+    generate_dataset_seeds: List[int],
+    prompts: List[str],
+    metadata_filtered: List[Dict[str, Any]],
+    base_folder: str,
+    replace_if_exists: bool,
+    upload_to_hf: bool,
+    hf_token: str,
+    progress: Dict[str, str],
+    progress_path: str,
+    embed_image_fn: Callable[[str], List[float]],
+    repository: str = DEFAULT_REMOTE_REPOSITORY_NAME,
+    hf_file_exists_fn: Callable[[str, str, str], bool] = huggingface_dataset_file_exists,
+    hf_upload_fn: Optional[Callable[..., None]] = None,
+) -> str:
+    """Embed the task's shared baseline folder, and nothing else. Returns the embedding file's path.
+
+    A session's run embeds the baseline as a side effect of its first entity, which needs that
+    entity's images; this embeds the baseline on its own, so it exists before any session does.
+    The file is the one ``BaselineEmbeddings`` addresses; it records no method and no epoch count,
+    because the baseline has neither. The baseline folder must already be complete locally: it is
+    never downloaded or skipped here, and an incomplete one raises ``FileNotFoundError``.
+    """
+    folder = get_shared_baseline_folder(task, base_folder=base_folder)  # type: ignore[arg-type]
+    if not dataset_folder_is_complete(folder, generate_dataset_seeds, prompts, "off"):
+        raise FileNotFoundError(
+            f"{folder} does not hold all {len(generate_dataset_seeds) * len(prompts)} baseline images; "
+            "generate the baseline first (pipeline_04 --baseline)."
+        )
+    baseline = BaselineEmbeddings(task=task, base_folder=base_folder)  # type: ignore[arg-type]
+    output_path = baseline._get_data_path_local()
+    run_session(
+        forgotten_entity="original",
+        target_preprocessed="original",
+        lora_state="off",
+        output_path=output_path,
+        hf_path=baseline._get_data_path_remote(),
+        progress_key=f"{task}/original",
+        dataset_folder=folder,
+        progress=progress,
+        task=task,
+        method=None,
+        num_train_epochs=None,
+        generate_dataset_seeds=generate_dataset_seeds,
+        prompts=prompts,
+        metadata_filtered=metadata_filtered,
+        replace_if_exists=replace_if_exists,
+        upload_to_hf=upload_to_hf,
+        hf_token=hf_token,
+        base_folder=base_folder,
+        progress_path=progress_path,
+        embed_image_fn=embed_image_fn,
+        hf_file_exists_fn=hf_file_exists_fn,
+        hf_upload_fn=hf_upload_fn,
+        repository=repository,
+    )
+    return output_path
+
+
 # ---------------------------------------------------------------------------
 # Status file helper (pure — safe to import / test without GPU)
 # ---------------------------------------------------------------------------
@@ -563,6 +624,16 @@ if __name__ == "__main__":
     parser.add_argument("--device", default=None,
                         help="Torch device for DINOv2 inference (e.g. 'cpu', 'cuda'). "
                              "Defaults to 'cuda' if available, else 'cpu'.")
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        default=False,
+        help=(
+            "Embed only the task's shared baseline folder (generated_{task}_baseline), which must be "
+            "complete locally, into the method-agnostic baseline embedding file, then exit. Ignores "
+            "--method, --num-train-epochs, --index-start and --max-identities."
+        ),
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -742,6 +813,24 @@ if __name__ == "__main__":
 
     # --- Main loop ---
     progress = load_progress(progress_path)
+
+    if args.baseline:
+        baseline_path = run_baseline_embeddings(
+            task=task,
+            generate_dataset_seeds=generate_dataset_seeds,
+            prompts=prompts,
+            metadata_filtered=metadata_for_embed,
+            base_folder=base_folder,
+            replace_if_exists=replace_if_exists,
+            upload_to_hf=upload_to_hf,
+            hf_token=HF_TOKEN,
+            progress=progress,
+            progress_path=progress_path,
+            embed_image_fn=embed_image,
+            repository=repository,
+        )
+        logger.info("Baseline embeddings: %s", baseline_path)
+        sys.exit(0)
 
     for index in range(index_start, index_start + max_identities):
         target: str = metadata_filtered[index]["name"]
