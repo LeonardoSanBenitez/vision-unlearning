@@ -10,6 +10,7 @@ from typing import Dict, List, Mapping, Optional
 
 import pytest
 
+from vision_unlearning.benchmarks.I_care import equalization
 from vision_unlearning.benchmarks.I_care.equalization import (
     IntegrityFailure,
     competence_screen,
@@ -239,3 +240,25 @@ def test_a_duplicate_entity_is_refused() -> None:
     from vision_unlearning.benchmarks.I_care.equalization import draw_panels
     with pytest.raises(ValueError, match='duplicate'):
         draw_panels('people', ['a', 'a'] + [str(k) for k in range(40)])
+
+
+# -- the ladders of the plan, value by value --------------------------------------------------------
+
+PLAN_LADDERS = {
+    ('uce', 'people'): [23.4375, 46.875, 93.75, 187.5, 375, 750, 1500, 3000, 6000, 12000, 24000, 48000, 96000],
+    ('uce', 'scenes'): [23.4375, 46.875, 93.75, 187.5, 375, 750, 1500, 3000, 6000, 12000, 24000, 48000, 96000],
+    ('uce', 'breeds'): [17.96875, 35.9375, 71.875, 143.75, 287.5, 575, 1150, 2300, 4600, 9200, 18400, 36800, 73600],
+    ('distil', 'people'): [50, 100, 200, 400, 800, 1600, 3200],
+    ('distil', 'scenes'): [13, 25, 50, 100, 200, 400, 800],
+    ('distil', 'breeds'): [13, 25, 50, 100, 200, 400, 800],
+    ('salun', 'people'): [13, 25, 50, 100, 200, 400, 800],
+    ('salun', 'scenes'): [3, 6, 13, 25, 50, 100, 200],
+    ('salun', 'breeds'): [3, 6, 13, 25, 50, 100, 200],
+}
+
+
+@pytest.mark.parametrize('method, task', sorted(PLAN_LADDERS))
+def test_every_ladder_is_the_plans_value_by_value(method: str, task: str) -> None:
+    """Fails on the code before: the ladders existed only as a rule and a table in the plan, and the
+    library's provisional SalUn epochs (configuration.py) are not the plan's SalUn centres."""
+    assert equalization.ladder(task, method) == [float(v) for v in PLAN_LADDERS[(method, task)]]

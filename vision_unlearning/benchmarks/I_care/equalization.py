@@ -83,6 +83,28 @@ def epoch_ladder(centre: int, low: int = -3, high: int = 3) -> List[int]:
     return values
 
 
+#: Each ladder's centre (``k = 0``), fixed before any calibration session. UCE's is
+#: ``configuration.uce_erase_scale`` (the first run's erase-to-ridge ratio put at ridge 0.5); SPARE's is
+#: the first run's epoch count; SalUn's is the grid centre of its integration pilot. They are starting
+#: points: the selected setting is justified by this run's measurements on the ladder.
+LADDER_CENTRES: Dict[str, Dict[str, float]] = {
+    'uce': {'people': 1500.0, 'scenes': 1500.0, 'breeds': 1150.0},
+    'distil': {'people': 400, 'scenes': 100, 'breeds': 100},
+    'salun': {'people': 100, 'scenes': 25, 'breeds': 25},
+}
+
+#: Whether a method's dial is an epoch count (rounded, at least 1) or a continuous scale.
+INTEGER_DIAL: Dict[str, bool] = {'uce': False, 'distil': True, 'salun': True}
+
+
+def ladder(task: str, method: str) -> List[float]:
+    """A method's ladder on a task: UCE ``c x 2**k`` for ``k = -6 .. 6``, the trained methods ``k = -3 .. 3``."""
+    centre = LADDER_CENTRES[method][task]
+    if INTEGER_DIAL[method]:
+        return [float(value) for value in epoch_ladder(int(centre))]
+    return scale_ladder(centre)
+
+
 def edge_extensions(
     ladders: Mapping[str, Sequence[float]],
     selected: Mapping[str, float],
