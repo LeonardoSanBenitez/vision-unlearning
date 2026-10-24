@@ -336,3 +336,15 @@ class TestTheReferenceConfigurations:
 
     def test_the_internal_record_path_is_gone_from_the_uce_docstring(self) -> None:
         assert 'tickets/' not in (session_config._uce.__doc__ or '')
+
+
+@pytest.mark.parametrize('method, field', [('distil', 'save_lora_at_epochs'), ('salun', 'save_at_epochs')])
+def test_a_trained_method_saves_at_the_requested_epochs(method: str, field: str) -> None:
+    """Fails on the code before: no configuration carried the epochs to save at, so equalization's
+    one run to the top of a ladder could not yield its lower values."""
+    assert _config('people', method, 'George_W_Bush', save_at_epochs=[400, 50, 100, 50])[field] == [50, 100, 400]
+
+
+def test_uce_has_no_epochs_to_save_at() -> None:
+    with pytest.raises(ValueError, match='no epochs'):
+        _config('people', 'uce', 'Mark_Philippoussis', save_at_epochs=[1])

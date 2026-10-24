@@ -263,3 +263,25 @@ def test_training_runs_under_the_determinism_regime() -> None:
     body, index = training[0]
     assert any(isinstance(statement, ast.Expr) and _is_call_to(statement.value, 'seed_training')
                for statement in body[:index]), 'unlearner.train() is not preceded by seed_training(...)'
+
+
+@pytest.mark.parametrize('flag', ['--save-at-epochs', '--no-outcome-checks'])
+def test_the_session_script_can_save_a_ladder_and_skip_outcome_thresholds(flag: str) -> None:
+    """Fails on the code before: equalization's one training run per ladder could not save its lower
+    values, and every run was stopped by evaluation thresholds tuned on an earlier corpus."""
+    assert flag in _flags_declared_by('pipeline_03_unlearn_model.py')
+
+
+def test_the_outcome_thresholds_are_behind_the_flag() -> None:
+    """Every threshold check on the trained model sits under ``if not _args.no_outcome_checks`` or after
+    the branch that skips them, so a calibration run is measured rather than stopped."""
+    tree = ast.parse(_read('vision_unlearning/benchmarks/I_care/pipeline_03_unlearn_model.py'))
+    guarded = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and 'no_outcome_checks' in ast.unparse(node.test):
+            for inner in ast.walk(node):
+                guarded.add(id(inner))
+    unguarded = [node.lineno for node in ast.walk(tree)
+                 if _is_call_to(node, 'check_eval_results') and id(node) not in guarded
+                 and not any(isinstance(a, ast.Constant) and a.value == 999 for a in getattr(node, 'args', []))]
+    assert not unguarded, f'threshold checks outside the flag at lines {unguarded}'

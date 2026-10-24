@@ -71,6 +71,7 @@ def session_hyperparameters(
     uce_guide_concepts: Optional[str] = None,
     retained_entities: Optional[Sequence[str]] = None,
     uce_erase_scale_override: Optional[float] = None,
+    save_at_epochs: Optional[Sequence[int]] = None,
 ) -> Dict[str, Any]:
     """Return the hyperparameters of one unlearning session.
 
@@ -92,6 +93,9 @@ def session_hyperparameters(
         from their retain splits. The target is refused if present.
     @param uce_erase_scale_override: UCE only: the strength dial, for equalization's sweep. None
         uses the task's value in ``configuration.uce_erase_scale``.
+    @param save_at_epochs: trained methods only: also save the trained weights after each of these
+        epochs, so one run to the top of a ladder yields every lower value of it (equalization). Each
+        trainer's own field takes it; refused for UCE, which has no epochs.
     @raises NotImplementedError: the method has no configuration here.
     """
     forget_prompts, retain_prompts = evaluation_prompts(task, entity)
@@ -125,6 +129,11 @@ def session_hyperparameters(
     else:
         raise NotImplementedError(f'no session configuration for method {method!r}')
 
+    if save_at_epochs is not None:
+        if method == 'uce':
+            raise ValueError('UCE is a closed-form edit; it has no epochs to save at')
+        field = 'save_at_epochs' if method == 'salun' else 'save_lora_at_epochs'
+        hyperparameters[field] = sorted(set(int(epoch) for epoch in save_at_epochs))
     return hyperparameters
 
 

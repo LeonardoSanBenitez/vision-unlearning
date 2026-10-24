@@ -219,6 +219,14 @@ _parser.add_argument("--uce-guide-concepts", default=None,
                           "the task's substitute concept. Set to the task name ('people', 'breeds', "
                           "'scenes') to reproduce the configuration used before that change, for a "
                           "control session on the same entity. Refused for any other method.")
+_parser.add_argument("--save-at-epochs", type=int, nargs="+", default=None,
+                     help="Trained methods only: also save the weights after each of these epochs, into "
+                          "epoch-N (SPARE) or epoch_N (SalUn) inside the model folder, each with its own "
+                          "provenance.json. Equalization trains once to the top of a ladder this way.")
+_parser.add_argument("--no-outcome-checks", action="store_true", default=False,
+                     help="Skip the checks of the trained model's runtime and evaluation scores against fixed "
+                          "thresholds. Those thresholds were tuned on an earlier corpus; a calibration run at "
+                          "a weak or strong setting must be measured and reported, not stopped by them.")
 _args = _parser.parse_args()
 
 base_folder: str = _args.base_folder
@@ -292,6 +300,7 @@ for index in range(index_start, index_start + max_identities):
         uce_guide_concepts=uce_guide_concepts,
         retained_entities=[m['name'] for m in metadata_filtered if m['name'] != target] if method == 'uce' else None,
         uce_erase_scale_override=_args.uce_erase_scale,
+        save_at_epochs=_args.save_at_epochs,
     )
     if uce_guide_concepts is not None:
         logger.info('UCE guide concept set by the caller to %r (default: the substitute concept)', uce_guide_concepts)
@@ -357,23 +366,33 @@ for index in range(index_start, index_start + max_identities):
         seed_training(TRAINING_SEED)
         eval_results = unlearner.train()
         logger.info('Evaluation metrics:\n' + pd.DataFrame([{'Name': r.metric_name, 'Value': r.metric_value} for r in eval_results]).to_markdown())
-        write_provenance(output_dir, producer_facts(
+        model_facts = producer_facts(
             precision=str(hyperparameters['mixed_precision'] if hyperparameters.get('mixed_precision') not in (None, 'no')
                           else ('tf32' if hyperparameters.get('allow_tf32') else 'float32')),
             pins_path=_args.pins, freeze_path=_args.freeze, producer='pipeline_03',
             deterministic_algorithms=torch.are_deterministic_algorithms_enabled(), training_seed=TRAINING_SEED,
             task=task, method=method, entity=target, num_train_epochs=num_train_epochs,
             configuration={k: v for k, v in hyperparameters.items() if isinstance(v, (str, int, float, bool, list, type(None)))},
-        ))
+        )
+        write_provenance(output_dir, model_facts)
+        # Each intermediate save is the model of a run stopped at that epoch (a constant learning rate), so
+        # it records that epoch count; the folder name differs between the two trainers.
+        for saved_epoch in _args.save_at_epochs or []:
+            for saved_name in (f'epoch-{saved_epoch}', f'epoch_{saved_epoch}'):
+                if os.path.isdir(os.path.join(output_dir, saved_name)):
+                    write_provenance(os.path.join(output_dir, saved_name), {**model_facts, 'num_train_epochs': saved_epoch})
 
         ###########################################
         # Check metrics
         ###########################################
-        check_eval_results(eval_results, 'Runtime training seconds', 10 * 3600, 'lt')
-        check_eval_results(eval_results, 'Runtime training seconds', 60, 'gt')
+        if not _args.no_outcome_checks:
+            check_eval_results(eval_results, 'Runtime training seconds', 10 * 3600, 'lt')
+            check_eval_results(eval_results, 'Runtime training seconds', 60, 'gt')
 
         # TODO define ideal values for more combinations
-        if task=='breeds':
+        if _args.no_outcome_checks:
+            pass
+        elif task=='breeds':
             if method=='distil':
                 check_eval_results(eval_results, 'ForgetSet clip score difference between original and unlearned mean', 3, 'gt')
                 check_eval_results(eval_results, 'RetainSet clip score difference between original and unlearned mean', 0.5, 'lt')
