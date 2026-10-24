@@ -285,3 +285,11 @@ def test_the_outcome_thresholds_are_behind_the_flag() -> None:
                  if _is_call_to(node, 'check_eval_results') and id(node) not in guarded
                  and not any(isinstance(a, ast.Constant) and a.value == 999 for a in getattr(node, 'args', []))]
     assert not unguarded, f'threshold checks outside the flag at lines {unguarded}'
+
+
+@pytest.mark.parametrize('script_name', ['pipeline_03_unlearn_model.py', 'pipeline_06_compute_interference_per_pair.py'])
+def test_a_readout_of_a_few_receivers_can_be_generated_and_scored(script_name: str) -> None:
+    """Fails on the code before: a session generated and scored every receiver, so equalization's
+    read-out of 21 prompts per setting could not be taken with the session's own code."""
+    assert '--receivers' in _flags_declared_by(script_name)
+    assert 'receivers_in_order(' in _read(f'vision_unlearning/benchmarks/I_care/{script_name}')

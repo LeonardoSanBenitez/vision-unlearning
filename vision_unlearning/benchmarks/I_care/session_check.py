@@ -41,11 +41,12 @@ from vision_unlearning.benchmarks.I_care.configuration import GENERATE_DATASET_S
 from vision_unlearning.benchmarks.I_care.metadata import (
     PER_PAIR_METRICS,
     BaselineEmbeddings,
+    receivers_in_order,
     get_embedding_output_path,
     get_interference_per_pair_path,
     per_seed_path_of,
 )
-from vision_unlearning.benchmarks.I_care.pairing import PairingFailure, check
+from vision_unlearning.benchmarks.I_care.pairing import PairingFailure, check, restrict
 from vision_unlearning.benchmarks.I_care.provenance import read_provenance
 from vision_unlearning.benchmarks.I_care.run_ledger import RunLedger
 from vision_unlearning.benchmarks.I_care.similarity import Similarity, UnetLatentSimilarity
@@ -66,6 +67,11 @@ class SessionCheckFailure(RuntimeError):
 def session_key(task: str, method: str, epochs: int, index: int) -> str:
     """The key a session is known by in the ledger and the expected-session list."""
     return f'{task}/{method}/{epochs}/{index}'
+
+
+def readout_key(task: str, method: str, dial: str, index: int) -> str:
+    """The key of an equalization read-out: the method's dial value (epochs, or UCE's erase scale) and the target."""
+    return f'calibration/{task}/{method}/{dial}/{index}'
 
 
 def baseline_key(task: str) -> str:
@@ -104,13 +110,19 @@ def check_session(
     receivers: Sequence[str],
     base_folder: str,
     seeds: Optional[Sequence[int]] = None,
+    entities: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Count, certify and digest one session. Returns the ledger fields; raises on any failure.
 
-    `seeds` defaults to the benchmark's generation seeds.
+    `seeds` defaults to the benchmark's generation seeds. `entities` is the task's full canonical list,
+    when `receivers` is only part of it: then the session is a **read-out** (equalization's), which has no
+    embeddings, and its images are certified against the baseline restricted to their prompts.
     """
     seeds = list(GENERATE_DATASET_SEEDS) if seeds is None else list(seeds)
+    entities = list(receivers) if entities is None else list(entities)
+    readout = list(receivers) != entities
     prompts = [generation_prompt(task, name) for name in receivers]
+    all_prompts = [generation_prompt(task, name) for name in entities]
     target = canonical_entity(task, entity)
     images = get_generated_dataset_folder(task, method, epochs, target, base_folder)  # type: ignore[arg-type]
     model = get_unlearned_model_folder(task, method, epochs, entity, base_folder)  # type: ignore[arg-type]
@@ -127,14 +139,15 @@ def check_session(
     counts['images'] = len(expected_names & present)
     if counts['images'] != expected:
         problems.append(f'{counts["images"]} of {expected} images in {images}')
-    try:
-        with open(embeddings, encoding='utf-8') as handle:
-            counts['embeddings'] = len(json.load(handle)['embeddings'])
-    except (OSError, KeyError, ValueError) as exc:
-        counts['embeddings'] = 0
-        problems.append(f'embeddings unreadable: {exc}')
-    if counts['embeddings'] != expected:
-        problems.append(f'{counts["embeddings"]} of {expected} embedding records')
+    if not readout:
+        try:
+            with open(embeddings, encoding='utf-8') as handle:
+                counts['embeddings'] = len(json.load(handle)['embeddings'])
+        except (OSError, KeyError, ValueError) as exc:
+            counts['embeddings'] = 0
+            problems.append(f'embeddings unreadable: {exc}')
+        if counts['embeddings'] != expected:
+            problems.append(f'{counts["embeddings"]} of {expected} embedding records')
     try:
         with open(per_pair, encoding='utf-8') as handle:
             rows = json.load(handle)
@@ -156,7 +169,10 @@ def check_session(
 
     pairing = 'not checked'
     try:
-        check(read_provenance(images, prompts, seeds)['pairing'], read_provenance(baseline, prompts, seeds)['pairing'],
+        reference = read_provenance(baseline, all_prompts, seeds)['pairing']
+        if readout:
+            reference = restrict(reference, all_prompts, prompts)
+        check(read_provenance(images, prompts, seeds)['pairing'], reference,
               prompts, seeds, 'image_pairs', file_name_of=get_generated_dataset_file)  # type: ignore[arg-type]
         pairing = 'paired'
     except (PairingFailure, FileNotFoundError, ValueError) as exc:
@@ -306,26 +322,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="a provenance.json whose producer facts (commit, card, pins and freeze hashes) the line carries; "
                              "default: the session's image folder's own")
     parser.add_argument('--calibration', action='store_true', help='mark the session as a calibration run')
+    parser.add_argument('--receivers', nargs='+', default=None,
+                        help='an equalization read-out: the receivers its images and scores cover (metadata names); '
+                             'needs --readout-dial and --calibration, and has no embeddings')
+    parser.add_argument('--readout-dial', default=None,
+                        help="the read-out's dial value as the ladder spells it (epochs, or UCE's erase scale); its ledger key is "
+                             "calibration/<task>/<method>/<dial>/<index>")
     args = parser.parse_args(argv)
     if not args.baseline and None in (args.method, args.epochs, args.index):
         parser.error('--method, --epochs and --index are required unless --baseline')
+    if (args.receivers is None) != (args.readout_dial is None) or (args.receivers is not None and not args.calibration):
+        parser.error('--receivers and --readout-dial go together, and a read-out is a calibration run (--calibration)')
 
     task = args.task
     with open(os.path.join(args.base_folder, f'metadata_{task}_2_enriched_filtered.json'), encoding='utf-8') as handle:
         receivers = [entity['name'] for entity in json.load(handle)]
+    scored = receivers_in_order(receivers, args.receivers)
     ledger = RunLedger(args.ledger)
     if args.baseline:
         key = baseline_key(task)
         images = get_shared_baseline_folder(task, args.base_folder)
     else:
         entity = receivers[args.index]
-        key = session_key(task, args.method, args.epochs, args.index)
+        key = (session_key(task, args.method, args.epochs, args.index) if args.receivers is None
+               else readout_key(task, args.method, args.readout_dial, args.index))
         images = get_generated_dataset_folder(task, args.method, args.epochs, canonical_entity(task, entity), args.base_folder)  # type: ignore[arg-type]
     try:
         if args.baseline:
             fields = check_baseline(task, receivers, args.base_folder)
         else:
-            fields = check_session(task, args.method, args.epochs, args.index, entity, receivers, args.base_folder)
+            fields = check_session(task, args.method, args.epochs, args.index, entity, scored, args.base_folder,
+                                   entities=receivers)
         status, message = 'ok', None
     except SessionCheckFailure as exc:
         fields, status, message = exc.args[1], 'failed', exc.args[0]
@@ -335,7 +362,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         with open(source, encoding='utf-8') as handle:
             record = json.load(handle)
         facts = {k: record.get(k) for k in ('commit', 'tree_clean', 'card_model', 'pins_sha256', 'freeze_sha256')}
-    fields.update({'attempt': args.attempt, 'calibration': args.calibration, **facts})
+    fields.update({'session': key, 'attempt': args.attempt, 'calibration': args.calibration, **facts})
     ledger.record(key, status, exception_type=None if status == 'ok' else 'SessionCheckFailure', message=message, fields=fields)
     ledger.close()
     print(f'SESSION_CHECK {status} {key} {json.dumps(fields["counts"])} pairing={fields["pairing"][:60]}')

@@ -22,6 +22,7 @@ from vision_unlearning.benchmarks.I_care.pairing import (
     check,
     output_distance,
     pairing_record,
+    restrict,
 )
 from vision_unlearning.datasets.testbed import get_generated_dataset_file
 
@@ -174,3 +175,39 @@ def test_records_hashed_under_different_encodings_are_refused() -> None:
     candidate['latent_hash_schema_version'] = 2
     with pytest.raises(PairingFailure, match='encodings'):
         _check(candidate, _record('off'))
+
+
+# -- a read-out of a few prompts, certified against the baseline restricted to them --------------
+
+SUBSET = [PROMPTS[7], PROMPTS[2], PROMPTS[9]]
+
+
+def _readout(subset: List[str] = SUBSET) -> Dict[str, Any]:
+    keys = [
+        {'prompt_index': i, 'seed': s, 'file_name': get_generated_dataset_file('on', s, p),  # type: ignore[arg-type]
+         'initial_latent_sha256': f'latent-of-seed-{s}'}
+        for s in SEEDS for i, p in enumerate(subset)
+    ]
+    return pairing_record(keys, 'PNDMScheduler', PNDM, KWARGS, latent_hash_schema_version=1)
+
+
+def test_a_readout_passes_against_the_baseline_restricted_to_its_prompts() -> None:
+    """Fails on the code before: there was no restriction, and a read-out's keys, indexed by position in
+    its own short prompt list, could only be compared with the whole baseline's and failed."""
+    restricted = restrict(_record('off'), PROMPTS, SUBSET)
+    assert len(restricted['keys']) == len(SUBSET) * len(SEEDS)
+    summary = check(_readout(), restricted, SUBSET, SEEDS, 'image_pairs', file_name_of=get_generated_dataset_file)  # type: ignore[arg-type]
+    assert summary['keys'] == 12
+
+
+def test_a_readout_whose_files_are_swapped_still_fails_after_restriction() -> None:
+    readout = _readout()
+    first, second = readout['keys'][0], readout['keys'][1]
+    first['file_name'], second['file_name'] = second['file_name'], first['file_name']
+    with pytest.raises(PairingFailure, match='not named for their prompt and seed'):
+        check(readout, restrict(_record('off'), PROMPTS, SUBSET), SUBSET, SEEDS, 'image_pairs', file_name_of=get_generated_dataset_file)  # type: ignore[arg-type]
+
+
+def test_restricting_to_a_prompt_the_record_does_not_hold_fails() -> None:
+    with pytest.raises(PairingFailure, match='not in the record'):
+        restrict(_record('off'), PROMPTS, ['An image of nobody'])

@@ -57,6 +57,7 @@ from vision_unlearning.benchmarks.I_care.configuration import (  # noqa: E402
     GENERATION_NOISE,
 )
 from vision_unlearning.benchmarks.I_care.provenance import producer_facts, write_provenance  # noqa: E402
+from vision_unlearning.benchmarks.I_care.metadata import receivers_in_order  # noqa: E402
 from vision_unlearning.benchmarks.I_care.upload import (  # noqa: E402
     assert_upload_allowed,
     remote_path_of,
@@ -227,7 +228,12 @@ _parser.add_argument("--no-outcome-checks", action="store_true", default=False,
                      help="Skip the checks of the trained model's runtime and evaluation scores against fixed "
                           "thresholds. Those thresholds were tuned on an earlier corpus; a calibration run at "
                           "a weak or strong setting must be measured and reported, not stopped by them.")
+_parser.add_argument("--receivers", nargs="+", default=None,
+                     help="Generate the images of these entities' prompts only (metadata names), in the task's "
+                          "order: a read-out, as equalization takes one. Left unset, every prompt. Never uploaded.")
 _args = _parser.parse_args()
+if _args.receivers is not None and _args.upload:
+    _parser.error("--receivers makes a read-out, which is never uploaded; drop --upload")
 
 base_folder: str = _args.base_folder
 task = _args.task
@@ -433,7 +439,8 @@ for index in range(index_start, index_start + max_identities):
     # Generate dataset
     ###########################################
     if perform_dataset_generation:
-        prompts = [generation_prompt(task, m['name']) for m in metadata_filtered]
+        prompts = [generation_prompt(task, name)
+                   for name in receivers_in_order([m['name'] for m in metadata_filtered], _args.receivers)]
         if generate_dataset_limit_prompts is not None:
             prompts = prompts[:generate_dataset_limit_prompts]
 

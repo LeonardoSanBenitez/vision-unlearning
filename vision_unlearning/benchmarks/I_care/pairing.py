@@ -161,6 +161,25 @@ def check(
     return {'check_class': check_class, 'keys': len(expected), 'seeds': len(seeds), 'verdict': 'paired'}
 
 
+def restrict(record: Mapping[str, Any], prompts: Sequence[str], subset: Sequence[str]) -> Dict[str, Any]:
+    """A record restricted to some of its prompts, its keys re-indexed to their positions in `subset`.
+
+    A read-out that generates only a few of the task's prompts (equalization's) records its keys by
+    position in its own prompt list; certifying it against the baseline means comparing it with the
+    baseline's keys for the same prompts, which this produces. `prompts` is the record's own ordered
+    prompt list. Every other field is kept. Raises :class:`PairingFailure` when a prompt of `subset` is
+    not in `prompts`.
+    """
+    position = {prompt: index for index, prompt in enumerate(prompts)}
+    absent = [prompt for prompt in subset if prompt not in position]
+    if absent:
+        raise PairingFailure(f'{len(absent)} prompts are not in the record (first {absent[:3]})')
+    new_index = {position[prompt]: index for index, prompt in enumerate(subset)}
+    keys = [dict(key, prompt_index=new_index[int(key['prompt_index'])])
+            for key in record['keys'] if int(key['prompt_index']) in new_index]
+    return {**record, 'keys': keys}
+
+
 def output_distance(baseline_image_path: str, candidate_image_path: str) -> float:
     """Mean absolute pixel difference on 0-255 between two images: a diagnostic, never a stop rule."""
     import numpy as np

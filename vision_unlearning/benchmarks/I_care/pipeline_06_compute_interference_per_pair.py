@@ -22,6 +22,7 @@ from vision_unlearning.datasets.testbed import (
 from vision_unlearning.benchmarks.I_care import get_interference_per_pair_path, save_interference_per_pair
 from vision_unlearning.benchmarks.I_care.metadata import (
     means_from_per_seed,
+    receivers_in_order,
     per_seed_path_of,
     save_interference_per_pair_per_seed,
 )
@@ -66,7 +67,12 @@ _parser.add_argument("--upload", action="store_true", default=False,
                      help="Upload each per-pair file once it holds a finite value of every metric for "
                           "every receiver, checked by content afterwards. Only the benchmark's current "
                           "corpus may be written to; any other --repository is refused at start-up.")
+_parser.add_argument("--receivers", nargs="+", default=None,
+                     help="Score these receivers only (metadata names), in the task's order: a read-out, whose "
+                          "image folder holds only their prompts, as equalization takes one. Never uploaded.")
 _args = _parser.parse_args()
+if _args.receivers is not None and (_args.upload or _args.limit_prompts is not None):
+    _parser.error("--receivers makes a read-out: it is never uploaded, and it replaces --limit-prompts")
 repository: str = _args.repository
 if _args.upload:
     # Before any model or data is loaded: a run that would upload somewhere forbidden fails now.
@@ -362,9 +368,12 @@ def evaluate_all_seeds(prompt: str, seeds: list) -> dict:
 # NOTE: all_prompts (built above, full list) is what was used to generate the datasets
 # and what compute() uses for completeness checks.  The truncated prompts list here
 # is only used during interference evaluation (limits the number of receiver entities).
-eval_prompts = all_prompts
+scored_receivers = receivers_in_order([m['name'] for m in metadata_filtered], _args.receivers)
 if generate_dataset_limit_prompts is not None:
-    eval_prompts = all_prompts[:generate_dataset_limit_prompts]
+    scored_receivers = scored_receivers[:generate_dataset_limit_prompts]
+scored_prompts = [generation_prompt(cast(type_entity_task, task), name) for name in scored_receivers]
+# The images a run needs: every prompt for a session, the read-out's own prompts for a read-out.
+needed_prompts = all_prompts if _args.receivers is None else scored_prompts
 
 def _assert_complete(per_pair: dict, receivers: list) -> None:
     """Refuse to publish a per-pair file missing a receiver, a metric, or holding a non-finite value."""
@@ -408,7 +417,7 @@ for index in range(index_start, index_start + max_identities):
         remote_repository_name=repository,
     )
     try:
-        ds_entity.compute(seeds=generate_dataset_seeds, prompts=all_prompts)
+        ds_entity.compute(seeds=generate_dataset_seeds, prompts=needed_prompts)
     except FileNotFoundError as exc:
         # _compute_from_scratch for entity datasets requires a trained model on disk.
         # If neither local data nor HF data is available AND the model is missing,
@@ -448,11 +457,10 @@ for index in range(index_start, index_start + max_identities):
     try:
         print(f'Measuring interferences caused by {index} {target}')
         per_seed = {}  # interferences caused by the current EMITER (given by `index`) to each RECEIVER, per seed
-        for i, m in enumerate(metadata_filtered[:len(eval_prompts)]):
-            p = eval_prompts[i]
+        for name, p in zip(scored_receivers, scored_prompts):
             print("Prompt: ", p)
             # evaluate_all_seeds batches BRISQUE across all seeds in one GPU pass
-            per_seed[m['name']] = evaluate_all_seeds(p, generate_dataset_seeds)
+            per_seed[name] = evaluate_all_seeds(p, generate_dataset_seeds)
         print('-' * 50 + '\n' + '-' * 50)
         interference_per_pair = means_from_per_seed(per_seed)
         save_interference_per_pair(interference_per_pair, task, index, method, num_train_epochs, base_folder=base_folder)

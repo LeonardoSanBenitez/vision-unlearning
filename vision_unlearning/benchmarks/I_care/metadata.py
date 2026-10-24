@@ -89,6 +89,22 @@ PER_SEED_PREFIX = 'per_seed_'
 PER_PAIR_METRICS = ('brisque_diff', 'clip_diff', 'rmse', 'ssim', 'dino_diff')
 
 
+def receivers_in_order(entities: List[str], receivers: Optional[List[str]]) -> List[str]:
+    """The receivers a run generates or scores, in the task's canonical order; every entity when None.
+
+    `entities` is the task metadata's names in order. A read-out of a few receivers (equalization's)
+    then generates and scores them in the same relative order as a full run does. Raises ValueError for
+    a name the task does not hold and for a name given twice.
+    """
+    if receivers is None:
+        return list(entities)
+    unknown = sorted(set(receivers) - set(entities))
+    repeated = sorted({name for name in receivers if receivers.count(name) > 1})
+    if unknown or repeated:
+        raise ValueError(f'receivers not in the task: {unknown[:3]}; given twice: {repeated[:3]}')
+    return [name for name in entities if name in set(receivers)]
+
+
 def per_seed_path_of(per_pair_path: str) -> str:
     """The per-seed sibling of a per-pair (regular or control) file."""
     folder, name = os.path.split(per_pair_path)
