@@ -4,62 +4,629 @@
     "index": 0,
     "domain": "style",
     "unlearnable": true,
-    "metric_uce_Unlearning accuracy": 0.25,
-    "metric_uce_In domain retain accuracy": 0.9640000000000001,
-    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.966,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
   },
   {
     "name": "Artist_Sketch",
     "index": 1,
     "domain": "style",
     "unlearnable": true,
-    "metric_uce_Unlearning accuracy": 0.0,
-    "metric_uce_In domain retain accuracy": 0.9590000000000001,
-    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+    "metric_uce_Unlearning accuracy": 0.050000000000000044,
+    "metric_uce_In domain retain accuracy": 0.9640000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
   },
   {
     "name": "Blossom_Season",
     "index": 2,
     "domain": "style",
     "unlearnable": true,
-    "metric_uce_Unlearning accuracy": 0.0,
-    "metric_uce_In domain retain accuracy": 0.9590000000000001,
-    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+    "metric_uce_Unlearning accuracy": 0.75,
+    "metric_uce_In domain retain accuracy": 0.9670000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9813725490196079
   },
   {
     "name": "Bricks",
     "index": 3,
     "domain": "style",
     "unlearnable": true,
-    "metric_uce_Unlearning accuracy": 0.0,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9640000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Byzantine",
+    "index": 4,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9629999999999999,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Cartoon",
+    "index": 5,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9680000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9794117647058824
+  },
+  {
+    "name": "Cold_Warm",
+    "index": 6,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.30000000000000004,
+    "metric_uce_In domain retain accuracy": 0.9690000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9862745098039216
+  },
+  {
+    "name": "Color_Fantasy",
+    "index": 7,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.30000000000000004,
+    "metric_uce_In domain retain accuracy": 0.9670000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9872549019607844
+  },
+  {
+    "name": "Comic_Etch",
+    "index": 8,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9660000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9803921568627452
+  },
+  {
+    "name": "Crayon",
+    "index": 9,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.7,
     "metric_uce_In domain retain accuracy": 0.9660000000000001,
     "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Cubism",
+    "index": 10,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9630000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9794117647058824
+  },
+  {
+    "name": "Dadaism",
+    "index": 11,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9610000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9833333333333334
+  },
+  {
+    "name": "Dapple",
+    "index": 12,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9670000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Defoliation",
+    "index": 13,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9650000000000003,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Early_Autumn",
+    "index": 14,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9680000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9813725490196079
+  },
+  {
+    "name": "Expressionism",
+    "index": 15,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.30000000000000004,
+    "metric_uce_In domain retain accuracy": 0.9660000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Fauvism",
+    "index": 16,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.95,
+    "metric_uce_In domain retain accuracy": 0.9650000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9843137254901961
+  },
+  {
+    "name": "French",
+    "index": 17,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9670000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9843137254901961
+  },
+  {
+    "name": "Glowing_Sunset",
+    "index": 18,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.965,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Gorgeous_Love",
+    "index": 19,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.4,
+    "metric_uce_In domain retain accuracy": 0.9620000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Greenfield",
+    "index": 20,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.8,
+    "metric_uce_In domain retain accuracy": 0.9660000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9833333333333334
+  },
+  {
+    "name": "Impressionism",
+    "index": 21,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9670000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9843137254901961
+  },
+  {
+    "name": "Ink_Art",
+    "index": 22,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.55,
+    "metric_uce_In domain retain accuracy": 0.966,
+    "metric_uce_Cross domain retain accuracy": 0.9862745098039216
+  },
+  {
+    "name": "Joy",
+    "index": 23,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9610000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9784313725490197
+  },
+  {
+    "name": "Liquid_Dreams",
+    "index": 24,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.65,
+    "metric_uce_In domain retain accuracy": 0.965,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Magic_Cube",
+    "index": 25,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.963,
+    "metric_uce_Cross domain retain accuracy": 0.9813725490196079
+  },
+  {
+    "name": "Meta_Physics",
+    "index": 26,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.55,
+    "metric_uce_In domain retain accuracy": 0.9640000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9813725490196079
+  },
+  {
+    "name": "Meteor_Shower",
+    "index": 27,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9640000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9843137254901961
+  },
+  {
+    "name": "Monet",
+    "index": 28,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9620000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Mosaic",
+    "index": 29,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9660000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9872549019607844
+  },
+  {
+    "name": "Neon_Lines",
+    "index": 30,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.65,
+    "metric_uce_In domain retain accuracy": 0.9650000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9774509803921569
+  },
+  {
+    "name": "On_Fire",
+    "index": 31,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.19999999999999996,
+    "metric_uce_In domain retain accuracy": 0.9649999999999999,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Pastel",
+    "index": 32,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.95,
+    "metric_uce_In domain retain accuracy": 0.9660000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Pencil_Drawing",
+    "index": 33,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9650000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9843137254901961
+  },
+  {
+    "name": "Picasso",
+    "index": 34,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9640000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9803921568627452
+  },
+  {
+    "name": "Pop_Art",
+    "index": 35,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9610000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Red_Blue_Ink",
+    "index": 36,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.8,
+    "metric_uce_In domain retain accuracy": 0.9630000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9823529411764707
+  },
+  {
+    "name": "Rust",
+    "index": 37,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.965,
+    "metric_uce_Cross domain retain accuracy": 0.9833333333333334
+  },
+  {
+    "name": "Sketch",
+    "index": 39,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.6,
+    "metric_uce_In domain retain accuracy": 0.9659999999999997,
+    "metric_uce_Cross domain retain accuracy": 0.9794117647058824
+  },
+  {
+    "name": "Sponge_Dabbed",
+    "index": 40,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9660000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Structuralism",
+    "index": 41,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9670000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9803921568627452
+  },
+  {
+    "name": "Superstring",
+    "index": 42,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.95,
+    "metric_uce_In domain retain accuracy": 0.9630000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9872549019607844
+  },
+  {
+    "name": "Surrealism",
+    "index": 43,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.95,
+    "metric_uce_In domain retain accuracy": 0.9630000000000003,
+    "metric_uce_Cross domain retain accuracy": 0.9833333333333334
+  },
+  {
+    "name": "Ukiyoe",
+    "index": 44,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9620000000000002,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
   },
   {
     "name": "Van_Gogh",
     "index": 45,
     "domain": "style",
     "unlearnable": true,
-    "metric_uce_Unlearning accuracy": 0.30000000000000004,
+    "metric_uce_Unlearning accuracy": 0.9,
+    "metric_uce_In domain retain accuracy": 0.9590000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Vibrant_Flow",
+    "index": 46,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.19999999999999996,
+    "metric_uce_In domain retain accuracy": 0.965,
+    "metric_uce_Cross domain retain accuracy": 0.9843137254901961
+  },
+  {
+    "name": "Warm_Love",
+    "index": 47,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.5,
     "metric_uce_In domain retain accuracy": 0.964,
     "metric_uce_Cross domain retain accuracy": 0.9803921568627452
+  },
+  {
+    "name": "Warm_Smear",
+    "index": 48,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.5,
+    "metric_uce_In domain retain accuracy": 0.9630000000000003,
+    "metric_uce_Cross domain retain accuracy": 0.9862745098039216
+  },
+  {
+    "name": "Watercolor",
+    "index": 49,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.965,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
+  },
+  {
+    "name": "Winter",
+    "index": 50,
+    "domain": "style",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9640000000000001,
+    "metric_uce_Cross domain retain accuracy": 0.9852941176470589
   },
   {
     "name": "Architectures",
     "index": 51,
     "domain": "object",
     "unlearnable": true,
-    "metric_uce_Unlearning accuracy": 0.019607843137254943,
-    "metric_uce_In domain retain accuracy": 0.9824561403508772,
-    "metric_uce_Cross domain retain accuracy": 0.9666666666666668
+    "metric_uce_Unlearning accuracy": 0.1568627450980392,
+    "metric_uce_In domain retain accuracy": 0.9803921568627452,
+    "metric_uce_Cross domain retain accuracy": 0.9627450980392157
   },
   {
     "name": "Bears",
     "index": 52,
     "domain": "object",
     "unlearnable": true,
-    "metric_uce_Unlearning accuracy": 0.0,
+    "metric_uce_Unlearning accuracy": 0.4509803921568627,
+    "metric_uce_In domain retain accuracy": 0.9834881320949433,
+    "metric_uce_Cross domain retain accuracy": 0.9656862745098038
+  },
+  {
+    "name": "Birds",
+    "index": 53,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9824561403508772,
+    "metric_uce_Cross domain retain accuracy": 0.965686274509804
+  },
+  {
+    "name": "Butterfly",
+    "index": 54,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
     "metric_uce_In domain retain accuracy": 0.9814241486068113,
-    "metric_uce_Cross domain retain accuracy": 0.9676470588235295
+    "metric_uce_Cross domain retain accuracy": 0.9598039215686275
+  },
+  {
+    "name": "Cats",
+    "index": 55,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9814241486068113,
+    "metric_uce_Cross domain retain accuracy": 0.958823529411765
+  },
+  {
+    "name": "Dogs",
+    "index": 56,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.803921568627451,
+    "metric_uce_In domain retain accuracy": 0.9803921568627452,
+    "metric_uce_Cross domain retain accuracy": 0.9627450980392157
+  },
+  {
+    "name": "Fishes",
+    "index": 57,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.9803921568627451,
+    "metric_uce_In domain retain accuracy": 0.9783281733746131,
+    "metric_uce_Cross domain retain accuracy": 0.9617647058823531
+  },
+  {
+    "name": "Flame",
+    "index": 58,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.8627450980392157,
+    "metric_uce_In domain retain accuracy": 0.9783281733746131,
+    "metric_uce_Cross domain retain accuracy": 0.965686274509804
+  },
+  {
+    "name": "Flowers",
+    "index": 59,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.803921568627451,
+    "metric_uce_In domain retain accuracy": 0.9834881320949433,
+    "metric_uce_Cross domain retain accuracy": 0.965686274509804
+  },
+  {
+    "name": "Frogs",
+    "index": 60,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9886480908152735,
+    "metric_uce_Cross domain retain accuracy": 0.969607843137255
+  },
+  {
+    "name": "Horses",
+    "index": 61,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.5294117647058824,
+    "metric_uce_In domain retain accuracy": 0.9834881320949433,
+    "metric_uce_Cross domain retain accuracy": 0.9656862745098039
+  },
+  {
+    "name": "Human",
+    "index": 62,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.039215686274509776,
+    "metric_uce_In domain retain accuracy": 0.9845201238390093,
+    "metric_uce_Cross domain retain accuracy": 0.9666666666666669
+  },
+  {
+    "name": "Jellyfish",
+    "index": 63,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9783281733746131,
+    "metric_uce_Cross domain retain accuracy": 0.969607843137255
+  },
+  {
+    "name": "Rabbits",
+    "index": 64,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9845201238390093,
+    "metric_uce_Cross domain retain accuracy": 0.9656862745098042
+  },
+  {
+    "name": "Sandwiches",
+    "index": 65,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9814241486068113,
+    "metric_uce_Cross domain retain accuracy": 0.9647058823529414
+  },
+  {
+    "name": "Sea",
+    "index": 66,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.6862745098039216,
+    "metric_uce_In domain retain accuracy": 0.9855521155830754,
+    "metric_uce_Cross domain retain accuracy": 0.9666666666666669
+  },
+  {
+    "name": "Statues",
+    "index": 67,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.43137254901960786,
+    "metric_uce_In domain retain accuracy": 0.9845201238390093,
+    "metric_uce_Cross domain retain accuracy": 0.9676470588235294
+  },
+  {
+    "name": "Towers",
+    "index": 68,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9803921568627452,
+    "metric_uce_Cross domain retain accuracy": 0.9666666666666668
+  },
+  {
+    "name": "Trees",
+    "index": 69,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 0.8431372549019608,
+    "metric_uce_In domain retain accuracy": 0.9824561403508772,
+    "metric_uce_Cross domain retain accuracy": 0.9647058823529411
+  },
+  {
+    "name": "Waterfalls",
+    "index": 70,
+    "domain": "object",
+    "unlearnable": true,
+    "metric_uce_Unlearning accuracy": 1.0,
+    "metric_uce_In domain retain accuracy": 0.9793601651186791,
+    "metric_uce_Cross domain retain accuracy": 0.9627450980392157
   }
 ]
