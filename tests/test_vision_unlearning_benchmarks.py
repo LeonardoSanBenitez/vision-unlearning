@@ -605,6 +605,26 @@ class TestComputeFromScratchMocked:
         first = data["result"][0]
         assert first[first["emitter"]] == pytest.approx(1.0)
 
+    def test_similarity_jacc_removes_its_checkpoint_once_the_matrix_is_written(
+        self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
+    ) -> None:
+        """The ``.partial`` checkpoint is gone once the canonical matrix is on disk.
+
+        A checkpoint left beside a finished matrix is a second, stale copy of it that every
+        listing of the assets folder shows. This fails today because the ``jacc`` branch writes
+        the checkpoint after every row and nothing ever removes it.
+        """
+        labels = ["a", "b", "c"]
+        meta = _fake_metadata(labels)
+        monkeypatch.setattr(_sim_mod.MetadataFiltered, "compute", lambda self: meta)
+        similarity = _sim_mod.Similarity(task="people", similarity_metric="jacc", base_folder=str(tmp_path))
+
+        records = similarity.compute()
+
+        assert len(records) == len(labels)
+        assert os.path.isfile(similarity._get_data_path_local())
+        assert not os.path.exists(similarity._get_partial_path_local())
+
     def test_similarity_matrix_dino_compute(
         self, monkeypatch: pytest.MonkeyPatch, no_remote: None, tmp_path: Any
     ) -> None:

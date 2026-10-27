@@ -1112,6 +1112,13 @@ class Similarity(SingleFileArtifact):
     def _get_partial_path_local(self) -> str:
         return self._get_data_path_local() + '.partial'
 
+    def _persist_local(self, data: Any) -> None:
+        # The ``jacc`` checkpoint has served its purpose once the canonical matrix is on disk;
+        # left behind it would be a second, stale copy of the matrix.
+        super()._persist_local(data)
+        if os.path.exists(self._get_partial_path_local()):
+            os.remove(self._get_partial_path_local())
+
     def _validate(self, data: Any) -> None:
         assert isinstance(data, list)
         assert all(isinstance(row, dict) and 'emitter' in row for row in data)
