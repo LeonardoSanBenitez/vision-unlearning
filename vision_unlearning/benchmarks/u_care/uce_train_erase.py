@@ -16,7 +16,6 @@ clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", cache_dir
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", cache_dir="./cache")
 
 ## get arguments for our script
-with_to_k = False
 with_augs = True
 train_func = "train_closed_form"
 
@@ -60,6 +59,11 @@ def edit_model(ldm_stable, old_text_, new_text_, retain_text_,
         if with_to_k:
             l.to_k = copy.deepcopy(og_matrices[num_ca_clip_layers + idx_])
             projection_matrices[num_ca_clip_layers + idx_] = l.to_k
+
+    edit_stats = {
+        "to_v": {"changed_layers": 0, "max_abs_delta": 0.0},
+        "to_k": {"changed_layers": 0, "max_abs_delta": 0.0},
+    }
 
     ### check the layers to edit (by default it is None; one can specify)
     layers_to_edit = ast.literal_eval(layers_to_edit) if type(layers_to_edit) == str else layers_to_edit
@@ -174,15 +178,32 @@ def edit_model(ldm_stable, old_text_, new_text_, retain_text_,
                 if not torch.isfinite(updated_weight).all():
                     raise RuntimeError(f"Non-finite UCE update at layer {layer_num}")
 
+                projection_name = "to_v" if layer_num < num_ca_clip_layers else "to_k"
+                max_abs_delta = (updated_weight - weight).abs().max().item()
+                if max_abs_delta > 0:
+                    edit_stats[projection_name]["changed_layers"] += 1
+                edit_stats[projection_name]["max_abs_delta"] = max(
+                    edit_stats[projection_name]["max_abs_delta"], max_abs_delta
+                )
+
                 projection_matrices[layer_num].weight = torch.nn.Parameter(
                     updated_weight.to(projection_matrices[layer_num].weight.dtype)
                 )
-                
+
+    for projection_name, stats in edit_stats.items():
+        print(
+            f"UCE {projection_name}: changed {stats['changed_layers']}/"
+            f"{num_ca_clip_layers} layers, max absolute delta={stats['max_abs_delta']:.8g}"
+        )
+    if with_to_k and edit_stats["to_k"]["changed_layers"] == 0:
+        raise RuntimeError("UCE requested to_k editing but no to_k weights changed")
+
     print(f'Current model status: Edited "{str(old_text_)}" into "{str(new_texts)}" and Retained "{str(retain_text_)}"')
     return ldm_stable
 
 
 if __name__ == '__main__':
+    print(f"UCE implementation: {__file__}")
     parser = argparse.ArgumentParser(
         prog='TrainUSD',
         description='Finetuning stable diffusion to debias the concepts')

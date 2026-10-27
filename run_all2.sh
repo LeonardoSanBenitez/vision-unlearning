@@ -27,8 +27,8 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate vision_unlearn_stable
 
 MODEL_PATH="/home/leonardo/soham/huggingface_assets/style50_checkpoints/style50_checkpoints/"
-UPSTREAM_SCRIPT="/home/leonardo/soham/UnlearnCanvas/machine_unlearning/mu_unified_concept_editing_uce/uce_train_erase.py"
 UPSTREAM_WORKDIR="/home/leonardo/soham/UnlearnCanvas/machine_unlearning/mu_unified_concept_editing_uce/"
+UPSTREAM_SCRIPT="$PIPELINE_DIR/uce_train_erase.py"
 MODEL_OUTPUT="/home/leonardo/soham/models"
 DATASET_ROOT="/home/leonardo/soham/huggingface_assets/datasets"
 CLASSIFIER_ROOT="/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints"
@@ -36,16 +36,6 @@ RESULTS_DIR="/home/leonardo/soham/huggingface_assets/results/results"
 BASELINE_PATH="$RESULTS_DIR/accuracies_original.json"
 STYLE_CLASSIFIER="$CLASSIFIER_ROOT/classifier_style.pth"
 OBJECT_CLASSIFIER="$CLASSIFIER_ROOT/classifier_object.pth"
-
-COMPLETED_EMITTERS=(
-  Van_Gogh
-  Abstractionism
-  Artist_Sketch
-  Blossom_Season
-  Bricks
-  Architectures
-  Bears
-)
 
 for required_path in \
   "$MODEL_PATH" \
@@ -62,31 +52,24 @@ done
 
 mkdir -p "$MODEL_OUTPUT" "$DATASET_ROOT" "$RESULTS_DIR"
 
+echo "Using UCE implementation: $UPSTREAM_SCRIPT"
+sha256sum "$UPSTREAM_SCRIPT"
+
 mapfile -t PENDING_EMITTERS < <(
   PYTHONPATH="$PYTHON_PACKAGE_ROOT" python3 - <<'PY'
 from vision_unlearning.benchmarks.u_care.configuration import UNLEARNABLE_ENTITIES
 
-completed = {
-    "Van_Gogh",
-    "Abstractionism",
-    "Artist_Sketch",
-    "Blossom_Season",
-    "Bricks",
-    "Architectures",
-    "Bears",
-}
 for emitter in UNLEARNABLE_ENTITIES:
-    if emitter not in completed:
-        print(emitter)
+    print(emitter)
 PY
 )
 
-if [[ ${#PENDING_EMITTERS[@]} -ne 63 ]]; then
-  echo "Expected 63 pending emitters, found ${#PENDING_EMITTERS[@]}. Aborting." >&2
+if [[ ${#PENDING_EMITTERS[@]} -ne 70 ]]; then
+  echo "Expected 70 emitters, found ${#PENDING_EMITTERS[@]}. Aborting." >&2
   exit 1
 fi
 
-echo "Running UCE for ${#PENDING_EMITTERS[@]} pending emitters: ${PENDING_EMITTERS[*]}"
+echo "Regenerating UCE artifacts for all ${#PENDING_EMITTERS[@]} emitters: ${PENDING_EMITTERS[*]}"
 
 for emitter in "${PENDING_EMITTERS[@]}"; do
   echo "============================================================"
@@ -98,7 +81,7 @@ for emitter in "${PENDING_EMITTERS[@]}"; do
   pair_output="$RESULTS_DIR/interferences_caused_by_${emitter}_uce_sd_style50.json"
 
   echo "Running pipeline_03 for $emitter"
-  PYTHONPATH="$PYTHON_PACKAGE_ROOT" python3 \
+  PYTHONPATH="$UPSTREAM_WORKDIR:$PYTHON_PACKAGE_ROOT" python3 \
     "$PIPELINE_DIR/pipeline_03_unlearn_model.py" \
     --emitter "$emitter" \
     --checkpoint "$MODEL_PATH" \
@@ -139,5 +122,5 @@ done
 
 echo ""
 echo "============================================================"
-echo "ALL 63 PENDING U-CARE UCE EMITTERS COMPLETED SUCCESSFULLY"
+echo "ALL 70 U-CARE UCE EMITTERS REGENERATED SUCCESSFULLY"
 echo "============================================================"
