@@ -1,15 +1,15 @@
 """Every field of an unlearning session's configuration, asserted directly.
 
 The three methods on the benchmark's method axis -- UCE, SPARE (``distil``) and SalUn -- run their
-authors' reference configurations apart from the strength dial; :class:`TestTheReferenceConfigurations`
-holds each value against the published source, and fails on the code before, which ran all three at
-settings nobody published (SPARE at rate 6e-4, rank 16, alpha 4, clipping 5.0; UCE at ridge 0.01 with
-the task word as its preserve set; SalUn at retain weight 0.1). Munba is not on the axis and keeps the
-settings it was run with.
+authors' reference configurations apart from the strength dial and the stated deviations;
+:class:`TestTheReferenceConfigurations` holds each value. UCE and SalUn are held against their published
+sources. SPARE is held against its published configuration with the step-size deviation that
+``session_config._lora`` states and justifies: learning rate 6e-4, rank 16, alpha 4, clipping 5.0, and a
+batch of 2 accumulated over 2 steps. Munba is not on the axis and keeps the settings it was run with.
 
 The per-machine settings of Munba -- batch size and gradient accumulation, chosen from free video
-memory -- are deliberately not here; they stay in the pipeline. SPARE's batch of 4 is part of its
-published configuration, so it is.
+memory -- are deliberately not here; they stay in the pipeline. SPARE's batch is part of its
+configuration, so it is.
 """
 import json
 import os
@@ -209,9 +209,9 @@ class TestTheAdapterTrainers:
         expected['overwritting_concept'] = substitute_concept(task)  # type: ignore[arg-type]
         expected['forget_concept'] = canonical_entity(task, entity)  # type: ignore[arg-type]
         expected.update({
-            'learning_rate': 1e-4, 'lora_r': 4, 'lora_alpha': 8, 'lora_dropout': 0.2, 'max_grad_norm': 1.0,
+            'learning_rate': 6e-4, 'lora_r': 16, 'lora_alpha': 4, 'lora_dropout': 0.2, 'max_grad_norm': 5.0,
             'adam_beta1': 0.9, 'adam_beta2': 0.999, 'adam_epsilon': 1e-8, 'adam_weight_decay': 1e-2,
-            'per_device_train_batch_size': 4, 'gradient_accumulation_steps': 1,
+            'per_device_train_batch_size': 2, 'gradient_accumulation_steps': 2,
         })
         assert _config(task, 'distil', entity) == expected
 
@@ -292,10 +292,13 @@ class TestTheReferenceConfigurations:
     """Each method's settings against its published source, value by value (the dial excepted)."""
 
     UCE = {'lamb': 0.5, 'preserve_scale': 0.1, 'guide_concepts': 'the substitute concept'}
-    SPARE = {'learning_rate': 1e-4, 'lr_scheduler_type': 'constant', 'lr_warmup_steps': 0, 'lora_r': 4,
-             'lora_alpha': 8, 'lora_dropout': 0.2, 'per_device_train_batch_size': 4, 'adam_beta1': 0.9,
+    # SPARE's published configuration with four deviations (learning rate, rank, alpha, clipping) and an
+    # accumulated batch of 2 x 2: at the published values a people target was not erased at any epoch count.
+    SPARE = {'learning_rate': 6e-4, 'lr_scheduler_type': 'constant', 'lr_warmup_steps': 0, 'lora_r': 16,
+             'lora_alpha': 4, 'lora_dropout': 0.2, 'per_device_train_batch_size': 2,
+             'gradient_accumulation_steps': 2, 'adam_beta1': 0.9,
              'adam_beta2': 0.999, 'adam_epsilon': 1e-8, 'adam_weight_decay': 1e-2, 'random_flip': True,
-             'max_grad_norm': 1.0, 'target_modules': ['to_k', 'to_q', 'to_v', 'to_out.0'],
+             'max_grad_norm': 5.0, 'target_modules': ['to_k', 'to_q', 'to_v', 'to_out.0'],
              'mixed_precision': 'no'}
     SALUN = {'learning_rate': 1e-5, 'mask_threshold': 0.5, 'alpha': 0.5, 'mask_guidance': 7.5,
              'train_method': 'xattn', 'per_device_train_batch_size': 1, 'allow_tf32': False}

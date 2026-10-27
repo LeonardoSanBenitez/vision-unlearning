@@ -198,8 +198,9 @@ _parser.add_argument("--batch-size-inference", type=int, default=None,
                           f"configuration.GENERATION_BATCH_SIZE ({GENERATION_BATCH_SIZE}), the size the "
                           "baseline is generated at, because the batch shape changes the pixels.")
 _parser.add_argument("--train-batch-size", type=int, default=None,
-                     help="Training batch per device. Left unset, a method whose reference configuration "
-                          "fixes it (SPARE: 4) uses that, and Munba chooses it from free video memory. A "
+                     help="Training batch per device. Left unset, a method whose session configuration "
+                          "fixes it (SPARE: 2, accumulated over 2 steps) uses that, and Munba chooses it "
+                          "from free video memory. A "
                           "batch that does not fit the card fails the session; it is never shrunk.")
 _parser.add_argument("--gradient-accumulation-steps", type=int, default=None,
                      help="Training steps accumulated per update. Same defaults as --train-batch-size.")

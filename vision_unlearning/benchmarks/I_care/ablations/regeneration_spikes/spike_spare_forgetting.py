@@ -118,7 +118,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     with open(path, 'w', encoding='utf-8') as handle:
         json.dump(result, handle, indent=2)
     print(path)
-    print(f"SPIKE_SPARE_DONE {args.name} {result['evaluation'].get(FORGET_RECORD)}")
+    # The trainer's record names end in a direction marker such as " (↑)", so match by prefix.
+    forget = next((v for k, v in result['evaluation'].items() if k.startswith(FORGET_RECORD)), None)
+    print(f"SPIKE_SPARE_DONE {args.name} {forget}")
     return 0
 
 

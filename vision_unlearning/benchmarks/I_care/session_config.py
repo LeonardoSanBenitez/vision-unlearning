@@ -10,14 +10,14 @@ Two things are deliberately *not* here:
 * the objects -- the gradient weighting methods, the unlearner classes -- because constructing them
   imports torch, and this module must stay importable in the lite test tier;
 * the settings that depend on the machine rather than on the session, namely the batch size and
-  gradient accumulation of the methods whose batch is not part of their reference configuration.
-  SPARE's batch of 4 is part of its published configuration and is set here; Munba's is still chosen
-  by the pipeline from free video memory.
+  gradient accumulation of the methods whose batch is not part of their configuration here.
+  SPARE's batch (2, accumulated over 2 steps) is set here; Munba's is still chosen by the pipeline
+  from free video memory.
 
 Every setting of a method on the benchmark's method axis -- UCE, SPARE (``distil``) and SalUn -- is its
 authors' reference configuration, apart from the one strength dial equalization sets (UCE's
-``erase_scale``, the trained methods' epoch count) and a short list of deviations each stated with its
-reason where the value is set. The sources: UCE's two code lineages
+``erase_scale``, the trained methods' epoch count) and the deviations, each stated with its reason
+where the value is set (SPARE's step size among them, see ``_lora``). The sources: UCE's two code lineages
 (``rohitgandikota/unified-concept-editing`` at ``7c724d9d7d19190e9bd33fe62fb656f1df87cd8e``, current,
 and at ``c34e5b9d69``, paper era); SPARE's arXiv 2602.07058v2 Appendix 0.A; SalUn's
 ``OPTML-Group/Unlearn-Saliency`` at ``a6e89fd17ff737c24c6aa16c9574469a234ffd91``.
@@ -235,13 +235,17 @@ def _lora(
 ) -> Dict[str, Any]:
     """The two low-rank adapter trainers, and what distinguishes them.
 
-    SPARE (``distil``) runs its only published configuration, arXiv 2602.07058v2 Appendix 0.A:
-    learning rate 1e-4, constant, no warm-up; LoRA rank 4, alpha 8, dropout 0.2, Gaussian
+    SPARE (``distil``) starts from its only published configuration, arXiv 2602.07058v2 Appendix 0.A
+    (learning rate 1e-4, constant, no warm-up; LoRA rank 4, alpha 8, dropout 0.2, Gaussian
     initialisation; batch 4; Adam betas 0.9 and 0.999, epsilon 1e-8, weight decay 1e-2; horizontal
-    flip. The paper is silent on gradient clipping and the target modules, so those are the library
-    defaults (1.0; the four attention projections). It trains in full precision, not the bfloat16 mixed
-    precision it offers, which moved its results beyond the spread between two ordinary trainings. Munba is
-    not on the benchmark's method axis and keeps the settings it was run with.
+    flip), and deviates from it in the step size. At the published values a people target was still
+    recognisable after 3 200 epochs, and raising the learning rate alone to 3e-4 or 1e-3 did not erase
+    it either; so it trains at learning rate 6e-4, LoRA rank 16 and alpha 4, gradient clipping at 5.0,
+    and a batch of 2 accumulated over 2 steps, which erased that target in 400 epochs. Dropout, the
+    optimiser, the flip and the four attention projections are as published. It trains in full
+    precision, not the bfloat16 mixed precision it offers, which moved its results beyond the spread
+    between two ordinary trainings. Munba is not on the benchmark's method axis and keeps the settings
+    it was run with.
     """
     settings: Dict[str, Any] = {
         'model_name_or_path': model_base_name,
@@ -276,17 +280,17 @@ def _lora(
         settings['overwritting_concept'] = substitute_concept(task)
         settings['forget_concept'] = canonical_entity(task, entity)
         settings.update({
-            'learning_rate': 1e-4,
-            'lora_r': 4,
-            'lora_alpha': 8,
+            'learning_rate': 6e-4,
+            'lora_r': 16,
+            'lora_alpha': 4,
             'lora_dropout': 0.2,
-            'max_grad_norm': 1.0,
+            'max_grad_norm': 5.0,
             'adam_beta1': 0.9,
             'adam_beta2': 0.999,
             'adam_epsilon': 1e-8,
             'adam_weight_decay': 1e-2,
-            'per_device_train_batch_size': 4,
-            'gradient_accumulation_steps': 1,
+            'per_device_train_batch_size': 2,
+            'gradient_accumulation_steps': 2,
         })
     elif method == 'munba' and task == 'scenes':
         settings.update({
