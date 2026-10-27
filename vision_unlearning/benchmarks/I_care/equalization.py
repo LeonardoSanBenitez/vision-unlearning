@@ -21,6 +21,9 @@ Everything that decides the selection is fixed here, before any calibration sess
   comparison is made at; it does not certify erasure;
 * **the screen** -- an engineering check that the scorer recognises most of the task's entities
   (:func:`competence_screen`); it informs, it never excludes an entity;
+* **collapse** -- :func:`collapsed`, the one retain-side rule that decides anything: a dial value at
+  which any calibration read-out broke the whole model (its receivers lose about as much as its target)
+  is not usable, and the selector never sees it. Destroying the target alone is erasure;
 * **the selector** -- :func:`select`, deterministic, with six branches and its tie-breaks;
 * **the one edge pass** -- :func:`edge_extensions` adds one value beyond each ladder end the first
   selection landed on, all methods at once; :func:`select` runs once more and that result is final;
@@ -195,6 +198,29 @@ def competence_screen(own_prompt_ranks: Mapping[str, Sequence[int]]) -> Dict[str
 
 
 # -- the selector ---------------------------------------------------------------------------------
+
+
+#: A read-out is collapsed when its receivers lose on average at least this share of its target's effect,
+#: and at least this share of the scale reference.
+COLLAPSE_SHARE = 0.5
+
+
+def collapsed(target_effect: float, receiver_clip_diffs: Sequence[float], f_min: float) -> bool:
+    """Whether one read-out broke the whole model rather than its target: such a setting is never selected.
+
+    ``target_effect`` is the read-out's ``F``; ``receiver_clip_diffs`` are the stored ``clip_diff`` values
+    (``on - off``) of its read-out receivers, the target excluded. The receivers' mean loss is the negated
+    mean of those. The read-out is collapsed when that loss is at least :data:`COLLAPSE_SHARE` of the
+    target's ``F`` -- the other entities fare like the target -- and at least :data:`COLLAPSE_SHARE` of
+    ``f_min``, so that a read-out in which almost nothing moves is never called collapsed on a ratio of two
+    small numbers. Destroying the target alone is erasure, not collapse.
+    """
+    if not receiver_clip_diffs:
+        raise IntegrityFailure('no receivers to judge a collapse by')
+    effect = _finite(target_effect, 'the target effect')
+    loss = -sum(_finite(value, 'a receiver clip_diff') for value in receiver_clip_diffs) / len(receiver_clip_diffs)
+    threshold = COLLAPSE_SHARE * _finite(f_min, 'the scale reference')
+    return loss >= COLLAPSE_SHARE * effect and loss >= threshold
 
 
 def qualifies(effects: Sequence[float], f_min: float) -> bool:

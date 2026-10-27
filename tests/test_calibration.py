@@ -87,6 +87,57 @@ def test_a_selection_at_a_ladder_top_asks_for_the_one_edge_value_then_is_final(t
     assert final['methods']['distil']['values']['6400']['on_ladder'] is False
 
 
+def _ladders_with_collapse(root: str, uce_collapses_from: int) -> None:
+    """SPARE and SalUn reach 10 cleanly; UCE reaches 3 cleanly, then 12 with every receiver losing 11."""
+    for method in ('uce', 'distil', 'salun'):
+        for k, value in enumerate(ladder(TASK, method)):
+            if method != 'uce':
+                _write(root, method, value, min(2.0 * k, 10.0))
+            elif k >= uce_collapses_from:
+                _write(root, method, value, 12.0, receiver_diff=-11.0)
+            else:
+                _write(root, method, value, min(0.5 * k, 3.0))
+
+
+def test_a_collapsed_value_is_reported_and_never_selected(tmp_path: Any) -> None:
+    root = str(tmp_path)
+    _ladders_with_collapse(root, uce_collapses_from=9)
+    result = cal.collect(root, TASK, ENTITIES, f_min=8.0)
+    top = result['methods']['uce']['values'][cal.dial_name(ladder(TASK, 'uce')[9])]
+    assert top['mean'] == pytest.approx(12.0) and top['usable'] is False
+    assert top['collapsed'] == draw_panels(TASK, ENTITIES)['calibration']
+    assert result['methods']['uce']['values'][cal.dial_name(ladder(TASK, 'uce')[8])]['usable'] is True
+    # UCE never reaches the floor at a usable value: SPARE and SalUn are matched, UCE sits at its largest usable F.
+    selection = result['selection']
+    assert selection['reaching'] == ['distil', 'salun'] and selection['label'] == 'partially matched'
+    assert selection['effects']['uce'] == pytest.approx(3.0)
+    assert selection['dials']['uce'] == ladder(TASK, 'uce')[6]
+
+
+def test_one_collapsed_entity_makes_the_value_unusable(tmp_path: Any) -> None:
+    root = str(tmp_path)
+    _ladders_with_collapse(root, uce_collapses_from=13)
+    value = ladder(TASK, 'uce')[12]
+    one = draw_panels(TASK, ENTITIES)['calibration'][0]
+    base = cal.readout_assets(root, TASK, 'uce', value)
+    path = get_interference_per_pair_path(TASK, ENTITIES.index(one), 'uce', 0, base_folder=base)  # type: ignore[arg-type]
+    with open(path, encoding='utf-8') as handle:
+        rows = json.load(handle)
+    rows = {name: ({'clip_diff': -11.0} if name != one else row) for name, row in rows.items()}
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(rows, handle)
+    result = cal.collect(root, TASK, ENTITIES, f_min=8.0)
+    entry = result['methods']['uce']['values'][cal.dial_name(value)]
+    assert entry['collapsed'] == [one] and entry['usable'] is False
+
+
+def test_a_method_with_no_usable_value_stops_the_selection(tmp_path: Any) -> None:
+    root = str(tmp_path)
+    _ladders_with_collapse(root, uce_collapses_from=0)
+    result = cal.collect(root, TASK, ENTITIES, f_min=8.0)
+    assert result['selection'] is None and result['no_usable_value'] == ['uce']
+
+
 def test_a_non_finite_measurement_is_an_integrity_failure(tmp_path: Any) -> None:
     root = str(tmp_path)
     _ladders(root, lambda method, k: float(k))

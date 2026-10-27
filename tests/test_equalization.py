@@ -13,6 +13,7 @@ import pytest
 from vision_unlearning.benchmarks.I_care import equalization
 from vision_unlearning.benchmarks.I_care.equalization import (
     IntegrityFailure,
+    collapsed,
     competence_screen,
     confirm,
     edge_extensions,
@@ -211,6 +212,43 @@ def test_confirmation_never_changes_the_calibration_label() -> None:
     matched = select(_single([10, 11, 12]), 5)
     failed = confirm(matched, {'uce': 6.0, 'distil': 11.0, 'salun': 12.0})
     assert failed['calibration_label'] == 'matched' and failed['notes'] == ['calibration-only matching']
+
+
+# -- collapse -------------------------------------------------------------------------------------
+
+
+def test_receivers_losing_as_much_as_the_target_is_a_collapse() -> None:
+    # UCE on a people target at erase scale 6000: target 11.29, receivers 11.08 on average.
+    assert collapsed(11.29, [-11.08] * 20, f_min=8.5)
+    # The receivers lose more than the target, the target barely at the floor: still the whole model.
+    assert collapsed(6.78, [-9.69] * 20, f_min=8.5)
+
+
+def test_a_working_setting_is_not_a_collapse() -> None:
+    # The same entity at 3000: target 4.70, receivers 0.30; SPARE at 50 epochs: 12.46 and 0.47.
+    assert not collapsed(4.70, [-0.295] * 20, f_min=8.5)
+    assert not collapsed(12.46, [-0.471] * 20, f_min=8.5)
+
+
+def test_a_small_loss_is_never_a_collapse_however_small_the_target_effect() -> None:
+    assert not collapsed(0.1, [-0.08] * 20, f_min=8.5)
+    assert not collapsed(-0.5, [-0.2] * 20, f_min=8.5)
+
+
+def test_the_collapse_boundary_is_inclusive_on_both_conditions() -> None:
+    assert collapsed(10.0, [-5.0] * 20, f_min=10.0)
+    assert not collapsed(10.0, [-4.99] * 20, f_min=10.0)
+    assert not collapsed(10.2, [-5.05] * 20, f_min=10.0)
+
+
+@pytest.mark.parametrize('bad', [math.nan, math.inf])
+def test_a_non_finite_collapse_input_is_an_integrity_failure(bad: float) -> None:
+    with pytest.raises(IntegrityFailure):
+        collapsed(bad, [-1.0], f_min=8.5)
+    with pytest.raises(IntegrityFailure):
+        collapsed(4.0, [-1.0, bad], f_min=8.5)
+    with pytest.raises(IntegrityFailure):
+        collapsed(4.0, [], f_min=8.5)
 
 
 # -- diagnostics ----------------------------------------------------------------------------------

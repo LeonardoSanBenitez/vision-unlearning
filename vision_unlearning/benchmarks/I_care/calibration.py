@@ -12,7 +12,12 @@ into what ``equalization`` decides on:
 * the **retain-side diagnostics** of each (method, dial), reported and never used to select: the mean
   ``clip_diff`` of the 20 receivers over the five entities and, for the trained methods, how many are
   damaged beyond three times the method's run-to-run spread (``equalization.retain_diagnostics``);
-* the **selection**: with every value of the three ladders measured, ``equalization.select`` and the one
+* **collapse**, the one retain-side rule that is used: the entities whose read-out at a dial broke the whole
+  model (``equalization.collapsed``). A dial with any such entity is not *usable*: it is reported with its
+  numbers and left out of the ladders the selector sees. When a method has no usable value on its ladder,
+  nothing is selected and the method is listed in ``no_usable_value``, for the user to decide;
+* the **selection**: with every value of the three ladders measured, ``equalization.select`` on the usable
+  values and the one
   edge pass (``equalization.edge_extensions``); once the extension values are measured too,
   ``equalization.final_selection``, whose result is final.
 
@@ -38,6 +43,7 @@ from vision_unlearning.benchmarks.I_care.equalization import (
     INTEGER_DIAL,
     METHOD_ORDER,
     IntegrityFailure,
+    collapsed,
     draw_panels,
     edge_extensions,
     final_selection,
@@ -109,6 +115,7 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
     methods: Dict[str, Any] = {}
     initial: Dict[str, Dict[float, Optional[float]]] = {}
     extended: Dict[str, Dict[float, Optional[float]]] = {}
+    measured_means: Dict[str, Dict[float, Optional[float]]] = {}
     for method in METHOD_ORDER:
         rungs = ladder(task, method)
         values: Dict[str, Any] = {}
@@ -116,13 +123,18 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
             base = readout_assets(root, task, method, value)
             effects: Dict[str, Optional[float]] = {}
             diffs: List[float] = []
+            broken: List[str] = []
             for target in calibration:
                 index = list(entities).index(target)
                 effects[target] = read_effect(base, task, method, value, index, target)
                 receivers = [r for r in readout_receivers(task, entities, target) if r != target]
                 found = read_receiver_diffs(base, task, method, value, index, receivers)
                 diffs += found or []
+                effect = effects[target]
+                if effect is not None and found and collapsed(effect, found, f_min):
+                    broken.append(target)
             complete = all(effect is not None for effect in effects.values())
+            usable = complete and not broken
             mean = sum(e for e in effects.values() if e is not None) / len(effects) if complete else None
             spread = RUN_TO_RUN_SPREAD[method]
             retain: Optional[Dict[str, Any]] = None
@@ -130,20 +142,25 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
                 retain = (retain_diagnostics(diffs, spread) if spread is not None
                           else {'mean_receiver_clip_diff': sum(diffs) / len(diffs), 'receivers': float(len(diffs))})
             values[dial_name(value)] = {'dial': value, 'on_ladder': value in rungs, 'effects': effects, 'mean': mean,
-                                        'retain': retain}
-            extended.setdefault(method, {})[value] = mean
-            if value in rungs:
-                initial.setdefault(method, {})[value] = mean
+                                        'retain': retain, 'collapsed': broken, 'usable': usable}
+            measured_means.setdefault(method, {})[value] = mean
+            if usable:
+                extended.setdefault(method, {})[value] = mean
+                if value in rungs:
+                    initial.setdefault(method, {})[value] = mean
         methods[method] = {'ladder': rungs, 'values': values,
-                           'complete': all(initial[method][v] is not None for v in rungs)}
+                           'complete': all(measured_means[method][v] is not None for v in rungs)}
     result: Dict[str, Any] = {'task': task, 'f_min': f_min, 'calibration_entities': calibration, 'methods': methods,
-                              'selection': None, 'extensions': None, 'final': False}
+                              'selection': None, 'extensions': None, 'final': False, 'no_usable_value': []}
     if not all(methods[m]['complete'] for m in METHOD_ORDER):
+        return result
+    result['no_usable_value'] = [m for m in METHOD_ORDER if not initial.get(m)]
+    if result['no_usable_value']:
         return result
     first = select(initial, f_min)
     wanted = edge_extensions({m: ladder(task, m) for m in METHOD_ORDER}, first.dials, INTEGER_DIAL)
     result['extensions'] = wanted
-    measured = all(value in extended[method] and extended[method][value] is not None for method, value in wanted.items())
+    measured = all(measured_means[method].get(value) is not None for method, value in wanted.items())
     chosen = final_selection(initial, extended, f_min) if measured else first
     result['final'] = measured
     result['selection'] = {'dials': chosen.dials, 'effects': chosen.effects, 'label': chosen.label,
@@ -157,8 +174,9 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
         prog='python -m vision_unlearning.benchmarks.I_care.calibration', description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='Prints, per method and dial, the five entities\' F and their mean (a dash where a read-out is '
-               'missing), then the selection when every ladder is complete: the first selection and the edge '
-               'values it asks for, or, once those are measured, the final one. Writes the whole result as JSON. '
+               'missing) and the entities whose read-out there collapsed (the value is then not usable), then the '
+               'selection when every ladder is complete: the first selection and the edge values it asks for, or, '
+               'once those are measured, the final one. A method with no usable value stops the selection. Writes the whole result as JSON. '
                'Exit status: 0 read (complete or not); 1 an integrity failure (a non-finite measurement); 2 bad '
                'arguments.')
     parser.add_argument('--task', required=True, choices=['people', 'scenes', 'breeds'])
@@ -182,8 +200,11 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
         for name, entry in result['methods'][method]['values'].items():
             cells = ' '.join('-' if e is None else f'{e:.3f}' for e in entry['effects'].values())
             mean = '-' if entry['mean'] is None else f"{entry['mean']:.3f}"
-            print(f"  {method:6s} {name:>12s} {'ladder' if entry['on_ladder'] else 'edge':6s} mean={mean:>8s}  [{cells}]")
-    if result['selection'] is None:
+            broken = f"  COLLAPSED: {', '.join(entry['collapsed'])}" if entry['collapsed'] else ''
+            print(f"  {method:6s} {name:>12s} {'ladder' if entry['on_ladder'] else 'edge':6s} mean={mean:>8s}  [{cells}]{broken}")
+    if result['no_usable_value']:
+        print('SELECTION stopped: no usable value on the ladder of ' + ', '.join(result['no_usable_value']) + '; the user decides')
+    elif result['selection'] is None:
         print('SELECTION not yet: ' + ', '.join(m for m in METHOD_ORDER if not result['methods'][m]['complete']) + ' incomplete')
     else:
         print(f"SELECTION final={result['final']} label={result['selection']['label']} dials={result['selection']['dials']} "
