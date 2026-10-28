@@ -14,9 +14,11 @@ into what ``equalization`` decides on:
   damaged beyond three times the method's run-to-run spread (``equalization.retain_diagnostics``);
 * **collapse**, the one retain-side rule that is used: the entities whose read-out at a dial broke the whole
   model (``equalization.collapsed``). A dial with any such entity is not *usable*: it is reported with its
-  numbers and left out of the ladders the selector sees. When a method has no usable value on its ladder,
-  nothing is selected and the method is listed in ``no_usable_value``, for the user to decide;
-* the **selection**: with every value of the three ladders measured, ``equalization.select`` on the usable
+  numbers and left out of the ladders the selector sees. Such a dial is also *settled* with read-outs still
+  missing, since no further read-out can make it usable; any other dial is settled once all five are
+  measured. When a method has no usable value on its ladder, nothing is selected and the method is listed
+  in ``no_usable_value``, for the user to decide;
+* the **selection**: with every value of the three ladders settled, ``equalization.select`` on the usable
   values and the one
   edge pass (``equalization.edge_extensions``); once the extension values are measured too,
   ``equalization.final_selection``, whose result is final.
@@ -115,7 +117,7 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
     methods: Dict[str, Any] = {}
     initial: Dict[str, Dict[float, Optional[float]]] = {}
     extended: Dict[str, Dict[float, Optional[float]]] = {}
-    measured_means: Dict[str, Dict[float, Optional[float]]] = {}
+    settled: Dict[str, Dict[float, bool]] = {}
     for method in METHOD_ORDER:
         rungs = ladder(task, method)
         values: Dict[str, Any] = {}
@@ -143,13 +145,13 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
                           else {'mean_receiver_clip_diff': sum(diffs) / len(diffs), 'receivers': float(len(diffs))})
             values[dial_name(value)] = {'dial': value, 'on_ladder': value in rungs, 'effects': effects, 'mean': mean,
                                         'retain': retain, 'collapsed': broken, 'usable': usable}
-            measured_means.setdefault(method, {})[value] = mean
+            settled.setdefault(method, {})[value] = complete or bool(broken)
             if usable:
                 extended.setdefault(method, {})[value] = mean
                 if value in rungs:
                     initial.setdefault(method, {})[value] = mean
         methods[method] = {'ladder': rungs, 'values': values,
-                           'complete': all(measured_means[method][v] is not None for v in rungs)}
+                           'complete': all(settled[method][v] for v in rungs)}
     result: Dict[str, Any] = {'task': task, 'f_min': f_min, 'calibration_entities': calibration, 'methods': methods,
                               'selection': None, 'extensions': None, 'final': False, 'no_usable_value': []}
     if not all(methods[m]['complete'] for m in METHOD_ORDER):
@@ -160,7 +162,7 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
     first = select(initial, f_min)
     wanted = edge_extensions({m: ladder(task, m) for m in METHOD_ORDER}, first.dials, INTEGER_DIAL)
     result['extensions'] = wanted
-    measured = all(measured_means[method].get(value) is not None for method, value in wanted.items())
+    measured = all(settled[method].get(value, False) for method, value in wanted.items())
     chosen = final_selection(initial, extended, f_min) if measured else first
     result['final'] = measured
     result['selection'] = {'dials': chosen.dials, 'effects': chosen.effects, 'label': chosen.label,
@@ -174,8 +176,8 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
         prog='python -m vision_unlearning.benchmarks.I_care.calibration', description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='Prints, per method and dial, the five entities\' F and their mean (a dash where a read-out is '
-               'missing) and the entities whose read-out there collapsed (the value is then not usable), then the '
-               'selection when every ladder is complete: the first selection and the edge values it asks for, or, '
+               'missing) and the entities whose read-out there collapsed (the value is then not usable, and needs '
+               'no missing read-out), then the selection when every ladder is complete:the first selection and the edge values it asks for, or, '
                'once those are measured, the final one. A method with no usable value stops the selection. Writes the whole result as JSON. '
                'Exit status: 0 read (complete or not); 1 an integrity failure (a non-finite measurement); 2 bad '
                'arguments.')

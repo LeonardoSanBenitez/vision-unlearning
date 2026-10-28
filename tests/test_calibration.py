@@ -131,6 +131,37 @@ def test_one_collapsed_entity_makes_the_value_unusable(tmp_path: Any) -> None:
     assert entry['collapsed'] == [one] and entry['usable'] is False
 
 
+def _remove_readout(root: str, method: str, value: float, target: str) -> None:
+    """One entity's read-out at one dial never produced a score file (its scoring failed)."""
+    base = cal.readout_assets(root, TASK, method, value)
+    path = get_interference_per_pair_path(TASK, ENTITIES.index(target), method, cal.epochs_of(method, value), base_folder=base)  # type: ignore[arg-type]
+    os.remove(per_seed_path_of(path))
+    os.remove(path)
+
+
+def test_a_collapsed_value_needs_no_missing_readout(tmp_path: Any) -> None:
+    root = str(tmp_path)
+    _ladders_with_collapse(root, uce_collapses_from=9)
+    complete = cal.collect(root, TASK, ENTITIES, f_min=8.0)
+    top = ladder(TASK, 'uce')[12]
+    last = draw_panels(TASK, ENTITIES)['calibration'][-1]
+    _remove_readout(root, 'uce', top, last)
+    result = cal.collect(root, TASK, ENTITIES, f_min=8.0)
+    entry = result['methods']['uce']['values'][cal.dial_name(top)]
+    assert entry['effects'][last] is None and entry['mean'] is None
+    assert entry['usable'] is False and last not in entry['collapsed'] and entry['collapsed']
+    assert result['methods']['uce']['complete'] is True
+    assert result['selection'] == complete['selection'] and result['final'] == complete['final']
+
+
+def test_a_missing_readout_at_a_usable_value_holds_the_selection(tmp_path: Any) -> None:
+    root = str(tmp_path)
+    _ladders_with_collapse(root, uce_collapses_from=9)
+    _remove_readout(root, 'uce', ladder(TASK, 'uce')[3], draw_panels(TASK, ENTITIES)['calibration'][-1])
+    result = cal.collect(root, TASK, ENTITIES, f_min=8.0)
+    assert result['methods']['uce']['complete'] is False and result['selection'] is None
+
+
 def test_a_method_with_no_usable_value_stops_the_selection(tmp_path: Any) -> None:
     root = str(tmp_path)
     _ladders_with_collapse(root, uce_collapses_from=0)
