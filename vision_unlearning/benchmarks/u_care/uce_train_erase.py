@@ -3,21 +3,17 @@ import ast
 import copy
 import operator
 import os
-import sys
 from functools import reduce
-from pathlib import Path
 
 import torch
 from diffusers import StableDiffusionPipeline
 from tqdm import tqdm
 from transformers import CLIPProcessor, CLIPModel
 
-# This script sits beside u_care/constants.py, which would otherwise shadow the
-# upstream constants package expected by `from constants.const import ...`.
-upstream_workdir = os.environ.get("U_CARE_UPSTREAM_WORKDIR", os.getcwd())
-sys.path.insert(0, str(Path(upstream_workdir).resolve()))
-
-from constants.const import theme_available, class_available
+from vision_unlearning.benchmarks.u_care.configuration import (
+    OBJECT_ENTITIES as class_available,
+    STYLE_ENTITIES as theme_available,
+)
 
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", cache_dir="./cache")
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", cache_dir="./cache")

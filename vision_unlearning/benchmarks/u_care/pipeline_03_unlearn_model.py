@@ -105,7 +105,6 @@ def run_uce(
             environment["PYTHONPATH"] = os.pathsep.join(
                 [upstream_workdir, *filter(None, python_paths)]
             )
-        environment["U_CARE_UPSTREAM_WORKDIR"] = upstream_workdir
 
     subprocess.run(
         command,
