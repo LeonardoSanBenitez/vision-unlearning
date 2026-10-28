@@ -61,8 +61,18 @@ def edit_model(ldm_stable, old_text_, new_text_, retain_text_,
             projection_matrices[num_ca_clip_layers + idx_] = l.to_k
 
     edit_stats = {
-        "to_v": {"changed_layers": 0, "max_abs_delta": 0.0},
-        "to_k": {"changed_layers": 0, "max_abs_delta": 0.0},
+        "to_v": {
+            "raw_changed_layers": 0,
+            "stored_changed_layers": 0,
+            "max_raw_abs_delta": 0.0,
+            "max_stored_abs_delta": 0.0,
+        },
+        "to_k": {
+            "raw_changed_layers": 0,
+            "stored_changed_layers": 0,
+            "max_raw_abs_delta": 0.0,
+            "max_stored_abs_delta": 0.0,
+        },
     }
 
     ### check the layers to edit (by default it is None; one can specify)
@@ -178,25 +188,40 @@ def edit_model(ldm_stable, old_text_, new_text_, retain_text_,
                 if not torch.isfinite(updated_weight).all():
                     raise RuntimeError(f"Non-finite UCE update at layer {layer_num}")
 
+                stored_weight = updated_weight.to(projection_matrices[layer_num].weight.dtype)
+                stored_weight_float = stored_weight.float()
                 projection_name = "to_v" if layer_num < num_ca_clip_layers else "to_k"
-                max_abs_delta = (updated_weight - weight).abs().max().item()
-                if max_abs_delta > 0:
-                    edit_stats[projection_name]["changed_layers"] += 1
-                edit_stats[projection_name]["max_abs_delta"] = max(
-                    edit_stats[projection_name]["max_abs_delta"], max_abs_delta
+                raw_max_abs_delta = (updated_weight - weight).abs().max().item()
+                stored_max_abs_delta = (stored_weight_float - weight).abs().max().item()
+                stats = edit_stats[projection_name]
+                if raw_max_abs_delta > 0:
+                    stats["raw_changed_layers"] += 1
+                if stored_max_abs_delta > 0:
+                    stats["stored_changed_layers"] += 1
+                stats["max_raw_abs_delta"] = max(
+                    stats["max_raw_abs_delta"], raw_max_abs_delta
+                )
+                stats["max_stored_abs_delta"] = max(
+                    stats["max_stored_abs_delta"], stored_max_abs_delta
                 )
 
                 projection_matrices[layer_num].weight = torch.nn.Parameter(
-                    updated_weight.to(projection_matrices[layer_num].weight.dtype)
+                    stored_weight
                 )
 
     for projection_name, stats in edit_stats.items():
         print(
-            f"UCE {projection_name}: changed {stats['changed_layers']}/"
-            f"{num_ca_clip_layers} layers, max absolute delta={stats['max_abs_delta']:.8g}"
+            f"UCE {projection_name}: fp32 changed "
+            f"{stats['raw_changed_layers']}/{num_ca_clip_layers} layers "
+            f"(max delta={stats['max_raw_abs_delta']:.8g}); stored-dtype changed "
+            f"{stats['stored_changed_layers']}/{num_ca_clip_layers} "
+            f"(max delta={stats['max_stored_abs_delta']:.8g})"
         )
-    if with_to_k and edit_stats["to_k"]["changed_layers"] == 0:
-        raise RuntimeError("UCE requested to_k editing but no to_k weights changed")
+    if with_to_k and edit_stats["to_k"]["stored_changed_layers"] == 0:
+        raise RuntimeError(
+            "UCE requested to_k editing but no to_k changes survived conversion "
+            "to the checkpoint dtype"
+        )
 
     print(f'Current model status: Edited "{str(old_text_)}" into "{str(new_texts)}" and Retained "{str(retain_text_)}"')
     return ldm_stable
