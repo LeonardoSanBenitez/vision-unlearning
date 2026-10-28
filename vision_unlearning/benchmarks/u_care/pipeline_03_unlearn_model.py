@@ -97,7 +97,22 @@ def run_uce(
     if dry_run:
         return output_path / emitter
 
-    subprocess.run(command, cwd=working_directory, check=True)
+    environment = os.environ.copy()
+    if working_directory:
+        upstream_workdir = str(Path(working_directory).resolve())
+        python_paths = environment.get("PYTHONPATH", "").split(os.pathsep)
+        if upstream_workdir not in python_paths:
+            environment["PYTHONPATH"] = os.pathsep.join(
+                [upstream_workdir, *filter(None, python_paths)]
+            )
+        environment["U_CARE_UPSTREAM_WORKDIR"] = upstream_workdir
+
+    subprocess.run(
+        command,
+        cwd=working_directory,
+        check=True,
+        env=environment,
+    )
     return _find_upstream_output(output_path, emitter)
 
 
