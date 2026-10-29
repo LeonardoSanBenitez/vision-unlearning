@@ -12,6 +12,8 @@ Reads the campaign assets folder (``--assets``) and writes into ``--output``:
 * ``calibration_{task}.png`` (with ``--calibration-summary``) -- from a task's ``selection_{task}.json`` written by
   ``calibration.collect``: per method, every calibration entity's forget effect ``F`` at every measured dial, their
   mean where all five are measured, collapsed read-outs crossed, and ``f_min``;
+* ``contact_{task}_{method}_seed42.png`` (with ``--contact-sheet``) -- the five calibration targets' own prompt at
+  seed 42, the baseline and then every dial the selection file records, each cell titled with its ``F``;
 * ``competence.md`` -- per task, the screen's count, the scale reference, the mean specificity, and the
   entities the screen does not recognise.
 
@@ -193,6 +195,48 @@ def calibration_summary(selection_path: str, output: str) -> str:
     return path
 
 
+def contact_sheet(assets: str, root: str, selection_path: str, method: str, seed: int, output: str) -> str:
+    """The five calibration targets' own prompt at one seed, at every measured dial of one method.
+
+    Columns are the calibration entities in the selection file's order, rows the baseline and then every dial
+    the selection file records for the method; each cell is titled with that read-out's ``F`` and, when it
+    collapsed, the word. An empty cell is a read-out not measured yet.
+    """
+    from vision_unlearning.benchmarks.I_care import calibration
+    from vision_unlearning.datasets.testbed import get_generated_dataset_folder
+    with open(selection_path, encoding='utf-8') as handle:
+        selection = json.load(handle)
+    task, entities = selection['task'], selection['calibration_entities']
+    values = sorted(selection['methods'][method]['values'].values(), key=lambda value: value['dial'])
+    figure, axes = plt.subplots(len(values) + 1, len(entities), figsize=(2.2 * len(entities), 2.4 * (len(values) + 1)),
+                                squeeze=False)
+    for c, entity in enumerate(entities):
+        prompt = generation_prompt(task, entity)
+        cells: List[Tuple[str, str, str]] = [(get_shared_baseline_folder(task, assets), 'off', 'baseline')]
+        for value in values:
+            base = calibration.readout_assets(root, task, method, value['dial'])
+            folder = get_generated_dataset_folder(task, method, calibration.epochs_of(method, value['dial']),  # type: ignore[arg-type]
+                                                  canonical_entity(task, entity), base)
+            effect = value['effects'].get(entity)
+            label = f"dial={calibration.dial_name(value['dial'])}" + ('' if effect is None else f' F={effect:.2f}')
+            cells.append((folder, 'on', label + (' collapsed' if entity in value['collapsed'] else '')))
+        for r, (folder, state, label) in enumerate(cells):
+            axis = axes[r][c]
+            path = os.path.join(folder, get_generated_dataset_file(state, seed, prompt))  # type: ignore[arg-type]
+            if os.path.isfile(path):
+                with Image.open(path) as handle:
+                    axis.imshow(np.asarray(handle.convert('RGB')))
+            axis.set_title(f'{canonical_entity(task, entity)}\n{label}' if r == 0 else label, fontsize=6)
+            axis.axis('off')
+    figure.suptitle(f'calibration contact sheet | task={task} | method={DISPLAY.get(method, method)} | seed={seed} | '
+                    f'cell = target own prompt | F = mean over 4 seeds of own-prompt CLIP lost', fontsize=9)
+    _layout(figure)
+    path = os.path.join(output, f'contact_{task}_{method}_seed{seed}.png')
+    figure.savefig(path, dpi=70)
+    plt.close(figure)
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--assets', required=True)
@@ -202,8 +246,15 @@ def main() -> None:
                         help='draw only ladder_<task>_<method>_<entity>.png, for the first of --tasks')
     parser.add_argument('--calibration-summary', nargs='+', metavar='SELECTION_JSON', default=None,
                         help='draw only calibration_<task>.png from each selection file calibration.collect wrote')
+    parser.add_argument('--contact-sheet', nargs=3, metavar=('CALIBRATION_ROOT', 'SELECTION_JSON', 'METHOD'), default=None,
+                        help='draw only contact_<task>_<method>_seed42.png: the five calibration targets at every dial')
     args = parser.parse_args()
     os.makedirs(args.output, exist_ok=True)
+    if args.contact_sheet is not None:
+        root, selection_path, method = args.contact_sheet
+        print(contact_sheet(args.assets, root, selection_path, method, SEEDS[0], args.output))
+        print('FIGURES_DONE')
+        return
     if args.calibration_summary is not None:
         for selection_path in args.calibration_summary:
             print(calibration_summary(selection_path, args.output))
