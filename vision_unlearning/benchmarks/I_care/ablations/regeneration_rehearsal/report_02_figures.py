@@ -9,12 +9,16 @@ Reads the campaign assets folder (``--assets``) and writes into ``--output``:
   half its mean, the scale reference ``f_min``, marked;
 * ``ladder_{task}_{method}_{entity}.png`` (with ``--ladder``) -- one calibration entity's own prompt at every measured
   dial of a method, the baseline first, each row titled with its forget effect ``F``;
+* ``calibration_{task}.png`` (with ``--calibration-summary``) -- from a task's ``selection_{task}.json`` written by
+  ``calibration.collect``: per method, every calibration entity's forget effect ``F`` at every measured dial, their
+  mean where all five are measured, collapsed read-outs crossed, and ``f_min``;
 * ``competence.md`` -- per task, the screen's count, the scale reference, the mean specificity, and the
   entities the screen does not recognise.
 
 Usage::
 
     python report_02_figures.py --assets CAMPAIGN_ASSETS --output DIR [--tasks people scenes breeds]
+    python report_02_figures.py --assets CAMPAIGN_ASSETS --output DIR --calibration-summary SELECTION_JSON [...]
 
 Prints ``FIGURES <n>`` and ``FIGURES_DONE``.
 """
@@ -36,6 +40,8 @@ from vision_unlearning.datasets.entity_names import canonical_entity, generation
 from vision_unlearning.datasets.testbed import get_generated_dataset_file, get_shared_baseline_folder  # noqa: E402
 
 SEEDS = [42, 43, 44, 45]
+#: Display names (CONTRIBUTING_ICARE.md section 10): the method called ``distil`` in code is SPARE in every figure.
+DISPLAY = {'distil': 'spare'}
 
 
 def _layout(figure: Any) -> None:
@@ -113,7 +119,7 @@ def ladder_targets(assets: str, root: str, task: type_entity_task, method: str, 
             with open(per_seed_path, encoding='utf-8') as handle:
                 row = json.load(handle)['receivers'][entity]
             effect = forget_effect(row['clip_off'], row['clip_on'])
-        rows.append((f'{method} dial={calibration.dial_name(dial)}', folder, 'on', effect))
+        rows.append((f'{DISPLAY.get(method, method)} dial={calibration.dial_name(dial)}', folder, 'on', effect))
     for r, (label, folder, state, effect) in enumerate(rows):
         for c, seed in enumerate(SEEDS):
             axis = axes[r][c]
@@ -124,11 +130,65 @@ def ladder_targets(assets: str, root: str, task: type_entity_task, method: str, 
             title = f'{label} seed={seed}' if effect is None else f'{label} F={effect:.2f} seed={seed}'
             axis.set_title(title, fontsize=6)
             axis.axis('off')
-    figure.suptitle(f'calibration | task={task} | method={method} | target={canonical_entity(task, entity)} | '
+    figure.suptitle(f'calibration | task={task} | method={DISPLAY.get(method, method)} | target={canonical_entity(task, entity)} | '
                     f'F = mean over seeds of own-prompt CLIP lost (row)', fontsize=9)
     _layout(figure)
     path = os.path.join(output, f'ladder_{task}_{method}_{entity}.png')
     figure.savefig(path, dpi=80)
+    plt.close(figure)
+    return path
+
+
+def calibration_summary(selection_path: str, output: str) -> str:
+    """One task's calibration as ``calibration.collect`` recorded it: per method, ``F`` at every measured dial.
+
+    One panel per method. Each calibration entity is one line, the five-entity mean is the thick line (drawn
+    only where all five are measured), a collapsed read-out is a red cross, and the scale reference ``f_min`` is
+    the dashed line. Reads only the selection file, so it draws exactly what the selector saw.
+    """
+    from vision_unlearning.benchmarks.I_care.calibration import dial_name
+    with open(selection_path, encoding='utf-8') as handle:
+        selection = json.load(handle)
+    task, f_min, entities = selection['task'], selection['f_min'], selection['calibration_entities']
+    methods = [m for m in ('uce', 'distil', 'salun') if m in selection['methods']]
+    colours = plt.get_cmap('tab10')
+    figure, axes = plt.subplots(1, len(methods), figsize=(5.2 * len(methods), 5.4), squeeze=False, sharey=True)
+    for axis, method in zip(axes[0], methods):
+        record = selection['methods'][method]
+        values = sorted(record['values'].values(), key=lambda value: value['dial'])
+        dials = [value['dial'] for value in values]
+        for i, entity in enumerate(entities):
+            points = [(value['dial'], value['effects'][entity]) for value in values if value['effects'].get(entity) is not None]
+            if points:
+                axis.plot(*zip(*points), marker='o', markersize=3, linewidth=0.8, color=colours(i),
+                          label=canonical_entity(task, entity))
+            crosses = [(value['dial'], value['effects'][entity]) for value in values
+                       if entity in value['collapsed'] and value['effects'].get(entity) is not None]
+            if crosses:
+                axis.plot(*zip(*crosses), linestyle='none', marker='x', markersize=9, color='tab:red')
+        complete = [(value['dial'], value['mean']) for value in values if value.get('mean') is not None]
+        if complete:
+            axis.plot(*zip(*complete), color='black', linewidth=2.2, label='mean of the five entities')
+        axis.axhline(f_min, color='tab:red', linestyle='--', linewidth=1, label='f_min')
+        axis.plot([], [], linestyle='none', marker='x', color='tab:red', label='collapsed read-out')
+        axis.set_xscale('log', base=2)
+        axis.set_xticks(dials)
+        axis.set_xticklabels([dial_name(dial) for dial in dials], rotation=60, fontsize=7)
+        axis.set_xlabel('erase scale' if method == 'uce' else 'epochs')
+        if axis is axes[0][0]:
+            axis.set_ylabel('F, own-prompt CLIP score lost (↑ = more forgetting)')
+        usable = sum(1 for value in values if value.get('usable'))
+        measured = sum(1 for value in values if len(value['effects']) == len(entities)
+                       and all(v is not None for v in value['effects'].values()))
+        axis.set_title(f'{DISPLAY.get(method, method)}\ndials={len(dials)} | measured on all five={measured} | usable={usable}',
+                       fontsize=9)
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    figure.legend(handles, labels, loc='lower center', ncol=len(labels), fontsize=8)
+    figure.suptitle(f'calibration | task={task} | entities={len(entities)} | f_min={f_min:.2f} | '
+                    f'collapsed = receivers lose at least half of F and of f_min', fontsize=10)
+    figure.tight_layout(rect=(0, 0.07, 1, 1 - 0.5 / figure.get_figheight()))
+    path = os.path.join(output, f'calibration_{task}.png')
+    figure.savefig(path, dpi=90)
     plt.close(figure)
     return path
 
@@ -140,8 +200,15 @@ def main() -> None:
     parser.add_argument('--tasks', nargs='+', default=['people', 'scenes', 'breeds'])
     parser.add_argument('--ladder', nargs=3, metavar=('CALIBRATION_ROOT', 'METHOD', 'ENTITY'), default=None,
                         help='draw only ladder_<task>_<method>_<entity>.png, for the first of --tasks')
+    parser.add_argument('--calibration-summary', nargs='+', metavar='SELECTION_JSON', default=None,
+                        help='draw only calibration_<task>.png from each selection file calibration.collect wrote')
     args = parser.parse_args()
     os.makedirs(args.output, exist_ok=True)
+    if args.calibration_summary is not None:
+        for selection_path in args.calibration_summary:
+            print(calibration_summary(selection_path, args.output))
+        print('FIGURES_DONE')
+        return
     if args.ladder is not None:
         root, method, entity = args.ladder
         print(ladder_targets(args.assets, root, args.tasks[0], method, entity, args.output))
