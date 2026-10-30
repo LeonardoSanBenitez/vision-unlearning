@@ -130,6 +130,34 @@ class TestUce:
         assert _config('scenes', 'uce', 'football_field', uce_erase_scale_override=23.4375)['erase_scale'] == 23.4375
 
     @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
+    def test_prompt_expansion_appends_the_authors_five_phrasings(self, task: str, entity: str) -> None:
+        """Opt-in: the edit and guide lists gain the five object phrasings of the authors'
+        ``--expand_prompts`` (``trainscripts/uce_sd_erase.py`` at ``7c724d9d``), in their order, and
+        nothing else changes; the library's own expansion, which adds a sixth phrasing the authors'
+        code does not have, stays off. Fails on the code before: the setting does not exist."""
+        default = _config(task, 'uce', entity, num_train_epochs=0)
+        expanded = _config(task, 'uce', entity, num_train_epochs=0, uce_expand_prompts=True)
+
+        phrasings = ['image of', 'photo of', 'portrait of', 'picture of', 'painting of']
+        target = canonical_entity(task, entity)  # type: ignore[arg-type]
+        guide = substitute_concept(task)  # type: ignore[arg-type]
+        assert expanded['edit_concepts'].split(';') == [target] + [f'{p} {target}' for p in phrasings]
+        assert expanded['guide_concepts'].split(';') == [guide] + [f'{p} {guide}' for p in phrasings]
+        assert expanded['expand_prompts'] is False
+        changed = {'edit_concepts', 'guide_concepts'}
+        assert {k: v for k, v in expanded.items() if k not in changed} == \
+            {k: v for k, v in default.items() if k not in changed}
+
+    def test_prompt_expansion_is_off_by_default(self) -> None:
+        config = _config('people', 'uce', 'Mark_Philippoussis', num_train_epochs=0)
+        assert config['edit_concepts'] == 'Mark Philippoussis' and config['guide_concepts'] == 'a child'
+
+    @pytest.mark.parametrize('method', ['salun', 'distil', 'munba'])
+    def test_prompt_expansion_is_refused_for_other_methods(self, method: str) -> None:
+        with pytest.raises(ValueError, match='uce_expand_prompts'):
+            _config('breeds', method, 'bouvier des flandres dog', uce_expand_prompts=True)
+
+    @pytest.mark.parametrize('task, entity', _TASKS_AND_ENTITIES)
     def test_the_three_methods_aim_at_the_same_substitute(self, task: str, entity: str) -> None:
         uce = _config(task, 'uce', entity, num_train_epochs=0)
         salun = _config(task, 'salun', entity)

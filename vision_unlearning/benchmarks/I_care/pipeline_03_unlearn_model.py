@@ -221,6 +221,10 @@ _parser.add_argument("--uce-guide-concepts", default=None,
                           "the task's substitute concept. Set to the task name ('people', 'breeds', "
                           "'scenes') to reproduce the configuration used before that change, for a "
                           "control session on the same entity. Refused for any other method.")
+_parser.add_argument("--uce-expand-prompts", action="store_true", default=False,
+                     help="UCE only: also edit the entity inside the five object phrasings of its authors' prompt "
+                          "expansion ('image of X', 'photo of X', ...), each guided to the same phrasing of the "
+                          "substitute concept. Off by default. Refused for any other method.")
 _parser.add_argument("--save-at-epochs", type=int, nargs="+", default=None,
                      help="Trained methods only: also save the weights after each of these epochs, into "
                           "epoch-N (SPARE) or epoch_N (SalUn) inside the model folder, each with its own "
@@ -308,6 +312,7 @@ for index in range(index_start, index_start + max_identities):
         retained_entities=[m['name'] for m in metadata_filtered if m['name'] != target] if method == 'uce' else None,
         uce_erase_scale_override=_args.uce_erase_scale,
         save_at_epochs=_args.save_at_epochs,
+        uce_expand_prompts=_args.uce_expand_prompts,
     )
     if uce_guide_concepts is not None:
         logger.info('UCE guide concept set by the caller to %r (default: the substitute concept)', uce_guide_concepts)

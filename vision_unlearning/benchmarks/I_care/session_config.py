@@ -72,6 +72,7 @@ def session_hyperparameters(
     retained_entities: Optional[Sequence[str]] = None,
     uce_erase_scale_override: Optional[float] = None,
     save_at_epochs: Optional[Sequence[int]] = None,
+    uce_expand_prompts: bool = False,
 ) -> Dict[str, Any]:
     """Return the hyperparameters of one unlearning session.
 
@@ -96,6 +97,10 @@ def session_hyperparameters(
     @param save_at_epochs: trained methods only: also save the trained weights after each of these
         epochs, so one run to the top of a ladder yields every lower value of it (equalization). Each
         trainer's own field takes it; refused for UCE, which has no epochs.
+    @param uce_expand_prompts: UCE only, off by default: append the authors' five object phrasings
+        (``UCE_OBJECT_PHRASINGS``) to the edit and the guide concept, as their ``--expand_prompts``
+        does, so the edit also covers the concept inside a phrase such as the benchmark's own
+        generation prompt. Refused for every other method.
     @raises NotImplementedError: the method has no configuration here.
     """
     forget_prompts, retain_prompts = evaluation_prompts(task, entity)
@@ -111,11 +116,13 @@ def session_hyperparameters(
                         ('uce_erase_scale_override', uce_erase_scale_override)):
         if value is not None and method != 'uce':
             raise ValueError(f'{name} is a UCE setting; method {method!r} has no such setting')
+    if uce_expand_prompts and method != 'uce':
+        raise ValueError(f'uce_expand_prompts is a UCE setting; method {method!r} has no such setting')
     if method == 'uce':
         if retained_entities is None:
             raise ValueError('UCE preserves the task\'s other entities; pass retained_entities')
         hyperparameters.update(_uce(task, entity, model_base_name, device, retained_entities,
-                                    uce_guide_concepts, uce_erase_scale_override))
+                                    uce_guide_concepts, uce_erase_scale_override, uce_expand_prompts))
     elif method == 'salun':
         hyperparameters.update(_salun(
             task, model_base_name, device, num_train_epochs,
@@ -137,6 +144,16 @@ def session_hyperparameters(
     return hyperparameters
 
 
+#: The object phrasings of UCE's prompt expansion, in its authors' order
+#: (``trainscripts/uce_sd_erase.py`` at ``7c724d9d``, ``--expand_prompts``).
+UCE_OBJECT_PHRASINGS = ('image of', 'photo of', 'portrait of', 'picture of', 'painting of')
+
+
+def _expanded(concept: str) -> str:
+    """The concept followed by its five phrasings, ``;``-separated as UCE's concept lists are."""
+    return ';'.join([concept] + [f'{phrasing} {concept}' for phrasing in UCE_OBJECT_PHRASINGS])
+
+
 def _uce(
     task: type_task,
     entity: str,
@@ -145,6 +162,7 @@ def _uce(
     retained_entities: Sequence[str],
     guide_concepts: Optional[str] = None,
     erase_scale: Optional[float] = None,
+    expand_prompts: bool = False,
 ) -> Dict[str, Any]:
     """The closed-form edit, at its authors' configuration.
 
@@ -160,6 +178,9 @@ def _uce(
     Deviations from the paper-era code, which the current lineage this library ports shares: the
     empty prompt is not added to the retain list (the weight is 0.1 either way), and each concept
     contributes one embedding rather than outer products over padded token positions.
+
+    ``expand_prompts`` writes the authors' expansion into the two lists here rather than switching on
+    the unlearner's own ``expand_prompts``, which adds a sixth phrasing their code does not have.
     """
     target = canonical_entity(task, entity)
     preserved = [canonical_entity(task, other) for other in retained_entities]
@@ -167,13 +188,14 @@ def _uce(
         raise ValueError(f'the target {target!r} is among the entities UCE is asked to preserve')
     if not preserved:
         raise ValueError('UCE was given no entity to preserve')
+    guide = substitute_concept(task) if guide_concepts is None else guide_concepts
     return {
         'pretrained_model_name_or_path': model_base_name,
         'erase_scale': uce_erase_scale[task] if erase_scale is None else erase_scale,
         'preserve_scale': max(0.1, 1.0 / len(preserved)),
         'lamb': 0.5,
-        'edit_concepts': target,
-        'guide_concepts': substitute_concept(task) if guide_concepts is None else guide_concepts,
+        'edit_concepts': _expanded(target) if expand_prompts else target,
+        'guide_concepts': _expanded(guide) if expand_prompts else guide,
         'preserve_concepts': ';'.join(preserved),
         'expand_prompts': False,
         'device': device,
