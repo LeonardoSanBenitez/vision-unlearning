@@ -86,12 +86,10 @@ def epoch_ladder(centre: int, low: int = -3, high: int = 3) -> List[int]:
     return values
 
 
-#: Each ladder's centre (``k = 0``), fixed before any calibration session. UCE's is
-#: ``configuration.uce_erase_scale`` (the first run's erase-to-ridge ratio put at ridge 0.5); SPARE's is
-#: the first run's epoch count; SalUn's is the grid centre of its integration pilot. They are starting
-#: points: the selected setting is justified by this run's measurements on the ladder.
+#: Each trained method's ladder centre (``k = 0``), fixed before any calibration session: SPARE's is the
+#: first run's epoch count; SalUn's is the grid centre of its integration pilot. They are starting points:
+#: the selected setting is justified by this run's measurements on the ladder.
 LADDER_CENTRES: Dict[str, Dict[str, float]] = {
-    'uce': {'people': 1500.0, 'scenes': 1500.0, 'breeds': 1150.0},
     'distil': {'people': 400, 'scenes': 100, 'breeds': 100},
     'salun': {'people': 100, 'scenes': 25, 'breeds': 25},
 }
@@ -100,8 +98,19 @@ LADDER_CENTRES: Dict[str, Dict[str, float]] = {
 INTEGER_DIAL: Dict[str, bool] = {'uce': False, 'distil': True, 'salun': True}
 
 
+#: UCE's ladder is ``2**k`` for ``k`` in this range, on every task. Its closed-form edit is fully applied once
+#: the erase term dominates the ridge and the preservation along the target's key, which the text keys' size
+#: makes true from a scale of a few units: at 8 at most 0.002 of the edit is left unapplied, at 2**-10 more than
+#: half. An earlier ladder, ``1500 x 2**k`` for ``k = -6 .. 6``, lay wholly above that point, so its values below
+#: the scales where the arithmetic breaks down were one and the same edit.
+UCE_LADDER_EXPONENTS = (-10, 3)
+
+
 def ladder(task: str, method: str) -> List[float]:
-    """A method's ladder on a task: UCE ``c x 2**k`` for ``k = -6 .. 6``, the trained methods ``k = -3 .. 3``."""
+    """A method's ladder on a task: UCE ``2**k`` for ``k = -10 .. 3`` on every task, the trained methods
+    ``centre x 2**k`` for ``k = -3 .. 3``."""
+    if method == 'uce':
+        return scale_ladder(1.0, *UCE_LADDER_EXPONENTS)
     centre = LADDER_CENTRES[method][task]
     if INTEGER_DIAL[method]:
         return [float(value) for value in epoch_ladder(int(centre))]

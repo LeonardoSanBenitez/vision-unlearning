@@ -283,9 +283,11 @@ def test_a_duplicate_entity_is_refused() -> None:
 # -- the ladders of the plan, value by value --------------------------------------------------------
 
 PLAN_LADDERS = {
-    ('uce', 'people'): [23.4375, 46.875, 93.75, 187.5, 375, 750, 1500, 3000, 6000, 12000, 24000, 48000, 96000],
-    ('uce', 'scenes'): [23.4375, 46.875, 93.75, 187.5, 375, 750, 1500, 3000, 6000, 12000, 24000, 48000, 96000],
-    ('uce', 'breeds'): [17.96875, 35.9375, 71.875, 143.75, 287.5, 575, 1150, 2300, 4600, 9200, 18400, 36800, 73600],
+    # UCE: 2**k for k = -10 .. 3 on every task. Its closed-form edit is fully applied from a scale of a few
+    # units, so the first ladder (1500 x 2**k, k = -6 .. 6) held one and the same edit at all its lower values.
+    ('uce', 'people'): [2.0 ** k for k in range(-10, 4)],
+    ('uce', 'scenes'): [2.0 ** k for k in range(-10, 4)],
+    ('uce', 'breeds'): [2.0 ** k for k in range(-10, 4)],
     ('distil', 'people'): [50, 100, 200, 400, 800, 1600, 3200],
     ('distil', 'scenes'): [13, 25, 50, 100, 200, 400, 800],
     ('distil', 'breeds'): [13, 25, 50, 100, 200, 400, 800],

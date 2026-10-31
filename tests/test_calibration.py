@@ -70,7 +70,7 @@ def test_complete_ladders_matched_in_the_middle_are_final_without_an_edge_pass(t
     assert result['selection']['label'] == 'matched'
     retain = result['methods']['distil']['values']['400']['retain']
     assert retain['receivers'] == 100.0 and retain['mean_receiver_clip_diff'] == pytest.approx(-0.1)
-    assert 'damaged' not in result['methods']['uce']['values']['1500']['retain']
+    assert 'damaged' not in result['methods']['uce']['values'][cal.dial_name(ladder(TASK, 'uce')[6])]['retain']
 
 
 def test_a_selection_at_a_ladder_top_asks_for_the_one_edge_value_then_is_final(tmp_path: Any) -> None:
@@ -160,6 +160,22 @@ def test_a_missing_readout_at_a_usable_value_holds_the_selection(tmp_path: Any) 
     _remove_readout(root, 'uce', ladder(TASK, 'uce')[3], draw_panels(TASK, ENTITIES)['calibration'][-1])
     result = cal.collect(root, TASK, ENTITIES, f_min=8.0)
     assert result['methods']['uce']['complete'] is False and result['selection'] is None
+
+
+def test_a_measured_value_off_the_ladder_is_reported_and_never_selected(tmp_path: Any) -> None:
+    """A read-out folder at a dial that is neither on the ladder nor an edge value the selection asked for
+    (UCE's read-outs from before its ladder moved) is reported, and stays out of the selection. Fails on the
+    code before: every usable value on disk entered the final selection, so UCE was matched at 1500."""
+    root = str(tmp_path)
+    _ladders(root, lambda method, k: min(0.5 * k, 3.0) if method == 'uce' else min(2.0 * k, 10.0))
+    _write(root, 'uce', 1500.0, 10.0)
+    result = cal.collect(root, TASK, ENTITIES, f_min=8.0)
+    stale = result['methods']['uce']['values']['1500']
+    assert stale['on_ladder'] is False and stale['usable'] is True and stale['mean'] == pytest.approx(10.0)
+    assert result['final'] is True and result['extensions'] == {}
+    assert result['selection']['dials']['uce'] != 1500.0
+    assert result['selection']['label'] == 'partially matched'
+    assert result['selection']['effects']['uce'] == pytest.approx(3.0)
 
 
 def test_a_method_with_no_usable_value_stops_the_selection(tmp_path: Any) -> None:

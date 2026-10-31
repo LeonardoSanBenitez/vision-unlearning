@@ -28,7 +28,9 @@ Layout, one assets folder per (task, method, dial) under a calibration root::
     <root>/<task>_<method>/readout_<dial>/assets/
 
 holding the five entities' models and read-outs at that dial under the benchmark's usual names. The dial
-is spelled by :func:`dial_name`. A dial folder that is not on the method's ladder is an extension value.
+is spelled by :func:`dial_name`. A dial folder that is not on the method's ladder is reported with
+``on_ladder`` false; it enters the final selection only when it is the edge value the first selection asked
+for, so a read-out left from before a ladder moved is never selected.
 
 Run ``python -m vision_unlearning.benchmarks.I_care.calibration --help``.
 """
@@ -116,7 +118,7 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
     calibration = draw_panels(task, entities)['calibration']
     methods: Dict[str, Any] = {}
     initial: Dict[str, Dict[float, Optional[float]]] = {}
-    extended: Dict[str, Dict[float, Optional[float]]] = {}
+    usable_means: Dict[str, Dict[float, Optional[float]]] = {}
     settled: Dict[str, Dict[float, bool]] = {}
     for method in METHOD_ORDER:
         rungs = ladder(task, method)
@@ -147,7 +149,7 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
                                         'retain': retain, 'collapsed': broken, 'usable': usable}
             settled.setdefault(method, {})[value] = complete or bool(broken)
             if usable:
-                extended.setdefault(method, {})[value] = mean
+                usable_means.setdefault(method, {})[value] = mean
                 if value in rungs:
                     initial.setdefault(method, {})[value] = mean
         methods[method] = {'ladder': rungs, 'values': values,
@@ -162,6 +164,11 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
     first = select(initial, f_min)
     wanted = edge_extensions({m: ladder(task, m) for m in METHOD_ORDER}, first.dials, INTEGER_DIAL)
     result['extensions'] = wanted
+    # Only the ladder and the edge values asked for enter the final selection. Any other dial measured on disk
+    # (a read-out from before a ladder moved) is reported above and never selected.
+    extended = {method: {value: mean for value, mean in means.items()
+                         if value in ladder(task, method) or value == wanted.get(method)}
+                for method, means in usable_means.items()}
     measured = all(settled[method].get(value, False) for method, value in wanted.items())
     chosen = final_selection(initial, extended, f_min) if measured else first
     result['final'] = measured
