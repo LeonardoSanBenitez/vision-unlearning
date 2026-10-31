@@ -102,7 +102,7 @@ INTEGER_DIAL: Dict[str, bool] = {'uce': False, 'distil': True, 'salun': True}
 #: the erase term dominates the ridge and the preservation along the target's key, which the text keys' size
 #: makes true from a scale of a few units: at 8 at most 0.002 of the edit is left unapplied, at 2**-10 more than
 #: half. An earlier ladder, ``1500 x 2**k`` for ``k = -6 .. 6``, lay wholly above that point, so its values below
-#: the scales where the arithmetic breaks down were one and the same edit.
+#: those at which the model collapsed were one and the same edit.
 UCE_LADDER_EXPONENTS = (-10, 3)
 
 
@@ -209,27 +209,24 @@ def competence_screen(own_prompt_ranks: Mapping[str, Sequence[int]]) -> Dict[str
 # -- the selector ---------------------------------------------------------------------------------
 
 
-#: A read-out is collapsed when its receivers lose on average at least this share of its target's effect,
-#: and at least this share of the scale reference.
+#: A read-out is collapsed when its receivers lose on average at least this share of the scale reference.
 COLLAPSE_SHARE = 0.5
 
 
-def collapsed(target_effect: float, receiver_clip_diffs: Sequence[float], f_min: float) -> bool:
+def collapsed(receiver_clip_diffs: Sequence[float], f_min: float) -> bool:
     """Whether one read-out broke the whole model rather than its target: such a setting is never selected.
 
-    ``target_effect`` is the read-out's ``F``; ``receiver_clip_diffs`` are the stored ``clip_diff`` values
-    (``on - off``) of its read-out receivers, the target excluded. The receivers' mean loss is the negated
-    mean of those. The read-out is collapsed when that loss is at least :data:`COLLAPSE_SHARE` of the
-    target's ``F`` -- the other entities fare like the target -- and at least :data:`COLLAPSE_SHARE` of
-    ``f_min``, so that a read-out in which almost nothing moves is never called collapsed on a ratio of two
-    small numbers. Destroying the target alone is erasure, not collapse.
+    ``receiver_clip_diffs`` are the stored ``clip_diff`` values (``on - off``) of the read-out's receivers, the
+    target excluded; their mean loss is the negated mean. The read-out is collapsed when that loss is at least
+    :data:`COLLAPSE_SHARE` of ``f_min``: the other entities lose half the effect the comparison is made at.
+    What the target loses does not enter. An earlier form also asked the loss to be half the target's, and so
+    passed read-outs in which nearly every receiver was damaged whenever the target was damaged twice as much.
+    Destroying the target alone is erasure, not collapse.
     """
     if not receiver_clip_diffs:
         raise IntegrityFailure('no receivers to judge a collapse by')
-    effect = _finite(target_effect, 'the target effect')
     loss = -sum(_finite(value, 'a receiver clip_diff') for value in receiver_clip_diffs) / len(receiver_clip_diffs)
-    threshold = COLLAPSE_SHARE * _finite(f_min, 'the scale reference')
-    return loss >= COLLAPSE_SHARE * effect and loss >= threshold
+    return loss >= COLLAPSE_SHARE * _finite(f_min, 'the scale reference')
 
 
 def qualifies(effects: Sequence[float], f_min: float) -> bool:

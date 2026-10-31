@@ -135,7 +135,7 @@ def collect(root: str, task: str, entities: Sequence[str], f_min: float) -> Dict
                 found = read_receiver_diffs(base, task, method, value, index, receivers)
                 diffs += found or []
                 effect = effects[target]
-                if effect is not None and found and collapsed(effect, found, f_min):
+                if effect is not None and found and collapsed(found, f_min):
                     broken.append(target)
             complete = all(effect is not None for effect in effects.values())
             usable = complete and not broken

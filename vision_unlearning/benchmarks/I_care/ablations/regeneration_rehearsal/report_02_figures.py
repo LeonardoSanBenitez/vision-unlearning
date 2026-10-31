@@ -187,7 +187,7 @@ def calibration_summary(selection_path: str, output: str) -> str:
     handles, labels = axes[0][0].get_legend_handles_labels()
     figure.legend(handles, labels, loc='lower center', ncol=len(labels), fontsize=8)
     figure.suptitle(f'calibration | task={task} | entities={len(entities)} | f_min={f_min:.2f} | '
-                    f'collapsed = receivers lose at least half of F and of f_min', fontsize=10)
+                    f'collapsed = receivers lose at least half of f_min', fontsize=10)
     figure.tight_layout(rect=(0, 0.07, 1, 1 - 0.5 / figure.get_figheight()))
     path = os.path.join(output, f'calibration_{task}.png')
     figure.savefig(path, dpi=90)

@@ -219,36 +219,44 @@ def test_confirmation_never_changes_the_calibration_label() -> None:
 
 def test_receivers_losing_as_much_as_the_target_is_a_collapse() -> None:
     # UCE on a people target at erase scale 6000: target 11.29, receivers 11.08 on average.
-    assert collapsed(11.29, [-11.08] * 20, f_min=8.5)
+    assert collapsed([-11.08] * 20, f_min=8.5)
     # The receivers lose more than the target, the target barely at the floor: still the whole model.
-    assert collapsed(6.78, [-9.69] * 20, f_min=8.5)
+    assert collapsed([-9.69] * 20, f_min=8.5)
+
+
+def test_receivers_damaged_while_the_target_is_damaged_more_is_a_collapse() -> None:
+    """UCE on the indoor velodrome at erase scale 6000: the target lost 16.60 and the 20 receivers 7.77 on
+    average, 19 of them more than 3. Fails on the code before, which also required the receivers' loss to be
+    half the target's and so called this read-out usable."""
+    assert collapsed([-7.77] * 20, f_min=5.8269)
 
 
 def test_a_working_setting_is_not_a_collapse() -> None:
-    # The same entity at 3000: target 4.70, receivers 0.30; SPARE at 50 epochs: 12.46 and 0.47.
-    assert not collapsed(4.70, [-0.295] * 20, f_min=8.5)
-    assert not collapsed(12.46, [-0.471] * 20, f_min=8.5)
+    # The same people entity at 3000: receivers 0.30; SPARE at 50 epochs: 0.47; the largest working loss
+    # measured on scenes, UCE on the badminton court at 6000: 2.38.
+    assert not collapsed([-0.295] * 20, f_min=8.5)
+    assert not collapsed([-0.471] * 20, f_min=8.5)
+    assert not collapsed([-2.376] * 20, f_min=5.8269)
 
 
-def test_a_small_loss_is_never_a_collapse_however_small_the_target_effect() -> None:
-    assert not collapsed(0.1, [-0.08] * 20, f_min=8.5)
-    assert not collapsed(-0.5, [-0.2] * 20, f_min=8.5)
+def test_a_small_loss_is_never_a_collapse() -> None:
+    assert not collapsed([-0.08] * 20, f_min=8.5)
+    assert not collapsed([-0.2] * 20, f_min=8.5)
 
 
-def test_the_collapse_boundary_is_inclusive_on_both_conditions() -> None:
-    assert collapsed(10.0, [-5.0] * 20, f_min=10.0)
-    assert not collapsed(10.0, [-4.99] * 20, f_min=10.0)
-    assert not collapsed(10.2, [-5.05] * 20, f_min=10.0)
+def test_the_collapse_boundary_is_inclusive() -> None:
+    assert collapsed([-5.0] * 20, f_min=10.0)
+    assert not collapsed([-4.99] * 20, f_min=10.0)
 
 
 @pytest.mark.parametrize('bad', [math.nan, math.inf])
 def test_a_non_finite_collapse_input_is_an_integrity_failure(bad: float) -> None:
     with pytest.raises(IntegrityFailure):
-        collapsed(bad, [-1.0], f_min=8.5)
+        collapsed([-1.0], f_min=bad)
     with pytest.raises(IntegrityFailure):
-        collapsed(4.0, [-1.0, bad], f_min=8.5)
+        collapsed([-1.0, bad], f_min=8.5)
     with pytest.raises(IntegrityFailure):
-        collapsed(4.0, [], f_min=8.5)
+        collapsed([], f_min=8.5)
 
 
 # -- diagnostics ----------------------------------------------------------------------------------
