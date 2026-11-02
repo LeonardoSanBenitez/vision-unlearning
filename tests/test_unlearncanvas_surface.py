@@ -62,6 +62,7 @@ def test_the_trainer_and_evaluator_defaults_are_the_historical_ones() -> None:
     assert EvaluatorTextToImage.model_fields['noise_seed'].default is None
     assert EvaluatorTextToImage.model_fields['plot_show'].default is True
     assert SalUn.model_fields['save_at_epochs'].default_factory() == []  # type: ignore[misc]
+    assert UnlearnerSpare.model_fields['checkpoint_at_epochs'].default is None
     assert SalUn.model_fields['allow_tf32'].default is False
 
 

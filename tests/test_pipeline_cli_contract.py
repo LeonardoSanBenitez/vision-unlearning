@@ -265,10 +265,12 @@ def test_training_runs_under_the_determinism_regime() -> None:
                for statement in body[:index]), 'unlearner.train() is not preceded by seed_training(...)'
 
 
-@pytest.mark.parametrize('flag', ['--save-at-epochs', '--no-outcome-checks'])
+@pytest.mark.parametrize('flag', ['--save-at-epochs', '--no-outcome-checks', '--checkpoint-at-epochs',
+                                  '--resume-from-checkpoint'])
 def test_the_session_script_can_save_a_ladder_and_skip_outcome_thresholds(flag: str) -> None:
     """Fails on the code before: equalization's one training run per ladder could not save its lower
-    values, and every run was stopped by evaluation thresholds tuned on an earlier corpus."""
+    values, and every run was stopped by evaluation thresholds tuned on an earlier corpus. The two
+    checkpoint flags fail on the code before too: a training longer than a sitting could not be split."""
     assert flag in _flags_declared_by('pipeline_03_unlearn_model.py')
 
 

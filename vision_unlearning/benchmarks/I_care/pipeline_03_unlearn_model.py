@@ -229,6 +229,14 @@ _parser.add_argument("--save-at-epochs", type=int, nargs="+", default=None,
                      help="Trained methods only: also save the weights after each of these epochs, into "
                           "epoch-N (SPARE) or epoch_N (SalUn) inside the model folder, each with its own "
                           "provenance.json. Equalization trains once to the top of a ladder this way.")
+_parser.add_argument("--checkpoint-at-epochs", type=int, nargs="+", default=None,
+                     help="SPARE only: write the whole training state at the end of each of these epochs, into "
+                          "checkpoint-<step> inside the model folder, so a later run can continue from it exactly "
+                          "with --resume-from-checkpoint. A training longer than one sitting runs in segments this way.")
+_parser.add_argument("--resume-from-checkpoint", default=None,
+                     help="SPARE only: the training-state checkpoint (a checkpoint-<step> folder, usually in an "
+                          "earlier segment's model folder) to continue from. The run then trains on to "
+                          "--num-train-epochs exactly as one unbroken run would. Refused if the folder is absent.")
 _parser.add_argument("--no-outcome-checks", action="store_true", default=False,
                      help="Skip the checks of the trained model's runtime and evaluation scores against fixed "
                           "thresholds. Those thresholds were tuned on an earlier corpus; a calibration run at "
@@ -313,7 +321,12 @@ for index in range(index_start, index_start + max_identities):
         uce_erase_scale_override=_args.uce_erase_scale,
         save_at_epochs=_args.save_at_epochs,
         uce_expand_prompts=_args.uce_expand_prompts,
+        checkpoint_at_epochs=_args.checkpoint_at_epochs,
+        resume_from_checkpoint=_args.resume_from_checkpoint,
     )
+    if _args.resume_from_checkpoint is not None and not os.path.isdir(_args.resume_from_checkpoint):
+        raise FileNotFoundError(f'--resume-from-checkpoint {_args.resume_from_checkpoint} is not a folder; '
+                                'a run meant to continue another must not start from scratch')
     if uce_guide_concepts is not None:
         logger.info('UCE guide concept set by the caller to %r (default: the substitute concept)', uce_guide_concepts)
     if _args.train_batch_size is not None or _args.gradient_accumulation_steps is not None:

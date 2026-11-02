@@ -73,6 +73,8 @@ def session_hyperparameters(
     uce_erase_scale_override: Optional[float] = None,
     save_at_epochs: Optional[Sequence[int]] = None,
     uce_expand_prompts: bool = False,
+    checkpoint_at_epochs: Optional[Sequence[int]] = None,
+    resume_from_checkpoint: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return the hyperparameters of one unlearning session.
 
@@ -101,6 +103,12 @@ def session_hyperparameters(
         (``UCE_OBJECT_PHRASINGS``) to the edit and the guide concept, as their ``--expand_prompts``
         does, so the edit also covers the concept inside a phrase such as the benchmark's own
         generation prompt. Refused for every other method.
+    @param checkpoint_at_epochs: low-rank adapter trainers only: write the whole training state at the
+        end of each of these epochs, so a later run can continue from it exactly. A run longer than one
+        sitting on a shared machine trains in segments this way. Refused for every other method.
+    @param resume_from_checkpoint: low-rank adapter trainers only: the training-state checkpoint a run
+        continues from, typically written by an earlier segment into its own output directory. Refused
+        for every other method.
     @raises NotImplementedError: the method has no configuration here.
     """
     forget_prompts, retain_prompts = evaluation_prompts(task, entity)
@@ -141,6 +149,13 @@ def session_hyperparameters(
             raise ValueError('UCE is a closed-form edit; it has no epochs to save at')
         field = 'save_at_epochs' if method == 'salun' else 'save_lora_at_epochs'
         hyperparameters[field] = sorted(set(int(epoch) for epoch in save_at_epochs))
+    for name, setting in (('checkpoint_at_epochs', checkpoint_at_epochs), ('resume_from_checkpoint', resume_from_checkpoint)):
+        if setting is not None and method not in _LORA_METHODS:
+            raise ValueError(f'{name} is a setting of the low-rank adapter trainers; method {method!r} has no such setting')
+    if checkpoint_at_epochs is not None:
+        hyperparameters['checkpoint_at_epochs'] = sorted(set(int(epoch) for epoch in checkpoint_at_epochs))
+    if resume_from_checkpoint is not None:
+        hyperparameters['resume_from_checkpoint'] = resume_from_checkpoint
     return hyperparameters
 
 

@@ -376,6 +376,24 @@ def test_a_trained_method_saves_at_the_requested_epochs(method: str, field: str)
     assert _config('people', method, 'George_W_Bush', save_at_epochs=[400, 50, 100, 50])[field] == [50, 100, 400]
 
 
+def test_spare_writes_and_resumes_its_training_state_when_asked() -> None:
+    """Fails on the code before: no configuration carried a training-state checkpoint or a resume, so a
+    SPARE run longer than one sitting on a shared machine could not be split into segments."""
+    config = _config('breeds', 'distil', 'chihuahua dog', checkpoint_at_epochs=[400, 400],
+                     resume_from_checkpoint='/runs/a/checkpoint-3600')
+    assert config['checkpoint_at_epochs'] == [400]
+    assert config['resume_from_checkpoint'] == '/runs/a/checkpoint-3600'
+    plain = _config('breeds', 'distil', 'chihuahua dog')
+    assert 'checkpoint_at_epochs' not in plain and 'resume_from_checkpoint' not in plain
+
+
+@pytest.mark.parametrize('method', ['uce', 'salun'])
+@pytest.mark.parametrize('setting', [{'checkpoint_at_epochs': [1]}, {'resume_from_checkpoint': '/runs/a/checkpoint-1'}])
+def test_only_the_adapter_trainers_take_a_training_state(method: str, setting: Dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match='low-rank adapter'):
+        _config('people', method, 'Mark_Philippoussis', **setting)
+
+
 def test_uce_has_no_epochs_to_save_at() -> None:
     with pytest.raises(ValueError, match='no epochs'):
         _config('people', 'uce', 'Mark_Philippoussis', save_at_epochs=[1])

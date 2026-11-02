@@ -6,8 +6,8 @@ import shutil
 import time
 from pathlib import Path
 import random
-from typing import List, Literal, Optional, Tuple, Dict, Any
-from pydantic import Field, field_validator
+from typing import Iterator, List, Literal, Optional, Tuple, Dict, Any
+from pydantic import Field, ValidationInfo, field_validator
 from abc import abstractmethod
 from PIL import Image
 import numpy as np
@@ -145,6 +145,13 @@ def epochs_to_save(save_lora_at_epochs: Optional[List[int]], epoch_1based: int) 
     return epoch_1based in save_lora_at_epochs
 
 
+#: The file, inside a training-state checkpoint, that records where the retain loader stood: the
+#: processor generator's state when its current pass began, how many batches of that pass were drawn,
+#: and the loss history so far. The accelerator saves everything else a resume needs; it does not know
+#: the retain loader, which the training loop advances by hand.
+RETAIN_STREAM_FILE = 'retain_stream.pt'
+
+
 class UnlearnerLora(Unlearner):
     '''
     Fine-tuning script for Stable Diffusion for text2image with support for LoRA.
@@ -242,6 +249,7 @@ class UnlearnerLora(Unlearner):
     checkpoints_total_limit: Optional[int] = Field(None, description="Maximum number of checkpoints to store.")
     resume_from_checkpoint: Optional[str] = Field(None, description="Resume training from a previous checkpoint.")
     save_lora_at_epochs: Optional[List[int]] = Field(default=None, description="1-based epoch numbers at which to also save the LoRA adapter into output_dir/epoch-{n}/. None disables (default). Entries must be positive ints; the list is deduplicated and sorted. On resume_from_checkpoint, epochs already passed are not re-saved.")
+    checkpoint_at_epochs: Optional[List[int]] = Field(default=None, description="1-based epoch numbers at whose end the whole training state (adapter, optimizer, learning-rate schedule, every random generator, the retain loader's position and the loss history) is written to output_dir/checkpoint-{global step}/, so that a later run given that directory as resume_from_checkpoint continues exactly where this one stopped, even with a different output_dir and a larger num_train_epochs. None disables (default). Entries must be positive ints; the list is deduplicated and sorted.")
     noise_offset: float = Field(0.0, description="Scale of noise offset.")
 
     # Internal attributes
@@ -271,6 +279,11 @@ class UnlearnerLora(Unlearner):
     # The forget loader drives the epoch; the retain loader is cycled beneath it, which is the
     # standard arrangement for two-loader forget/retain training.
     _train_retain_iterator: Any = None
+    # Where the retain iterator's current pass began (the processor generator's state just before the
+    # iterator was built, which is when the loader draws its shuffle and its worker seeds) and how many of
+    # its batches have been drawn. Together they put a resumed run back on the same pass at the same place.
+    _retain_pass_rng_state: Optional[torch.Tensor] = None
+    _retain_batches_drawn: int = 0
 
     _optimizer: Any = None
     _lr_scheduler: Any = None
@@ -290,19 +303,20 @@ class UnlearnerLora(Unlearner):
     # to disk beside the adapter (`_save_loss_history`).
     _loss_history: List[Dict[str, Any]] = []
 
-    @field_validator('save_lora_at_epochs', mode='before')
+    @field_validator('save_lora_at_epochs', 'checkpoint_at_epochs', mode='before')
     @classmethod
-    def _validate_save_lora_at_epochs(cls, value: Any) -> Optional[List[int]]:
+    def _validate_save_lora_at_epochs(cls, value: Any, info: ValidationInfo) -> Optional[List[int]]:
+        name = info.field_name
         if value is None:
             return None
         if not isinstance(value, (list, tuple)):
-            raise ValueError("save_lora_at_epochs must be a list of positive integers, or None.")
+            raise ValueError(f"{name} must be a list of positive integers, or None.")
         cleaned: List[int] = []
         for item in value:
             if isinstance(item, bool) or not isinstance(item, int):
-                raise ValueError(f"save_lora_at_epochs entries must be int, got {type(item).__name__}: {item!r}")
+                raise ValueError(f"{name} entries must be int, got {type(item).__name__}: {item!r}")
             if item < 1:
-                raise ValueError(f"save_lora_at_epochs entries must be >= 1 (1-based epochs), got {item}")
+                raise ValueError(f"{name} entries must be >= 1 (1-based epochs), got {item}")
             cleaned.append(item)
         return sorted(set(cleaned))
 
@@ -423,11 +437,12 @@ class UnlearnerLora(Unlearner):
         A requested epoch greater than num_train_epochs is a configuration error, not a
         silently-skipped no-op. Called at train-start once num_train_epochs is finalized.
         '''
-        if self.save_lora_at_epochs is not None and max(self.save_lora_at_epochs) > self.num_train_epochs:
-            raise ValueError(
-                f"save_lora_at_epochs requests epoch {max(self.save_lora_at_epochs)}, but training runs only "
-                f"{self.num_train_epochs} epochs; a requested checkpoint beyond training is a configuration error."
-            )
+        for name, epochs in (('save_lora_at_epochs', self.save_lora_at_epochs), ('checkpoint_at_epochs', self.checkpoint_at_epochs)):
+            if epochs is not None and max(epochs) > self.num_train_epochs:
+                raise ValueError(
+                    f"{name} requests epoch {max(epochs)}, but training runs only "
+                    f"{self.num_train_epochs} epochs; a requested checkpoint beyond training is a configuration error."
+                )
 
     def _save_lora_layers_to(self, target_dir: str) -> None:
         '''
@@ -809,8 +824,15 @@ class UnlearnerLora(Unlearner):
         # Potentially load in the weights and states from a previous save
         if self.resume_from_checkpoint:
             path: Optional[str]
+            checkpoint_dir: Optional[str] = None
             if self.resume_from_checkpoint != "latest":
-                path = os.path.basename(self.resume_from_checkpoint)
+                path = os.path.basename(os.path.normpath(self.resume_from_checkpoint))
+                # A checkpoint inside this run's own output directory is named by its directory name, as
+                # before. One written by another run, typically the earlier segment of a run that had to
+                # stop, is given by its path.
+                assert self._output_dir_checkpoints is not None
+                if not os.path.isdir(os.path.join(self._output_dir_checkpoints, path)) and os.path.isdir(self.resume_from_checkpoint):
+                    checkpoint_dir = self.resume_from_checkpoint
             else:
                 # Get the most recent checkpoint
                 dirs = os.listdir(self._output_dir_checkpoints)
@@ -826,8 +848,11 @@ class UnlearnerLora(Unlearner):
                 initial_global_step = 0
             else:
                 assert self._output_dir_checkpoints is not None
-                self._accelerator.print(f"Resuming from checkpoint {path}")
-                self._accelerator.load_state(os.path.join(self._output_dir_checkpoints, path))
+                if checkpoint_dir is None:
+                    checkpoint_dir = os.path.join(self._output_dir_checkpoints, path)
+                self._accelerator.print(f"Resuming from checkpoint {checkpoint_dir}")
+                self._accelerator.load_state(checkpoint_dir)
+                self._restore_retain_stream(checkpoint_dir)
                 global_step = int(path.split("-")[1])
 
                 initial_global_step = global_step
@@ -857,13 +882,7 @@ class UnlearnerLora(Unlearner):
                 # 13 distinct items over five such calls, against 20 when one iterator is advanced.
                 # For the people task (5 forget images, 200 epochs, 495 retain images) that left
                 # about 13 % of the retain set, roughly 65 images, expected never to be seen at all.
-                if self._train_retain_iterator is None:
-                    self._train_retain_iterator = iter(self._train_retain_dataloader)
-                try:
-                    batch_retain = next(self._train_retain_iterator)
-                except StopIteration:
-                    self._train_retain_iterator = iter(self._train_retain_dataloader)
-                    batch_retain = next(self._train_retain_iterator)
+                batch_retain = self._next_retain_batch()
                 # The two sets are rarely a multiple of the batch size apart, so the last batch of
                 # either is short; both are cut to the shorter one, every entry together.
                 min_length = min(len(batch_forget["pixel_values"]), len(batch_retain["pixel_values"]))
@@ -936,8 +955,7 @@ class UnlearnerLora(Unlearner):
                                         removing_checkpoint = os.path.join(self._output_dir_checkpoints, removing_checkpoint)
                                         shutil.rmtree(removing_checkpoint)
 
-                            save_path = os.path.join(self._output_dir_checkpoints, f"checkpoint-{global_step}")  # type: ignore
-                            self._accelerator.save_state(save_path)
+                            save_path = self._save_training_state(global_step)
 
                             unwrapped_unet = unwrap_model(self._unet, self._accelerator)
                             unet_lora_state_dict = convert_state_dict_to_diffusers(
@@ -981,6 +999,83 @@ class UnlearnerLora(Unlearner):
                     # epoch is 0-based; save_lora_at_epochs is 1-based. On resume, epochs before
                     # first_epoch are never entered by this loop, so they are not re-saved.
                     self._save_lora_layers_to(os.path.join(self.output_dir, f"epoch-{epoch + 1}"))
+
+                if epochs_to_save(self.checkpoint_at_epochs, epoch + 1):
+                    self._save_training_state(global_step)
+
+    def _next_retain_batch(self) -> Any:
+        '''The next retain batch, from one iterator held across steps and epochs and restarted when a pass ends.
+
+        Each pass records where it began and how far it has gone, which is what `_save_training_state`
+        writes and `_restore_retain_stream` reads.
+        '''
+        iterator = self._train_retain_iterator if self._train_retain_iterator is not None else self._start_retain_pass()
+        try:
+            batch = next(iterator)
+        except StopIteration:
+            batch = next(self._start_retain_pass())
+        self._retain_batches_drawn += 1
+        return batch
+
+    def _start_retain_pass(self) -> Iterator[Any]:
+        assert self._train_retain_dataloader is not None
+        self._retain_pass_rng_state = torch.get_rng_state()
+        self._retain_batches_drawn = 0
+        self._train_retain_iterator = iter(self._train_retain_dataloader)
+        return self._train_retain_iterator
+
+    def _save_training_state(self, global_step: int) -> str:
+        '''Write everything a resume needs into output_dir/checkpoint-{global_step}/ and return that path.
+
+        The accelerator writes the denoiser, the optimizer, the learning-rate schedule and every random
+        generator; `RETAIN_STREAM_FILE` adds the retain loader's position and the loss history so far.
+        Saving consumes no random numbers, so a run that writes a checkpoint and carries on is the same
+        run as one that does not.
+        '''
+        assert self._accelerator is not None
+        assert self._output_dir_checkpoints is not None
+        save_path = os.path.join(self._output_dir_checkpoints, f"checkpoint-{global_step}")
+        self._accelerator.save_state(save_path)
+        torch.save({
+            'pass_rng_state': self._retain_pass_rng_state,
+            'batches_drawn': self._retain_batches_drawn,
+            'loss_history': self._loss_history,
+        }, os.path.join(save_path, RETAIN_STREAM_FILE))
+        logger.info(f"Saved the training state at step {global_step} to {save_path}")
+        return save_path
+
+    def _restore_retain_stream(self, checkpoint_dir: str) -> None:
+        '''Put the retain loader back where it stood when `checkpoint_dir` was written, and the loss history with it.
+
+        The pass is rebuilt from where it began: the processor generator is set to the state recorded when
+        the pass started, a new iterator is built (drawing the same shuffle and the same worker seeds), and
+        the batches already drawn are drawn again and dropped. Then every generator the replay touched is
+        put back to the checkpoint's state, which `load_state` has just restored, so the run continues on
+        exactly the random numbers the interrupted one would have used next.
+
+        A checkpoint written before the position was recorded has no `RETAIN_STREAM_FILE`: it still
+        resumes, with the retain loader on a fresh pass, which is not the interrupted run's continuation.
+        '''
+        stream_path = os.path.join(checkpoint_dir, RETAIN_STREAM_FILE)
+        if not os.path.isfile(stream_path):
+            logger.warning(
+                f"{checkpoint_dir} has no {RETAIN_STREAM_FILE}: the retain loader starts a fresh pass, so this run "
+                "does not continue the interrupted one exactly."
+            )
+            return
+        stream = torch.load(stream_path, weights_only=True)
+        self._loss_history = list(stream['loss_history'])
+        if stream['pass_rng_state'] is None:
+            return
+        resumed_states = (torch.get_rng_state(), random.getstate(), np.random.get_state())
+        torch.set_rng_state(stream['pass_rng_state'])
+        iterator = self._start_retain_pass()
+        for _ in range(stream['batches_drawn']):
+            next(iterator)
+        self._retain_batches_drawn = stream['batches_drawn']
+        torch.set_rng_state(resumed_states[0])
+        random.setstate(resumed_states[1])
+        np.random.set_state(resumed_states[2])
 
     def evaluate(self) -> List[EvalResult]:
         '''Score the saved adapter against the base model, and write the model card.
