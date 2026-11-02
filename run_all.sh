@@ -28,8 +28,8 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate vision_unlearn_stable
 
 MODEL_PATH="/home/leonardo/soham/huggingface_assets/style50_checkpoints/style50_checkpoints/"
-UPSTREAM_SCRIPT="/home/leonardo/soham/UnlearnCanvas/machine_unlearning/mu_unified_concept_editing_uce/uce_train_erase.py"
 UPSTREAM_WORKDIR="/home/leonardo/soham/UnlearnCanvas/machine_unlearning/mu_unified_concept_editing_uce/"
+UPSTREAM_SCRIPT="$PIPELINE_DIR/uce_train_erase.py"
 MODEL_OUTPUT="/home/leonardo/soham/models"
 DATASET_ROOT="/home/leonardo/soham/huggingface_assets/datasets"
 CLASSIFIER_ROOT="/home/leonardo/soham/huggingface_assets/classifier_checkpoints/classifier_checkpoints"
@@ -72,7 +72,7 @@ for emitter in "${EMITTERS[@]}"; do
   pair_output="$RESULTS_DIR/interferences_caused_by_${emitter}_uce_sd_style50.json"
 
   echo "Running pipeline_03 for $emitter"
-  PYTHONPATH="$PYTHON_PACKAGE_ROOT" python3 \
+  PYTHONPATH="$UPSTREAM_WORKDIR:$PYTHON_PACKAGE_ROOT" python3 \
     "$PIPELINE_DIR/pipeline_03_unlearn_model.py" \
     --emitter "$emitter" \
     --checkpoint "$MODEL_PATH" \

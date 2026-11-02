@@ -138,6 +138,8 @@ def generate_answer_set(
     overwrite: bool = False,
     unet_state_dict_path: Optional[str] = None,
     prefix: str = "off",
+    emitter: Optional[str] = None,
+    method: Optional[cfg.type_unlearning_algorithm] = None,
 ) -> str:
     """Generate answer-set images using one CPU-seeded latent per prompt and seed.
     
@@ -160,7 +162,11 @@ def generate_answer_set(
     prompt_list = prompts if prompts is not None else answer_set_prompts(style)
     output_dir = Path(output_folder)
     output_dir.mkdir(parents=True, exist_ok=True)
-    dataset = GeneratedDataset(base_folder=str(output_dir.parent.parent))
+    dataset = GeneratedDataset(
+        base_folder=str(output_dir.parent.parent),
+        emitter=emitter,
+        method=method,
+    )
     if not overwrite and dataset.exists(seeds, prompt_list):
         return str(output_dir)
 
@@ -255,6 +261,8 @@ def main() -> None:
         overwrite=args.overwrite,
         unet_state_dict_path=args.unet_state_dict,
         prefix=args.prefix,
+        emitter=args.emitter,
+        method=args.method,
     )
     if args.upload_to_hf:
         if not args.hf_token:
