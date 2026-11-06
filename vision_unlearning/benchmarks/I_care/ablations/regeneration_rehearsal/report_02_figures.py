@@ -13,7 +13,9 @@ Reads the campaign assets folder (``--assets``) and writes into ``--output``:
   ``calibration.collect``: per method, every calibration entity's forget effect ``F`` at every measured dial, their
   mean where all five are measured, collapsed read-outs crossed, and ``f_min``;
 * ``contact_{task}_{method}_seed42.png`` (with ``--contact-sheet``) -- the five calibration targets' own prompt at
-  seed 42, the baseline and then every dial the selection file records, each cell titled with its ``F``;
+  seed 42, the baseline and then every dial of the method's ladder and its edge extension, each cell titled with its
+  ``F``; and ``contact_{task}_{method}_off_ladder_seed42.png`` beside it when the selection file also records values
+  off the ladder that are not the extension (UCE's first ladder), which are never selected;
 * ``competence.md`` -- per task, the screen's count, the scale reference, the mean specificity, and the
   entities the screen does not recognise.
 
@@ -203,19 +205,35 @@ def calibration_summary(selection_path: str, output: str) -> str:
     return path
 
 
-def contact_sheet(assets: str, root: str, selection_path: str, method: str, seed: int, output: str) -> str:
+def contact_sheet(assets: str, root: str, selection_path: str, method: str, seed: int, output: str) -> List[str]:
     """The five calibration targets' own prompt at one seed, at every measured dial of one method.
 
-    Columns are the calibration entities in the selection file's order, rows the baseline and then every dial
-    the selection file records for the method; each cell is titled with that read-out's ``F`` and, when it
-    collapsed, the word. An empty cell is a read-out not measured yet.
+    Columns are the calibration entities in the selection file's order, rows the baseline and then every dial of
+    the method's ladder and its edge extension; each cell is titled with that read-out's ``F`` and, when it
+    collapsed, the word. An empty cell is a read-out not measured yet. Values the selection file records off the
+    ladder that are not the extension go to a second sheet, ``..._off_ladder_...``. Returns the paths written.
     """
-    from vision_unlearning.benchmarks.I_care import calibration
-    from vision_unlearning.datasets.testbed import get_generated_dataset_folder
     with open(selection_path, encoding='utf-8') as handle:
         selection = json.load(handle)
-    task, entities = selection['task'], selection['calibration_entities']
     values = sorted(selection['methods'][method]['values'].values(), key=lambda value: value['dial'])
+    extension = (selection.get('extensions') or {}).get(method)
+    on = [value for value in values if value.get('on_ladder', True) or value['dial'] == extension]
+    off = [value for value in values if not (value.get('on_ladder', True) or value['dial'] == extension)]
+    task = selection['task']
+    paths = [_contact_figure(assets, root, selection, method, seed, on, '',
+                             os.path.join(output, f'contact_{task}_{method}_seed{seed}.png'))]
+    if off:
+        paths.append(_contact_figure(assets, root, selection, method, seed, off, ' | values above the ladder, never selected',
+                                     os.path.join(output, f'contact_{task}_{method}_off_ladder_seed{seed}.png')))
+    return paths
+
+
+def _contact_figure(assets: str, root: str, selection: Dict[str, Any], method: str, seed: int,
+                    values: List[Dict[str, Any]], title_suffix: str, path: str) -> str:
+    """One contact sheet: the baseline row, then one row per value in ``values``; see :func:`contact_sheet`."""
+    from vision_unlearning.benchmarks.I_care import calibration
+    from vision_unlearning.datasets.testbed import get_generated_dataset_folder
+    task, entities = selection['task'], selection['calibration_entities']
     figure, axes = plt.subplots(len(values) + 1, len(entities), figsize=(2.2 * len(entities), 2.4 * (len(values) + 1)),
                                 squeeze=False)
     for c, entity in enumerate(entities):
@@ -230,15 +248,16 @@ def contact_sheet(assets: str, root: str, selection_path: str, method: str, seed
             cells.append((folder, 'on', label + (' collapsed' if entity in value['collapsed'] else '')))
         for r, (folder, state, label) in enumerate(cells):
             axis = axes[r][c]
-            path = os.path.join(folder, get_generated_dataset_file(state, seed, prompt))  # type: ignore[arg-type]
-            if os.path.isfile(path):
-                with Image.open(path) as handle:
+            image = os.path.join(folder, get_generated_dataset_file(state, seed, prompt))  # type: ignore[arg-type]
+            if os.path.isfile(image):
+                with Image.open(image) as handle:
                     axis.imshow(np.asarray(handle.convert('RGB')))
             axis.set_title(f'{canonical_entity(task, entity)}\n{label}' if r == 0 else label, fontsize=6)
             axis.axis('off')
     _layout(figure, f'calibration contact sheet | task={task} | method={DISPLAY.get(method, method)} | seed={seed} | '
-                    f'cell = target own prompt | F = mean over 4 seeds of own-prompt CLIP lost', 9)
-    path = os.path.join(output, f'contact_{task}_{method}_seed{seed}.png')
+                    f'cell = target own prompt | F = mean over 4 seeds of own-prompt CLIP lost{title_suffix}', 9)
+    if not os.path.basename(path).startswith('contact_'):  # never write a sheet over one of the images it reads
+        raise ValueError(f'refusing to write a contact sheet to {path}')
     figure.savefig(path, dpi=70)
     plt.close(figure)
     return path
@@ -254,12 +273,14 @@ def main() -> None:
     parser.add_argument('--calibration-summary', nargs='+', metavar='SELECTION_JSON', default=None,
                         help='draw only calibration_<task>.png from each selection file calibration.collect wrote')
     parser.add_argument('--contact-sheet', nargs=3, metavar=('CALIBRATION_ROOT', 'SELECTION_JSON', 'METHOD'), default=None,
-                        help='draw only contact_<task>_<method>_seed42.png: the five calibration targets at every dial')
+                        help='draw only contact_<task>_<method>_seed42.png: the five calibration targets at every dial '
+                             'of the ladder and its extension, and the _off_ladder_ sheet when other values exist')
     args = parser.parse_args()
     os.makedirs(args.output, exist_ok=True)
     if args.contact_sheet is not None:
         root, selection_path, method = args.contact_sheet
-        print(contact_sheet(args.assets, root, selection_path, method, SEEDS[0], args.output))
+        for path in contact_sheet(args.assets, root, selection_path, method, SEEDS[0], args.output):
+            print(path)
         print('FIGURES_DONE')
         return
     if args.calibration_summary is not None:
