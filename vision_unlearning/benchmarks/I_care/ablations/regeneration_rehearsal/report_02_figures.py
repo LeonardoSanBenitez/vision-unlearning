@@ -46,9 +46,14 @@ SEEDS = [42, 43, 44, 45]
 DISPLAY = {'distil': 'spare'}
 
 
-def _layout(figure: Any) -> None:
-    """Tight layout below a fixed band for the figure title, so the title never covers the first row."""
-    figure.tight_layout(rect=(0, 0, 1, 1 - 0.5 / figure.get_figheight()))
+def _layout(figure: Any, title: str, fontsize: float) -> None:
+    """Title centred in a fixed 0.5-inch band at the top, axes laid out below it.
+
+    The band is fixed in inches, so the title never covers the first row however tall the figure grows.
+    """
+    band = 0.5 / figure.get_figheight()
+    figure.suptitle(title, fontsize=fontsize, y=1 - band / 2, va='center')
+    figure.tight_layout(rect=(0, 0, 1, 1 - band))
 
 
 def baseline_sheet(assets: str, task: type_entity_task, seed: int, competence: Dict[str, Any], output: str) -> str:
@@ -62,9 +67,8 @@ def baseline_sheet(assets: str, task: type_entity_task, seed: int, competence: D
         rank = competence['per_image'][name][str(seed)]['rank']
         axis.set_title(f'{canonical_entity(task, name)}\nrank {rank}', fontsize=6)
         axis.axis('off')
-    figure.suptitle(f'{task} baseline | seed={seed} | entities={len(names)} | batch=8 | noise=per_image_processor | '
-                    f'rank = own prompt among the {len(names)} prompts, 1 highest', fontsize=10)
-    _layout(figure)
+    _layout(figure, f'{task} baseline | seed={seed} | entities={len(names)} | batch=8 | noise=per_image_processor | '
+                    f'rank = own prompt among the {len(names)} prompts, 1 highest', 10)
     path = os.path.join(output, f'baseline_{task}_seed{seed}.png')
     figure.savefig(path, dpi=70)
     plt.close(figure)
@@ -90,8 +94,7 @@ def competence_figure(task: str, competence: Dict[str, Any], output: str) -> str
     right.set_ylabel('images')
     right.set_title(f'n={len(specificities)} images | mean {competence["mean_specificity"]:.3f} | '
                     f'f_min = half the mean = {f_min:.3f} (red)', fontsize=9)
-    figure.suptitle(f'baseline competence | task={task} | scorer=CLIP ViT-B/16 | seeds={competence["seeds"]}', fontsize=10)
-    _layout(figure)
+    _layout(figure, f'baseline competence | task={task} | scorer=CLIP ViT-B/16 | seeds={competence["seeds"]}', 10)
     path = os.path.join(output, f'competence_{task}.png')
     figure.savefig(path, dpi=90)
     plt.close(figure)
@@ -132,9 +135,8 @@ def ladder_targets(assets: str, root: str, task: type_entity_task, method: str, 
             title = f'{label} seed={seed}' if effect is None else f'{label} F={effect:.2f} seed={seed}'
             axis.set_title(title, fontsize=6)
             axis.axis('off')
-    figure.suptitle(f'calibration | task={task} | method={DISPLAY.get(method, method)} | target={canonical_entity(task, entity)} | '
-                    f'F = mean over seeds of own-prompt CLIP lost (row)', fontsize=9)
-    _layout(figure)
+    _layout(figure, f'calibration | task={task} | method={DISPLAY.get(method, method)} | target={canonical_entity(task, entity)} | '
+                    f'F = mean over seeds of own-prompt CLIP lost (row)', 9)
     path = os.path.join(output, f'ladder_{task}_{method}_{entity}.png')
     figure.savefig(path, dpi=80)
     plt.close(figure)
@@ -228,9 +230,8 @@ def contact_sheet(assets: str, root: str, selection_path: str, method: str, seed
                     axis.imshow(np.asarray(handle.convert('RGB')))
             axis.set_title(f'{canonical_entity(task, entity)}\n{label}' if r == 0 else label, fontsize=6)
             axis.axis('off')
-    figure.suptitle(f'calibration contact sheet | task={task} | method={DISPLAY.get(method, method)} | seed={seed} | '
-                    f'cell = target own prompt | F = mean over 4 seeds of own-prompt CLIP lost', fontsize=9)
-    _layout(figure)
+    _layout(figure, f'calibration contact sheet | task={task} | method={DISPLAY.get(method, method)} | seed={seed} | '
+                    f'cell = target own prompt | F = mean over 4 seeds of own-prompt CLIP lost', 9)
     path = os.path.join(output, f'contact_{task}_{method}_seed{seed}.png')
     figure.savefig(path, dpi=70)
     plt.close(figure)
