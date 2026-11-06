@@ -186,8 +186,14 @@ def calibration_summary(selection_path: str, output: str) -> str:
                        and all(v is not None for v in value['effects'].values()))
         axis.set_title(f'{DISPLAY.get(method, method)}\ndials={len(dials)} | measured on all five={measured} | usable={usable}',
                        fontsize=9)
-    handles, labels = axes[0][0].get_legend_handles_labels()
-    figure.legend(handles, labels, loc='lower center', ncol=len(labels), fontsize=8)
+    # One legend for the figure, from every panel: an entity measured by only some methods is still named.
+    found: Dict[str, Any] = {}
+    for axis in axes[0]:
+        for handle, label in zip(*axis.get_legend_handles_labels()):
+            found.setdefault(label, handle)
+    names = [canonical_entity(task, entity) for entity in entities]
+    labels = [label for label in names if label in found] + [label for label in found if label not in names]
+    figure.legend([found[label] for label in labels], labels, loc='lower center', ncol=len(labels), fontsize=8)
     figure.suptitle(f'calibration | task={task} | entities={len(entities)} | f_min={f_min:.2f} | '
                     f'collapsed = receivers lose at least half of f_min', fontsize=10)
     figure.tight_layout(rect=(0, 0.07, 1, 1 - 0.5 / figure.get_figheight()))
