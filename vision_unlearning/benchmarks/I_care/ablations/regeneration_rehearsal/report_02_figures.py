@@ -223,7 +223,7 @@ def contact_sheet(assets: str, root: str, selection_path: str, method: str, seed
     paths = [_contact_figure(assets, root, selection, method, seed, on, '',
                              os.path.join(output, f'contact_{task}_{method}_seed{seed}.png'))]
     if off:
-        paths.append(_contact_figure(assets, root, selection, method, seed, off, ' | values above the ladder, never selected',
+        paths.append(_contact_figure(assets, root, selection, method, seed, off, '\nvalues above the ladder, never selected',
                                      os.path.join(output, f'contact_{task}_{method}_off_ladder_seed{seed}.png')))
     return paths
 
