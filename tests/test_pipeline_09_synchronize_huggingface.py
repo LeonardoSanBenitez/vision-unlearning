@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from vision_unlearning.benchmarks.I_care.configuration import unlearning_algorithm_to_epochs
 from vision_unlearning.benchmarks.I_care.pipeline_09_synchronize_huggingface import (
     RemoteSnapshot,
     _count_in_ancestors,
@@ -76,7 +77,8 @@ class TestEnumerateItems:
     def test_epochs_resolved_from_configuration(self) -> None:
         items = _items(["embeddings"], methods=["distil"])
         entity = [i for i in items if i.name != "original"][0]
-        assert entity.remote_path.endswith("_distil_400.json")  # people/distil = 400 epochs
+        epochs = unlearning_algorithm_to_epochs["people"]["distil"]
+        assert entity.remote_path.endswith(f"_distil_{epochs:03d}.json")
         items_uce = _items(["embeddings"], methods=["uce"])
         entity_uce = [i for i in items_uce if i.name != "original"][0]
         assert entity_uce.remote_path.endswith("_uce_000.json")
@@ -106,8 +108,9 @@ class TestEnumerateItems:
 
     def test_interference_per_pair_paths(self) -> None:
         items = _items(["interference-per-pair"], methods=["distil"])
-        assert items[0].remote_path == "datasets/interferences_caused_by_people_0_distil_400.json"
-        assert items[1].remote_path == "datasets/interferences_caused_by_people_1_distil_400.json"
+        epochs = unlearning_algorithm_to_epochs["people"]["distil"]
+        assert items[0].remote_path == f"datasets/interferences_caused_by_people_0_distil_{epochs}.json"
+        assert items[1].remote_path == f"datasets/interferences_caused_by_people_1_distil_{epochs}.json"
 
     def test_max_identities_and_index_start(self) -> None:
         items = _items(["models"], index_start=1, max_identities=5)

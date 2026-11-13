@@ -65,6 +65,43 @@ class TestRegistryCompletenessAgainstLiterals:
                 assert isinstance(epochs, int) and epochs >= 0, f'{task}/{method} = {epochs!r}'
 
 
+class TestCampaignSettings:
+    """The settings the regeneration campaign trains with are the equalization's final selection.
+
+    Each value below is the selected dial of one method on one task, read from that task's final
+    selection file; every one of them is on the method's ladder or is the one edge value the selection
+    added (`equalization.ladder`, `equalization.edge_extensions`). They are written out here, not
+    recomputed, because the selection reads measurements that do not ship with the library: what this
+    test protects is that the campaign does not silently train at anything else.
+    """
+
+    SELECTED_UCE_ERASE_SCALE = {'people': 2.0 ** -4, 'scenes': 2.0 ** -7, 'breeds': 8.0}
+    SELECTED_EPOCHS = {
+        'people': {'distil': 50, 'salun': 400},
+        'scenes': {'distil': 50, 'salun': 200},
+        'breeds': {'distil': 1600, 'salun': 6},
+    }
+
+    def test_uce_erase_scale_is_the_selected_one(self) -> None:
+        assert config.uce_erase_scale == self.SELECTED_UCE_ERASE_SCALE
+
+    def test_trained_methods_epochs_are_the_selected_ones(self) -> None:
+        for task, per_method in self.SELECTED_EPOCHS.items():
+            for method, epochs in per_method.items():
+                assert config.unlearning_algorithm_to_epochs[task][method] == epochs, f'{task}/{method}'
+
+    def test_selected_values_lie_on_the_ladders_or_their_one_extension(self) -> None:
+        from vision_unlearning.benchmarks.I_care.equalization import ladder
+
+        for task, scale in self.SELECTED_UCE_ERASE_SCALE.items():
+            rungs = ladder(task, 'uce')
+            assert scale in rungs or scale in (rungs[0] / 2, rungs[-1] * 2), f'{task}/uce {scale}'
+        for task, per_method in self.SELECTED_EPOCHS.items():
+            for method, epochs in per_method.items():
+                rungs = ladder(task, method)
+                assert epochs in rungs or epochs in (max(1, round(rungs[0] / 2)), rungs[-1] * 2), f'{task}/{method}'
+
+
 class TestDerivedValuesMatchRegistries:
     """`domain_*` / `*_to_direction` / `GUI_TO_BACKEND` are derived -- spot-check the derivation
     logic itself (byte-identical-to-pre-refactor is verified separately, ad hoc, against git

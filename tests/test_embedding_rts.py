@@ -21,6 +21,11 @@ import pytest  # noqa: E402
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 from vision_unlearning.artifact import ArtifactNotAvailableError  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
+from vision_unlearning.benchmarks.I_care.configuration import unlearning_algorithm_to_epochs  # noqa: E402
+
+#: The epoch segment of every people/distil fixture filename: the code under test builds the name from
+#: configuration, so a hardcoded count would only match while the table happened to hold it.
+PEOPLE_DISTIL_EPOCHS: int = unlearning_algorithm_to_epochs['people']['distil']
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +253,7 @@ class TestEmbeddingUnlearningProfileCompute:
         """Minimal compute run with fake data."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
 
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
@@ -297,7 +302,7 @@ class TestEmbeddingUnlearningProfileCompute:
         """With large shift on forgotten entity and an IPE file providing the ratio, ratio > 1."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
 
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
@@ -339,7 +344,7 @@ class TestEmbeddingUnlearningProfileCompute:
         """
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
 
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
@@ -374,7 +379,7 @@ class TestEmbeddingUnlearningProfileCompute:
         """When IPE file has the ratio column, ratio_source must be 'ipe'."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
 
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
@@ -428,7 +433,7 @@ class TestEmbeddingUnlearningProfileCompute:
     def test_missing_entity_file_raises(self, tmp_path: Any) -> None:
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         _write_baseline_file(tmp_path, task, method, epochs)
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         original_epochs = rt_mod.unlearning_algorithm_to_epochs
@@ -452,7 +457,7 @@ class TestEmbeddingUnlearningProfileCompute:
         """When an Mp file exists for this entity, mp_clip_diffs should have non-NaN values."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
 
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
@@ -495,7 +500,7 @@ class TestEmbeddingUnlearningProfileCompute:
         """When the Mp file does not exist, mp_clip_diffs must be all-NaN (not an error)."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
 
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
@@ -534,7 +539,7 @@ class TestEmbeddingUnlearningProfileCompute:
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         _write_baseline_file(tmp_path, task, method, epochs)
 
         # Write an entity file that is missing one entity ('Eve') relative to the baseline.
@@ -660,7 +665,7 @@ class TestEmbeddingUnlearningProfileClipDiffNormalization:
         The EUP must normalize so clip_diffs are non-NaN."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         # Entities: embedding files record them with SPACES, IPE stores them with UNDERSCORES.
         entities_with_spaces = ["Alice Smith", "Bob Jones", "Carol Doe", "Dave Lee", "Eve Fox"]
         forgotten_entity_space = "Alice Smith"
@@ -734,7 +739,7 @@ class TestEmbeddingUnlearningProfilePlot:
     def test_plot_runs_without_error(self, tmp_path: Any) -> None:
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         _write_baseline_file(tmp_path, task, method, epochs)
         _write_entity_file(tmp_path, task, FORGOTTEN_ENTITY, method, epochs)
 
@@ -796,7 +801,7 @@ class TestEmbeddingForgettingEfficiencyCompute:
         """Minimal compute run: requires IPE file with embedding_specificity_ratio column."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         # Write IPE with both ratio and clip_diff columns
         _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
@@ -829,7 +834,7 @@ class TestEmbeddingForgettingEfficiencyCompute:
         """n_valid must equal the number of entities with non-NaN ratios."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         # Write IPE where only 3 of 5 entities have a non-NaN ratio
         col_clip = f"metric_{method}_{epochs}_emitter_average_clip_diff (↑)"
         col_ratio = f"metric_{method}_{epochs}_embedding_specificity_ratio (↑)"
@@ -870,7 +875,7 @@ class TestEmbeddingForgettingEfficiencyCompute:
         """Values in result must match what was written to IPE, not be recomputed."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
@@ -918,7 +923,7 @@ class TestEmbeddingForgettingEfficiencyCompute:
         """IPE present but no embedding_specificity_ratio column → FileNotFoundError."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         # Write IPE without ratio column
         _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=False)
 
@@ -938,7 +943,7 @@ class TestEmbeddingForgettingEfficiencyCompute:
     def test_permutation_p_value_in_range(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
@@ -958,7 +963,7 @@ class TestEmbeddingForgettingEfficiencyCompute:
     def test_metadata_contains_references(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod
@@ -986,7 +991,7 @@ class TestEmbeddingForgettingEfficiencyNValid:
         """n_valid must equal n_entities when all entities have a non-NaN ratio."""
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         # All ENTITIES have a valid ratio (no missing values)
         _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
@@ -1012,7 +1017,7 @@ class TestEmbeddingForgettingEfficiencyPlot:
     def test_plot_runs_without_error(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         task = "people"
         method = "distil"
-        epochs = 400
+        epochs = PEOPLE_DISTIL_EPOCHS
         _write_interference_per_entity(tmp_path, task, method, epochs, include_ratio=True)
 
         import vision_unlearning.benchmarks.I_care.result_templates as rt_mod

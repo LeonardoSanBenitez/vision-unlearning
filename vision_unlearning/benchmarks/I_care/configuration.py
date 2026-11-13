@@ -845,13 +845,13 @@ GENERATION_NOISE: type_noise = 'per_image_processor'
 GENERATION_BATCH_SIZE: int = 8
 
 # UCE's strength dial (`erase_scale`) per task, at its reference ridge (`lamb` 0.5) and with the
-# task's other entities as its preserve set. Equalization sweeps `c * 2**k` around these values and
-# replaces them with the selected ones; until it has, they are the centres of its ladders and record
-# no equalization result.
+# task's other entities as its preserve set: the value equalization selected on each task's ladder
+# (`equalization.ladder`, `2**k`). People and scenes take UCE's largest value at which the model still
+# works; breeds the value of the selected triplet.
 uce_erase_scale: Dict[str, float] = {
-    'people': 1500.0,
-    'scenes': 1500.0,
-    'breeds': 1150.0,
+    'people': 2.0 ** -4,
+    'scenes': 2.0 ** -7,
+    'breeds': 8.0,
 }
 
 
@@ -867,35 +867,28 @@ uce_erase_scale: Dict[str, float] = {
 # is present: `salun` was added to the library after the first campaign and was missing here for a while,
 # so every artifact lookup for it raised `KeyError` instead of returning a name.
 #
-# salun MIRRORS distil per task -- 100/100/400, not a number of its own. It is provisional and is the
-# uniform choice rather than the measured one: salun has never been run across the benchmark, so no
-# equalization result exists to fill it with, and matching SPARE keeps the two trained methods on the
-# same budget while the corpus is regenerated. The SalUn strength-dial study measured saturation
-# between 50 and 100 epochs for `people` only, over three entities, which is not a basis for a
-# per-task number for the other two.
-#
-# THE REAL NUMBER IS SET DURING EQUALIZATION, and every one of these rows is then re-decided, not just
-# salun's: the first equalization did not bring the methods to a common operating point, so epochs and
-# hyperparameters are redefined for all methods together. Until then, treat a salun epoch count as a
-# placeholder that happens to be SPARE's, and note that changing it renames every salun artifact.
+# distil and salun are the epoch counts equalization selected per task, each on the method's ladder
+# (`equalization.ladder`) or the one value its edge pass added (breeds distil, 1600). They differ from
+# the first campaign's, so every distil and salun artifact of the regenerated corpus is named with them.
+# munba was not part of the equalization and keeps the first campaign's counts.
 unlearning_algorithm_to_epochs = {
     'breeds': {
-        'distil': 100,
+        'distil': 1600,
         'munba': 50,
         'uce': 0,
-        'salun': 100,  # provisional: mirrors distil, re-decided during equalization
+        'salun': 6,
     },
     'scenes': {
-        'distil': 100,
+        'distil': 50,
         'munba': 100,
         'uce': 0,
-        'salun': 100,  # provisional: mirrors distil, re-decided during equalization
+        'salun': 200,
     },
     'people': {
-        'distil': 400,
+        'distil': 50,
         'munba': 200,
         'uce': 0,
-        'salun': 400,  # provisional: mirrors distil, re-decided during equalization
+        'salun': 400,
     },
 }
 

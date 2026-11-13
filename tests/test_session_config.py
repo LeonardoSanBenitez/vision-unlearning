@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 import pytest
 
 from vision_unlearning.benchmarks.I_care import session_config
+from vision_unlearning.benchmarks.I_care.configuration import uce_erase_scale
 from vision_unlearning.benchmarks.I_care.prompts import evaluation_prompts
 from vision_unlearning.datasets.entity_names import canonical_entity, substitute_concept
 
@@ -64,7 +65,7 @@ class TestUce:
             'final_eval_prompts_retain': retain,
             'evaluation_noise_seed': 42,
             'pretrained_model_name_or_path': _MODEL,
-            'erase_scale': {'people': 1500.0, 'scenes': 1500.0, 'breeds': 1150.0}[task],
+            'erase_scale': uce_erase_scale[task],
             'preserve_scale': 0.5,     # max(0.1, 1/2) for the two retained entities of this fixture
             'lamb': 0.5,
             'edit_concepts': canonical_entity(task, entity),  # type: ignore[arg-type]

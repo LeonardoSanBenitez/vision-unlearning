@@ -29,6 +29,11 @@ import pytest  # noqa: E402
 import vision_unlearning.benchmarks.I_care as vb  # noqa: E402
 from vision_unlearning.artifact import ArtifactNotAvailableError  # noqa: E402
 import vision_unlearning.benchmarks.I_care.result_templates as _rt_mod  # noqa: E402
+from vision_unlearning.benchmarks.I_care.configuration import unlearning_algorithm_to_epochs  # noqa: E402
+
+#: The epoch segment of every people/distil fixture filename: the code under test builds the name from
+#: configuration, so a hardcoded count would only match while the table happened to hold it.
+PEOPLE_DISTIL_EPOCHS: int = unlearning_algorithm_to_epochs['people']['distil']
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +112,7 @@ def _write_embedding_file(
         )
 
 
-def _write_baseline(tmp_path: Any, task: str = "people", method: str = "distil", epochs: int = 400) -> None:
+def _write_baseline(tmp_path: Any, task: str = "people", method: str = "distil", epochs: int = PEOPLE_DISTIL_EPOCHS) -> None:
     # Canonical, method-agnostic baseline name — the only name the RT reads now that the
     # per-method fallback has been removed.
     fname = f"embeddings_{task}_original.json"
@@ -117,7 +122,7 @@ def _write_baseline(tmp_path: Any, task: str = "people", method: str = "distil",
     )
 
 
-def _write_baseline_legacy(tmp_path: Any, task: str = "people", method: str = "distil", epochs: int = 400) -> None:
+def _write_baseline_legacy(tmp_path: Any, task: str = "people", method: str = "distil", epochs: int = PEOPLE_DISTIL_EPOCHS) -> None:
     """Write the OBSOLETE per-method baseline name, for the negative test only."""
     fname = f"embeddings_{task}_original_{method}_{epochs:03d}.json"
     _write_embedding_file(
@@ -130,7 +135,7 @@ def _write_entity_files(
     tmp_path: Any,
     task: str = "people",
     method: str = "distil",
-    epochs: int = 400,
+    epochs: int = PEOPLE_DISTIL_EPOCHS,
     lora_state: str = "on",
 ) -> None:
     """Write one per-entity embedding file for each entity in ENTITIES."""
@@ -519,7 +524,7 @@ class TestComputeFromScratch:
         _write_baseline(tmp_path)
         # Write only 3 of 6 entity files
         for entity in ENTITIES[:3]:
-            fname = f"embeddings_people_{entity}_distil_400.json"
+            fname = f"embeddings_people_{entity}_distil_{PEOPLE_DISTIL_EPOCHS:03d}.json"
             _write_embedding_file(
                 str(tmp_path / "datasets" / fname),
                 ENTITIES,
