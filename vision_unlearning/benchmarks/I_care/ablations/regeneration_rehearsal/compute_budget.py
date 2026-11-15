@@ -24,9 +24,10 @@ training: its closed-form edit is inside the rehearsal's ``pipeline_03`` time. E
 sessions and one control session. Uploads are not included.
 
 Usage:
-    python compute_budget.py --units DIR --s2-costs FILE --output DIR [--min-steps N]
+    python compute_budget.py --units DIR --s2-costs FILE --output DIR [--min-steps N] [--epochs TASK/METHOD=N ...]
 
-Writes ``budget.json`` (every input rate and every computed number) and ``budget.md`` (the tables) into
+``--epochs breeds/distil=800`` prices an alternative setting with the same measured rates; give it a separate
+``--output`` so the budget of the configuration is not overwritten. Writes ``budget.json`` (every input rate and every computed number) and ``budget.md`` (the tables) into
 ``--output``, prints the tables, then ``BUDGET_DONE``. Exit 1 with ``BUDGET_FAILED <reason>`` if a trained
 (task, method) has no measured rate.
 """
@@ -186,9 +187,20 @@ def main() -> None:
     parser.add_argument('--output', type=Path, required=True, help='folder for budget.json and budget.md')
     parser.add_argument('--min-steps', type=int, default=1000, help='shortest training counted in a rate')
     parser.add_argument('--configuration', default='vision_unlearning.benchmarks.I_care.configuration')
+    parser.add_argument('--epochs', action='append', default=[], metavar='TASK/METHOD=N',
+                        help='price an alternative: use N epochs for that pair instead of the configuration (repeatable)')
     args = parser.parse_args()
 
-    epochs: Dict[str, Dict[str, int]] = import_module(args.configuration).unlearning_algorithm_to_epochs
+    configured: Dict[str, Dict[str, int]] = import_module(args.configuration).unlearning_algorithm_to_epochs
+    epochs = {task: dict(by_method) for task, by_method in configured.items()}
+    for override in args.epochs:
+        pair, _, value = override.partition('=')
+        task, _, method = pair.partition('/')
+        if task not in epochs or method not in epochs[task] or not value.isdigit():
+            print(f'BUDGET_FAILED --epochs {override!r} is not TASK/METHOD=N for a configured pair')
+            sys.exit(1)
+        epochs[task][method] = int(value)
+        print(f'ALTERNATIVE {task}/{method}: {value} epochs instead of {configured[task][method]}')
     units = [u for u in (parse_unit(p) for p in sorted(args.units.glob('*.log'))) if u is not None]
     costs: List[Dict[str, float]] = json.loads(args.s2_costs.read_text(encoding='utf-8'))
 
