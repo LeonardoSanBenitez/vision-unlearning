@@ -1,0 +1,428 @@
+{
+  "Abstractionism": {
+    "accuracy": 0.0,
+    "target_probability": 0.0033809797195377377,
+    "accuracy_diff": -1.0,
+    "target_probability_diff": -0.9934897657009182
+  },
+  "Artist_Sketch": {
+    "accuracy": 0.99,
+    "target_probability": 0.9817248816043138,
+    "accuracy_diff": -0.010000000000000009,
+    "target_probability_diff": -0.01055065624415874
+  },
+  "Blossom_Season": {
+    "accuracy": 1.0,
+    "target_probability": 0.9998968327045441,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -5.138516426028694e-06
+  },
+  "Bricks": {
+    "accuracy": 1.0,
+    "target_probability": 0.9903725266456604,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.0031788122653960693
+  },
+  "Byzantine": {
+    "accuracy": 1.0,
+    "target_probability": 0.9998558062314987,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -4.517495632172519e-05
+  },
+  "Cartoon": {
+    "accuracy": 0.96,
+    "target_probability": 0.9457104622584303,
+    "accuracy_diff": 0.020000000000000018,
+    "target_probability_diff": 0.01522411719080996
+  },
+  "Cold_Warm": {
+    "accuracy": 0.9,
+    "target_probability": 0.8700319257797673,
+    "accuracy_diff": 0.020000000000000018,
+    "target_probability_diff": -0.0027249710611068068
+  },
+  "Color_Fantasy": {
+    "accuracy": 0.94,
+    "target_probability": 0.9179066637926735,
+    "accuracy_diff": -0.010000000000000009,
+    "target_probability_diff": -0.01779270185739734
+  },
+  "Comic_Etch": {
+    "accuracy": 1.0,
+    "target_probability": 0.9919502913951874,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.00025037884712220126
+  },
+  "Crayon": {
+    "accuracy": 1.0,
+    "target_probability": 0.98483971118927,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.006320115923881486
+  },
+  "Cubism": {
+    "accuracy": 0.98,
+    "target_probability": 0.9744270089268684,
+    "accuracy_diff": -0.010000000000000009,
+    "target_probability_diff": -0.008844454586505957
+  },
+  "Dadaism": {
+    "accuracy": 1.0,
+    "target_probability": 0.9929871320724487,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.002960823178291383
+  },
+  "Dapple": {
+    "accuracy": 1.0,
+    "target_probability": 0.9987296611070633,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.0001240217685699596
+  },
+  "Defoliation": {
+    "accuracy": 1.0,
+    "target_probability": 0.9973967522382736,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.000557072162628125
+  },
+  "Early_Autumn": {
+    "accuracy": 1.0,
+    "target_probability": 0.9996828663349152,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.000198842287063572
+  },
+  "Expressionism": {
+    "accuracy": 1.0,
+    "target_probability": 0.9997756403684616,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.0006437993049620561
+  },
+  "Fauvism": {
+    "accuracy": 0.93,
+    "target_probability": 0.9153657669370295,
+    "accuracy_diff": 0.010000000000000009,
+    "target_probability_diff": 0.014640962576959238
+  },
+  "French": {
+    "accuracy": 0.99,
+    "target_probability": 0.9849003353714942,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.005521157085895623
+  },
+  "Glowing_Sunset": {
+    "accuracy": 1.0,
+    "target_probability": 0.9995476913452148,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.00038606941699981245
+  },
+  "Gorgeous_Love": {
+    "accuracy": 1.0,
+    "target_probability": 0.9982119053602219,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 7.224380970005662e-05
+  },
+  "Greenfield": {
+    "accuracy": 0.99,
+    "target_probability": 0.9904939523339271,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -4.887491464622418e-05
+  },
+  "Impressionism": {
+    "accuracy": 1.0,
+    "target_probability": 0.9988559466600418,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.000496839284896855
+  },
+  "Ink_Art": {
+    "accuracy": 0.98,
+    "target_probability": 0.966845597885549,
+    "accuracy_diff": -0.010000000000000009,
+    "target_probability_diff": -0.017367723463103224
+  },
+  "Joy": {
+    "accuracy": 0.93,
+    "target_probability": 0.9291714252484963,
+    "accuracy_diff": -0.039999999999999925,
+    "target_probability_diff": -0.040985663090832514
+  },
+  "Liquid_Dreams": {
+    "accuracy": 1.0,
+    "target_probability": 0.9993452370166779,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.00021294832229612481
+  },
+  "Magic_Cube": {
+    "accuracy": 1.0,
+    "target_probability": 0.9892742192745209,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.008003463149070744
+  },
+  "Meta_Physics": {
+    "accuracy": 0.97,
+    "target_probability": 0.9526793444156647,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.00015761937946079385
+  },
+  "Meteor_Shower": {
+    "accuracy": 1.0,
+    "target_probability": 0.9947904938459396,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.0064335796236991705
+  },
+  "Monet": {
+    "accuracy": 1.0,
+    "target_probability": 0.9991432243585586,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.00019423425197606647
+  },
+  "Mosaic": {
+    "accuracy": 1.0,
+    "target_probability": 0.9949508565664291,
+    "accuracy_diff": 0.020000000000000018,
+    "target_probability_diff": 0.0195672635734081
+  },
+  "Neon_Lines": {
+    "accuracy": 0.87,
+    "target_probability": 0.8286935034951602,
+    "accuracy_diff": 0.010000000000000009,
+    "target_probability_diff": -0.004092362966766849
+  },
+  "On_Fire": {
+    "accuracy": 1.0,
+    "target_probability": 0.9999702477455139,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 2.3381114006015835e-05
+  },
+  "Pastel": {
+    "accuracy": 1.0,
+    "target_probability": 0.9958703750371933,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.003001340031623889
+  },
+  "Pencil_Drawing": {
+    "accuracy": 1.0,
+    "target_probability": 0.9732258465886116,
+    "accuracy_diff": 0.010000000000000009,
+    "target_probability_diff": -0.005565458685159785
+  },
+  "Picasso": {
+    "accuracy": 1.0,
+    "target_probability": 0.9999148660898208,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 1.1392831802292669e-05
+  },
+  "Pop_Art": {
+    "accuracy": 0.99,
+    "target_probability": 0.9867024034261703,
+    "accuracy_diff": -0.010000000000000009,
+    "target_probability_diff": 0.0003861355781554776
+  },
+  "Red_Blue_Ink": {
+    "accuracy": 1.0,
+    "target_probability": 0.9964254766702652,
+    "accuracy_diff": 0.010000000000000009,
+    "target_probability_diff": 0.00813397645950309
+  },
+  "Rust": {
+    "accuracy": 1.0,
+    "target_probability": 0.9915624928474426,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.004224069118499818
+  },
+  "Seed_Images": {
+    "accuracy": 0.07,
+    "target_probability": 0.06067155497733495,
+    "accuracy_diff": 0.05,
+    "target_probability_diff": 0.03554143060028821
+  },
+  "Sketch": {
+    "accuracy": 0.98,
+    "target_probability": 0.9703244077134877,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.00090593691915275
+  },
+  "Sponge_Dabbed": {
+    "accuracy": 1.0,
+    "target_probability": 0.9983216470479965,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.00042116820812221345
+  },
+  "Structuralism": {
+    "accuracy": 0.99,
+    "target_probability": 0.9933595675230026,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.00045459508895873135
+  },
+  "Superstring": {
+    "accuracy": 1.0,
+    "target_probability": 0.9999046921730042,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -4.793584346773905e-05
+  },
+  "Surrealism": {
+    "accuracy": 0.99,
+    "target_probability": 0.9802410316467285,
+    "accuracy_diff": -0.010000000000000009,
+    "target_probability_diff": -0.0038795763254165783
+  },
+  "Ukiyoe": {
+    "accuracy": 0.99,
+    "target_probability": 0.9820840004086494,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.007021910846233381
+  },
+  "Van_Gogh": {
+    "accuracy": 1.0,
+    "target_probability": 0.9946248859167099,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 7.746577262879306e-05
+  },
+  "Vibrant_Flow": {
+    "accuracy": 1.0,
+    "target_probability": 0.9999066162109375,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -3.082275390631217e-05
+  },
+  "Warm_Love": {
+    "accuracy": 0.93,
+    "target_probability": 0.9124522656574845,
+    "accuracy_diff": -0.019999999999999907,
+    "target_probability_diff": -0.021120694018900377
+  },
+  "Warm_Smear": {
+    "accuracy": 0.99,
+    "target_probability": 0.9820630314946175,
+    "accuracy_diff": -0.010000000000000009,
+    "target_probability_diff": -0.017641706764698006
+  },
+  "Watercolor": {
+    "accuracy": 0.98,
+    "target_probability": 0.9675926055735908,
+    "accuracy_diff": 0.010000000000000009,
+    "target_probability_diff": 0.007720365000423057
+  },
+  "Winter": {
+    "accuracy": 1.0,
+    "target_probability": 0.9876918065547943,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.0033879560232162875
+  },
+  "Architectures": {
+    "accuracy": 0.996078431372549,
+    "target_probability": 0.9903785402283949,
+    "accuracy_diff": 0.0039215686274509665,
+    "target_probability_diff": 0.0027778496929243834
+  },
+  "Bears": {
+    "accuracy": 0.9686274509803922,
+    "target_probability": 0.9623207355819771,
+    "accuracy_diff": -0.007843137254901933,
+    "target_probability_diff": -0.006157476529501826
+  },
+  "Birds": {
+    "accuracy": 0.9686274509803922,
+    "target_probability": 0.9610745363019626,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 2.9650737768838198e-05
+  },
+  "Butterfly": {
+    "accuracy": 0.996078431372549,
+    "target_probability": 0.9934770252190385,
+    "accuracy_diff": -0.0039215686274509665,
+    "target_probability_diff": -0.0029003454189674427
+  },
+  "Cats": {
+    "accuracy": 1.0,
+    "target_probability": 0.9969178227817311,
+    "accuracy_diff": 0.0039215686274509665,
+    "target_probability_diff": 0.002777645159877995
+  },
+  "Dogs": {
+    "accuracy": 1.0,
+    "target_probability": 0.9985906636013704,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 8.336936726283106e-05
+  },
+  "Fishes": {
+    "accuracy": 0.984313725490196,
+    "target_probability": 0.9821011315136418,
+    "accuracy_diff": -0.01176470588235301,
+    "target_probability_diff": -0.008066278385619352
+  },
+  "Flame": {
+    "accuracy": 0.996078431372549,
+    "target_probability": 0.9935463630685619,
+    "accuracy_diff": 0.0039215686274509665,
+    "target_probability_diff": 0.001969865760674705
+  },
+  "Flowers": {
+    "accuracy": 0.9686274509803922,
+    "target_probability": 0.9464646633057033,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.0011746410280466524
+  },
+  "Frogs": {
+    "accuracy": 0.9294117647058824,
+    "target_probability": 0.9223771606268665,
+    "accuracy_diff": 0.007843137254902044,
+    "target_probability_diff": 0.00502338676913705
+  },
+  "Horses": {
+    "accuracy": 1.0,
+    "target_probability": 0.9992920118219712,
+    "accuracy_diff": 0.007843137254901933,
+    "target_probability_diff": 0.006650319231637614
+  },
+  "Human": {
+    "accuracy": 0.9764705882352941,
+    "target_probability": 0.9550318436806693,
+    "accuracy_diff": 0.007843137254901933,
+    "target_probability_diff": 0.0007488641458764933
+  },
+  "Jellyfish": {
+    "accuracy": 0.996078431372549,
+    "target_probability": 0.9972935975766649,
+    "accuracy_diff": -0.0039215686274509665,
+    "target_probability_diff": -0.0023118121951234416
+  },
+  "Rabbits": {
+    "accuracy": 1.0,
+    "target_probability": 0.9986588312130348,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -4.067911821259429e-05
+  },
+  "Sandwiches": {
+    "accuracy": 1.0,
+    "target_probability": 0.9962438059788125,
+    "accuracy_diff": 0.007843137254901933,
+    "target_probability_diff": 0.005422543602831231
+  },
+  "Sea": {
+    "accuracy": 0.996078431372549,
+    "target_probability": 0.9880658655774359,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.0022701674232294966
+  },
+  "Statues": {
+    "accuracy": 0.9137254901960784,
+    "target_probability": 0.9046027378911865,
+    "accuracy_diff": 0.0117647058823529,
+    "target_probability_diff": 0.012100680200605618
+  },
+  "Towers": {
+    "accuracy": 0.9686274509803922,
+    "target_probability": 0.9425501690552041,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": -0.004210002655072098
+  },
+  "Trees": {
+    "accuracy": 1.0,
+    "target_probability": 0.9963011024045009,
+    "accuracy_diff": 0.0,
+    "target_probability_diff": 0.0001099436890844574
+  },
+  "Waterfalls": {
+    "accuracy": 0.9882352941176471,
+    "target_probability": 0.9860603392932236,
+    "accuracy_diff": -0.0039215686274509665,
+    "target_probability_diff": -0.0007749013565354623
+  }
+}

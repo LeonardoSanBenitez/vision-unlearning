@@ -1,0 +1,428 @@
+[
+  {
+    "name": "Abstractionism",
+    "index": 0,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Artist_Sketch",
+    "index": 1,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Blossom_Season",
+    "index": 2,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Bricks",
+    "index": 3,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Byzantine",
+    "index": 4,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Cartoon",
+    "index": 5,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Cold_Warm",
+    "index": 6,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Color_Fantasy",
+    "index": 7,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Comic_Etch",
+    "index": 8,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Crayon",
+    "index": 9,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Cubism",
+    "index": 10,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Dadaism",
+    "index": 11,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Dapple",
+    "index": 12,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Defoliation",
+    "index": 13,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Early_Autumn",
+    "index": 14,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Expressionism",
+    "index": 15,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Fauvism",
+    "index": 16,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "French",
+    "index": 17,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Glowing_Sunset",
+    "index": 18,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Gorgeous_Love",
+    "index": 19,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Greenfield",
+    "index": 20,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Impressionism",
+    "index": 21,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Ink_Art",
+    "index": 22,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Joy",
+    "index": 23,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Liquid_Dreams",
+    "index": 24,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Magic_Cube",
+    "index": 25,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Meta_Physics",
+    "index": 26,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Meteor_Shower",
+    "index": 27,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Monet",
+    "index": 28,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Mosaic",
+    "index": 29,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Neon_Lines",
+    "index": 30,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "On_Fire",
+    "index": 31,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Pastel",
+    "index": 32,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Pencil_Drawing",
+    "index": 33,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Picasso",
+    "index": 34,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Pop_Art",
+    "index": 35,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Red_Blue_Ink",
+    "index": 36,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Rust",
+    "index": 37,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Seed_Images",
+    "index": 38,
+    "domain": "style",
+    "unlearnable": false
+  },
+  {
+    "name": "Sketch",
+    "index": 39,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Sponge_Dabbed",
+    "index": 40,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Structuralism",
+    "index": 41,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Superstring",
+    "index": 42,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Surrealism",
+    "index": 43,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Ukiyoe",
+    "index": 44,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Van_Gogh",
+    "index": 45,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Vibrant_Flow",
+    "index": 46,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Warm_Love",
+    "index": 47,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Warm_Smear",
+    "index": 48,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Watercolor",
+    "index": 49,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Winter",
+    "index": 50,
+    "domain": "style",
+    "unlearnable": true
+  },
+  {
+    "name": "Architectures",
+    "index": 51,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Bears",
+    "index": 52,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Birds",
+    "index": 53,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Butterfly",
+    "index": 54,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Cats",
+    "index": 55,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Dogs",
+    "index": 56,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Fishes",
+    "index": 57,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Flame",
+    "index": 58,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Flowers",
+    "index": 59,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Frogs",
+    "index": 60,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Horses",
+    "index": 61,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Human",
+    "index": 62,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Jellyfish",
+    "index": 63,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Rabbits",
+    "index": 64,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Sandwiches",
+    "index": 65,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Sea",
+    "index": 66,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Statues",
+    "index": 67,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Towers",
+    "index": 68,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Trees",
+    "index": 69,
+    "domain": "object",
+    "unlearnable": true
+  },
+  {
+    "name": "Waterfalls",
+    "index": 70,
+    "domain": "object",
+    "unlearnable": true
+  }
+]
